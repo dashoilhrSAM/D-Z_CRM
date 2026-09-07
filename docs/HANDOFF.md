@@ -67,4 +67,9 @@
 3. 跑基线（tsc 0 / lint 0errors / test 48 / build）
 4. 从下一步挑：介绍站改动 / 经销商验证(需真人) / provider env+webhook / 处理 untracked
 - 文档：docs/TESTING_BRANCH_GUIDE.md（Testing Branch 详情+指南：账号(角色+123)/隔离/开通流程/验证）+ docs/ACCOUNTS_BY_BRANCH.md（全组织账号清单）。
+- 待 owner merge：feat/manager-branch-settings（Settings 角色分流 + MyBranchSettings + actions 鉴权）
+- 待 owner merge：feat/product-management（产品目录增删改管理，org级）
+- feat/product-management：产品目录增删改（MANAGER 可管理）；需生产启用 DB Permission MANAGER|PARTS。
+- feat/product-management：产品目录管理含图片展示/Image URL 编辑（恢复被删的图片列）。
+- feat/product-management：产品目录管理 + 图片显示/上传（storageProvider）。
 - 已修：Testing Manager 侧边栏/问候语显示其自身分行（767e324/a241bb4），测试分行城市=Subang Jaya；Vercel 部署排队。

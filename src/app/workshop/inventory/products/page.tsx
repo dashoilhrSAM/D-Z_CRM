@@ -1,56 +1,29 @@
-import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
-import { inventoryService } from "@/modules/inventory/service";
-import { formatRM } from "@/lib/money";
+import { ProductManager } from "@/components/workshop/product-manager";
+import { db } from "@/lib/db";
+import { getSessionUser } from "@/lib/session-user";
+import { isOrgLevelRole } from "@/lib/branch-scope";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
 export default async function ProductsPage() {
-  const rows = await inventoryService.productOptions();
   const lang = await getLang();
+  const session = await getSessionUser();
+  const canManage = session.kind === "staff" && (isOrgLevelRole(session.role) || session.role === "MANAGER");
+  const rows = await db.product.findMany({ orderBy: { name: "asc" } });
   return (
     <div>
       <PageHeader title={t("ws.products.title", lang)} subtitle={t("ws.products.subtitle", lang).replace("{n}", String(rows.length))} />
-      <div className="rounded-2xl border bg-card overflow-hidden">
-        <div data-tut="products-list" className="overflow-x-auto max-h-[560px] overflow-y-auto">
-          <table className="dz-table">
-            <thead><tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground sticky top-0 z-10">
-              <th className="px-4 py-3 font-medium">{t("ws.products.col.name", lang)}</th><th className="px-4 py-3 font-medium">{t("ws.products.col.sku", lang)}</th><th className="px-4 py-3 font-medium">{t("ws.products.col.mfr-no", lang)}</th>
-              <th className="px-4 py-3 font-medium">{t("ws.products.col.category", lang)}</th><th className="px-4 py-3 font-medium">{t("ws.products.col.brand", lang)}</th>
-              <th className="px-4 py-3 font-medium">{t("ws.products.col.cost", lang)}</th><th className="px-4 py-3 font-medium">{t("ws.products.col.sell", lang)}</th><th className="px-4 py-3 font-medium">{t("ws.products.col.margin", lang)}</th>
-            </tr></thead>
-            <tbody>
-              {rows.map((p) => {
-                const margin = p.sellPriceSen > 0 ? Math.round(((p.sellPriceSen - p.costPriceSen) / p.sellPriceSen) * 100) : 0;
-                return (
-                  <tr key={p.id} className="border-b last:border-0 hover:bg-muted/30">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2.5">
-                        {p.imageUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={p.imageUrl} alt={p.name} className="h-9 w-9 shrink-0 rounded-md object-cover" loading="lazy" />
-                        ) : (
-                          <span className="h-9 w-9 shrink-0 rounded-md bg-muted" />
-                        )}
-                        <span className="font-medium">{p.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-xs">{p.sku}</td>
-                    <td className="px-4 py-2.5 font-mono text-[11px] text-muted-foreground">{p.manufacturerPartNo ?? "—"}</td>
-                    <td className="px-4 py-2.5 text-xs">{p.category?.replace("_", " ")}</td>
-                    <td className="px-4 py-2.5 text-xs">{p.brand}</td>
-                    <td className="px-4 py-2.5 tabular-nums">{formatRM(p.costPriceSen)}</td>
-                    <td className="px-4 py-2.5 font-semibold tabular-nums">{formatRM(p.sellPriceSen)}</td>
-                    <td className="px-4 py-2.5 tabular-nums text-emerald-600 dark:text-emerald-300">{margin}%</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
+      <ProductManager
+        canManage={canManage}
+        products={rows.map((p) => ({
+          id: p.id, name: p.name, sku: p.sku, manufacturerPartNo: p.manufacturerPartNo ?? null,
+          category: p.category ?? null, brand: p.brand ?? null, sellPriceSen: p.sellPriceSen,
+          costPriceSen: p.costPriceSen, minStock: p.minStock, active: p.active, imageUrl: p.imageUrl,
+        }))}
+      />
     </div>
   );
 }
