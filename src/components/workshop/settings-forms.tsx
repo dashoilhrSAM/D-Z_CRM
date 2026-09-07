@@ -140,3 +140,73 @@ export function ServiceTypeManager({ serviceTypes }: { serviceTypes: { id: strin
     </div>
   );
 }
+
+// ---------- My Branch Settings (branch 级 manager 只编辑自己分行) ----------
+const DAYS: [string, string][] = [["mon","Mon"],["tue","Tue"],["wed","Wed"],["thu","Thu"],["fri","Fri"],["sat","Sat"],["sun","Sun"]];
+type DayHours = { open: string; close: string; closed: boolean };
+function parseHours(s: string | null): Record<string, DayHours> {
+  let raw: Record<string, string> = {};
+  try { raw = s ? JSON.parse(s) : {}; } catch { raw = {}; }
+  const out: Record<string, DayHours> = {};
+  for (const [k] of DAYS) {
+    const v = raw[k];
+    if (typeof v === "string" && v.includes("-")) {
+      const [open, close] = v.split("-");
+      out[k] = { open: open ?? "", close: close ?? "", closed: false };
+    } else out[k] = { open: "", close: "", closed: true };
+  }
+  return out;
+}
+function serializeHours(h: Record<string, DayHours>): string {
+  const o: Record<string, string> = {};
+  for (const [k] of DAYS) {
+    const d = h[k];
+    o[k] = d && !d.closed && d.open && d.close ? `${d.open}-${d.close}` : "";
+  }
+  return JSON.stringify(o);
+}
+
+export function MyBranchSettings({ branch }: { branch: { id: string; name: string; city: string; phone: string | null; address: string | null; operatingHours: string | null; appointmentCapacity: number | null } }) {
+  const router = useRouter();
+  const lang = useLang();
+  const [phone, setPhone] = useState(branch.phone ?? "");
+  const [address, setAddress] = useState(branch.address ?? "");
+  const [capacity, setCapacity] = useState(String(branch.appointmentCapacity ?? ""));
+  const [hours, setHours] = useState<Record<string, DayHours>>(parseHours(branch.operatingHours));
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function save() {
+    setBusy(true); setMsg("");
+    const res = await updateBranch(branch.id, { phone, address, operatingHours: serializeHours(hours), appointmentCapacity: Number(capacity) || 0 });
+    setBusy(false);
+    setMsg(res.ok ? t("settings-form.no-saved", lang) : (res.error ?? "Failed"));
+    if (res.ok) router.refresh();
+  }
+  return (
+    <div className="rounded-xl border bg-card p-4">
+      <h2 className="font-semibold text-sm">{t("settings-form.no-my-branch", lang)}</h2>
+      <p className="text-xs text-muted-foreground mb-3">{branch.name} · {branch.city}</p>
+      <div className="grid grid-cols-2 gap-2">
+        <div><label className={labelCls}>{t("common.phone", lang)}</label><input className={inputCls} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="03-1234 5678" /></div>
+        <div><label className={labelCls}>{t("settings-form.no-capacity", lang)}</label><input className={inputCls} type="number" min="1" value={capacity} onChange={(e) => setCapacity(e.target.value)} /></div>
+        <div className="col-span-2"><label className={labelCls}>{t("form.address", lang)}</label><input className={inputCls} value={address} onChange={(e) => setAddress(e.target.value)} /></div>
+      </div>
+      <div className="mt-3">
+        <h3 className="text-xs font-semibold text-muted-foreground mb-1.5">{t("settings-form.no-hours-label", lang)}</h3>
+        <div className="space-y-1.5">
+          {DAYS.map(([k]) => (
+            <div key={k} className="flex items-center gap-2 text-sm">
+              <span className="w-9 text-muted-foreground">{t("day." + k, lang)}</span>
+              <input type="time" className={"rounded-md border bg-background px-2 py-1 text-sm " + (hours[k].closed ? "opacity-40" : "")} disabled={hours[k].closed} value={hours[k].open} onChange={(e) => setHours({ ...hours, [k]: { ...hours[k], open: e.target.value } })} />
+              <span className="text-muted-foreground">–</span>
+              <input type="time" className={"rounded-md border bg-background px-2 py-1 text-sm " + (hours[k].closed ? "opacity-40" : "")} disabled={hours[k].closed} value={hours[k].close} onChange={(e) => setHours({ ...hours, [k]: { ...hours[k], close: e.target.value } })} />
+              <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={hours[k].closed} onChange={(e) => setHours({ ...hours, [k]: { ...hours[k], closed: e.target.checked } })} /> {t("settings-form.no-closed", lang)}</label>
+            </div>
+          ))}
+        </div>
+      </div>
+      {msg && <p className="mt-2 text-xs text-muted-foreground">{msg}</p>}
+      <button className="mt-3 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" disabled={busy} onClick={save}>{busy ? t("pub.login.signing_in", lang) : t("common.save", lang)}</button>
+    </div>
+  );
+}
