@@ -18,7 +18,7 @@ function toRM(sen: number): string { return (sen / 100).toFixed(2); }
 function empty(): Draft { return { name: "", sku: "", category: "", brand: "", cost: "", sell: "", minStock: "5" }; }
 function fromRow(p: PRow): Draft { return { name: p.name, sku: p.sku, category: p.category ?? "", brand: p.brand ?? "", cost: toRM(p.costPriceSen), sell: toRM(p.sellPriceSen), minStock: String(p.minStock) }; }
 
-export function ProductManager({ products, isOrgLevel }: { products: PRow[]; isOrgLevel: boolean }) {
+export function ProductManager({ products, canManage }: { products: PRow[]; canManage: boolean }) {
   const router = useRouter();
   const lang = useLang();
   const [add, setAdd] = useState<Draft>(empty());
@@ -46,10 +46,10 @@ export function ProductManager({ products, isOrgLevel }: { products: PRow[]; isO
     <div className="rounded-2xl border bg-card overflow-hidden">
       <div className="border-b bg-muted/30 px-4 py-3 flex items-center justify-between">
         <h2 className="font-semibold text-sm">{t("ws.products.title", lang)}</h2>
-        {isOrgLevel && <span className="text-[11px] text-muted-foreground">{t("ws.products.subtitle", lang).replace("{n}", String(products.length))}</span>}
+        {canManage && <span className="text-[11px] text-muted-foreground">{t("ws.products.subtitle", lang).replace("{n}", String(products.length))}</span>}
       </div>
 
-      {isOrgLevel && (
+      {canManage && (
         <div className="p-4 border-b">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
             <input className={inputCls} placeholder={t("ws.products.col.name", lang)} value={add.name} onChange={(e) => setAdd({ ...add, name: e.target.value })} />
@@ -72,7 +72,7 @@ export function ProductManager({ products, isOrgLevel }: { products: PRow[]; isO
           <thead><tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground sticky top-0 z-10">
             <th className="px-4 py-3">{t("ws.products.col.name", lang)}</th><th className="px-4 py-3">SKU</th><th className="px-4 py-3">{t("ws.products.col.category", lang)}</th>
             <th className="px-4 py-3">{t("ws.products.col.brand", lang)}</th><th className="px-4 py-3">{t("ws.products.col.cost", lang)}</th><th className="px-4 py-3">{t("ws.products.col.sell", lang)}</th>
-            <th className="px-4 py-3">{t("ws.products.col.margin", lang)}</th><th className="px-4 py-3">{t("ws.products.col.status", lang)}</th>{isOrgLevel && <th className="px-4 py-3 text-right">•</th>}
+            <th className="px-4 py-3">{t("ws.products.col.margin", lang)}</th><th className="px-4 py-3">{t("ws.products.col.status", lang)}</th>{canManage && <th className="px-4 py-3 text-right">•</th>}
           </tr></thead>
           <tbody>
             {products.map((p) => {
@@ -105,7 +105,7 @@ export function ProductManager({ products, isOrgLevel }: { products: PRow[]; isO
                       <td className="px-4 py-2.5 font-semibold tabular-nums">{formatRM(p.sellPriceSen)}</td>
                       <td className="px-4 py-2.5 tabular-nums text-emerald-600 dark:text-emerald-300">{margin}%</td>
                       <td className="px-4 py-2.5"><span className={"rounded-full px-2 py-0.5 text-[10px] font-semibold " + (p.active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground")}>{t(p.active ? "ws.products.col.active" : "ws.products.col.archived", lang)}</span></td>
-                      {isOrgLevel && (
+                      {canManage && (
                         <td className="px-4 py-2.5 text-right whitespace-nowrap">
                           <button className="text-muted-foreground hover:text-foreground mr-2" onClick={() => { setEditingId(p.id); setDraft(fromRow(p)); }}>{t("ws.products.edit", lang)}</button>
                           <button className="text-muted-foreground hover:text-destructive mr-2" onClick={() => doToggle(p)}>{t(p.active ? "ws.products.col.archived" : "ws.products.col.active", lang)}</button>

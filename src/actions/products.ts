@@ -3,11 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { isOrgLevelRole } from "@/lib/branch-scope";
 
-async function requireOrg(): Promise<{ ok: true } | { ok: false; error: string }> {
+const CAN_MANAGE = new Set(["OWNER", "SUPER_ADMIN", "HEAD_OFFICE_ADMIN", "MANAGER"]);
+async function requireProductManager(): Promise<{ ok: true } | { ok: false; error: string }> {
   const session = await getSessionUser();
-  if (session.kind !== "staff" || !isOrgLevelRole(session.role)) return { ok: false, error: "Only the owner can manage the product catalogue." };
+  if (session.kind !== "staff" || !CAN_MANAGE.has(session.role)) return { ok: false, error: "Only owners/managers can manage the product catalogue." };
   return { ok: true };
 }
 
@@ -22,7 +22,7 @@ export type ProductInput = {
 
 /** 新增产品（org 级）。 */
 export async function createProduct(input: ProductInput) {
-  const auth = await requireOrg();
+  const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   const org = await db.organisation.findFirst();
   const exists = await db.product.findFirst({ where: { sku: input.sku } });
@@ -44,7 +44,7 @@ export async function createProduct(input: ProductInput) {
 
 /** 编辑产品（org 级）。 */
 export async function updateProduct(id: string, input: ProductInput) {
-  const auth = await requireOrg();
+  const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   const clash = await db.product.findFirst({ where: { sku: input.sku, NOT: { id } } });
   if (clash) return { ok: false as const, error: "SKU already exists." };
@@ -65,7 +65,7 @@ export async function updateProduct(id: string, input: ProductInput) {
 
 /** 软删除产品（active=false，保留工单/PO/库存引用）。 */
 export async function deleteProduct(id: string) {
-  const auth = await requireOrg();
+  const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   await db.product.update({ where: { id }, data: { active: false } });
   revalidatePath("/workshop/inventory/products");
@@ -74,7 +74,7 @@ export async function deleteProduct(id: string) {
 
 /** 启用/停用产品（重建目录）。 */
 export async function setProductActive(id: string, active: boolean) {
-  const auth = await requireOrg();
+  const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   await db.product.update({ where: { id }, data: { active } });
   revalidatePath("/workshop/inventory/products");
