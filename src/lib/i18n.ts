@@ -177,7 +177,7 @@ export const DICT: Dict = {
   "dash.morning": { en: "Good morning", zh: "早上好", ms: "Selamat pagi" },
   "dash.afternoon": { en: "Good afternoon", zh: "下午好", ms: "Selamat tengah hari" },
   "dash.evening": { en: "Good evening", zh: "晚上好", ms: "Selamat petang" },
-  "dash.owner-sub": { en: "Here is what is happening at D&Z Smart Workshop (Kuala Lumpur) today.", zh: "这是 D&Z 智能车行（吉隆坡）今日概况。", ms: "Ini ringkasan D&Z Bengkel Pintar (Kuala Lumpur) hari ini." },
+  "dash.owner-sub": { en: "Here is what is happening at {org} ({city}) today.", zh: "这是 {org}（{city}）今日概况。", ms: "Ini ringkasan {org} ({city}) hari ini." },
   "dash.mechanic-sub": { en: "Here are your assigned jobs and today's tasks.", zh: "这是你被分配的工作和今日任务。", ms: "Ini kerja tugasan dan tugas anda hari ini." },
   "dash.counter-sub": { en: "Here is the front-desk view for today.", zh: "这是今日前台视图。", ms: "Ini pandangan kaunter untuk hari ini." },
   "dash.my-active-jobs": { en: "My Active Jobs", zh: "我的进行中工单", ms: "Kerja Aktif Saya" },

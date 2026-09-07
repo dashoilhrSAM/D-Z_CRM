@@ -61,11 +61,11 @@ export default async function DashboardPage() {
           {session.authenticated ? (
             <>{session.name} · <span className="font-medium text-foreground">{t("role." + session.role, lang)}</span></>
           ) : (
-            isMechanic ? t("dash.mechanic-sub", lang) : isOwner ? t("dash.owner-sub", lang) : t("dash.counter-sub", lang)
+            isMechanic ? t("dash.mechanic-sub", lang) : isOwner ? tpl("dash.owner-sub", lang, { org: branch?.name ?? "D&Z Smart Workshop", city: branch?.city ?? "" }) : t("dash.counter-sub", lang)
           )}
         </p>
         <p className="text-sm text-muted-foreground">
-          {isMechanic ? t("dash.mechanic-sub", lang) : isOwner ? t("dash.owner-sub", lang) : t("dash.counter-sub", lang)}
+          {isMechanic ? t("dash.mechanic-sub", lang) : isOwner ? tpl("dash.owner-sub", lang, { org: branch?.name ?? "D&Z Smart Workshop", city: branch?.city ?? "" }) : t("dash.counter-sub", lang)}
         </p>
       </div>
 
