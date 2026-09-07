@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { settlePayouts, agreePayout, addPayoutPayment } from "@/actions/payouts";
-import { updateJobCommission, setPayoutBonus, updateMechanicCommissionRules } from "@/actions/settlements";
+import { updateJobCommission, updateJobBonus, setPayoutBonus, updateMechanicCommissionRules } from "@/actions/settlements";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
@@ -29,7 +29,7 @@ export interface DailyBill {
   payoutStatus: string | null;
   payoutId: string | null;
   paidSen: number;
-  jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number }[];
+  jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number; bonusSen: number }[];
 }
 
 export interface ForemanBill {
@@ -59,6 +59,7 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
   const [rulesFor, setRulesFor] = useState<{ userId: string; name: string; commissionType: string; commissionValue: string; addonBonus: string } | null>(null);
   // per-job commission buffer (key=jobId)
   const [jobComm, setJobComm] = useState<Record<string, string>>({});
+  const [jobBonus, setJobBonus] = useState<Record<string, string>>({});
   // per-day bonus buffer (key = userId:date)
   const [bonusBuf, setBonusBuf] = useState<Record<string, string>>({});
 
@@ -72,7 +73,13 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
       if (r.ok) { setJobComm((p) => ({ ...p, [jobId]: "" })); toast.success(t("settle.save-mech", lang)); router.refresh(); }
       else toast.error(r.error);
     });
-
+  const saveJobBonus = (jobId: string) =>
+    start(async () => {
+      const v = jobBonus[jobId];
+      const r = await updateJobBonus(jobId, v === "" ? null : Math.round(parseFloat(v || "0") * 100));
+      if (r.ok) { setJobBonus((p) => ({ ...p, [jobId]: "" })); toast.success(t("settle.save-mech", lang)); router.refresh(); }
+      else toast.error(r.error);
+    });
   const saveBonus = (userId: string, date: Date, commissionSen: number, addonBonusSen: number) =>
     start(async () => {
       const v = bonusBuf[key(userId, date)];
@@ -185,6 +192,9 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
                                 <span className="text-muted-foreground">{t("settle.job-comm", lang)}</span>
                                 <Input inputMode="decimal" placeholder={(f.commissionRules?.commissionValue ?? orgCommissionValue) / 100 + ""} value={jobComm[j.jobId] ?? ""} onChange={(e) => setJobComm((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobComm(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
                                 <span className="w-16 text-right tabular-nums font-semibold">{formatRM(j.commissionSen)}</span>
+                                <span className="text-muted-foreground">{t("settle.job-bonus", lang)}</span>
+                                <Input inputMode="decimal" placeholder="0" value={jobBonus[j.jobId] ?? ""} onChange={(e) => setJobBonus((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobBonus(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
+                                <span className="w-16 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatRM(j.bonusSen)}</span>
                               </div>
                             ))}
                           </div>

@@ -252,6 +252,7 @@ pnpm db:studio    # Prisma Studio 可视化
 
 | 日期 | 改动 | 影响 |
 | --- | --- | --- |
+| 2026-09-07 | Mechanic 逐单奖金：新增 ServiceJob.bonusSen（双 schema 同步 + 迁移 add_service_job_bonus）；updateJobBonus action + 结算视图每单 Bonus 输入；Mechanic 收入页每单显示佣金+奖金、总佣金/总奖金(Σ per-job) | 技师每单可手填奖金并展示总奖金。⚠️ 生产 PG 需幂等加列：ALTER TABLE \"ServiceJob\" ADD COLUMN IF NOT EXISTS \"bonusSen\" INTEGER; |
 | 2026-09-07 | Mechanic App 收入页精简（feat/mechanic-earnings-simplify）：去掉「服务价值」展示，每个完成工单只显示佣金(ServiceJob.commissionSen)，汇总卡改为 完成工单/总佣金(Σ commissionSen)/总奖金(Σ StaffPayout.bonusSen)；i18n 增 mech.commission/bonus/total-* | 技师收入页只看到自己的佣金与奖金（不再显示客户服务金额）；build0/tsc0/test48 全绿 |
 | 2026-09-07 | 修复 owner 无法编辑分行（feat/fix-branch-edit）：BranchManager 增加每行 Edit（内联编辑 name/city/phone/address/appointmentCapacity + 按天 operatingHours），Save 调 updateBranch；updateBranch 新增 city 字段（org 级可改）；settings 页给 BranchManager 传 appointmentCapacity | owner 现可在 Settings 编辑每个分行详情（此前只能列+加，且不能改 city）；build0/tsc0/test48 全绿 |
 | 2026-09-07 | 产品目录管理（feat/product-management）：新增 src/actions/products.ts（createProduct/updateProduct/deleteProduct(软删 active=false)/setProductActive，均 org 级鉴权 + SKU 唯一校验）；产品页 /workshop/inventory/products 由只读改为 ProductManager 客户端组件（org 级可增/改/软删/启停，branch 级只读）；i18n 增 ws.products.* 管理键。产品页 module=PARTS 访问=OWNER+COUNTER_STAFF+MANAGER（方案①）。⚠️ DB Permission MANAGER|PARTS 需 canView/canEdit=1（本地已设），生产需同样启用否则 MANAGER 进不去（Developer Settings/seed）。 | 可新增/编辑/归档产品目录（org 级共享）；软删保留工单/PO/库存引用；build0/tsc0/test48 全绿 |

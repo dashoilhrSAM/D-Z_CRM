@@ -949,6 +949,7 @@ export const DICT: Dict = {
   "settle.per-mech-hint": { en: "This mechanic's own commission; blank = shop default.", zh: "该技师自己的提成算法；留空用门店默认。", ms: "Komisen sendiri; kosong = lalai kedai." },
   "settle.use-default": { en: "Use shop default", zh: "用门店默认", ms: "Guna lalai kedai" },
   "settle.job-comm": { en: "Comm.", zh: "提成", ms: "Kom." },
+  "settle.job-bonus": { en: "Bonus", zh: "奖金", ms: "Bonus" },
   "settle.save-mech": { en: "Save rules", zh: "保存", ms: "Simpan" },
 
   "nav.payouts": { en: "Payouts", zh: "发薪", ms: "Bayaran" },
