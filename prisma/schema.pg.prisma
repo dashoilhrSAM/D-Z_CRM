@@ -351,6 +351,8 @@ model ServiceJob {
   quotation       Quotation?
   /** 该 job 给技师的手工提成（sen）；null=按个人算法结算时自动算 */
   commissionSen   Int?
+  /** 该 job 给技师的手工奖金（sen）；结算时可手填 */
+  bonusSen        Int?
 }
 
 // ---------- Mechanic pre-service SOP photos (开工前拍照记录) ----------

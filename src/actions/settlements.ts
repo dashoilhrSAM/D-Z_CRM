@@ -50,6 +50,16 @@ export async function updateJobCommission(jobId: string, commissionSen: number |
 }
 
 /** 结算时手填 bonus（写入 StaffPayout.bonusSen，total = commission + addon + bonus）。 */
+export async function updateJobBonus(jobId: string, bonusSen: number | null) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || session.role === "MECHANIC") return { ok: false as const, error: "Owner/manager access required" };
+  await db.serviceJob.update({ where: { id: jobId }, data: { bonusSen: bonusSen != null ? Math.max(0, Math.round(bonusSen)) : null } });
+  revalidatePath("/workshop/settlements");
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
+/** 结算时手填 bonus（写入 StaffPayout.bonusSen，total = commission + addon + bonus）。 */
 export async function setPayoutBonus(userId: string, period: string, periodStart: Date, bonusSen: number, commissionSen: number, addonBonusSen: number) {
   const session = await getSessionUser();
   if (session.kind !== "staff" || session.role === "MECHANIC") return { ok: false as const, error: "Owner/manager access required" };
@@ -63,4 +73,3 @@ export async function setPayoutBonus(userId: string, period: string, periodStart
   revalidatePath("/workshop/settlements");
   return { ok: true as const };
 }
-

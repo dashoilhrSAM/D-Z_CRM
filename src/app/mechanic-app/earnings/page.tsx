@@ -30,29 +30,49 @@ export default async function EarningsPage() {
     }),
   ]);
 
-  const pending = payouts.filter((p) => p.status !== "PAID");
+  const toConfirm = payouts.filter((p) => p.status === "AWAITING_CONFIRM");
+  const paying = payouts.filter((p) => p.status === "PENDING" || p.status === "PARTIAL" || p.status === "UNPAID");
   const done = payouts.filter((p) => p.status === "PAID");
-  const totalEarned = jobs.reduce((s, j) => s + (j.invoice?.totalSen ?? 0), 0);
+  const totalCommission = jobs.reduce((s, j) => s + (j.commissionSen ?? 1000), 0);
+  const totalBonus = jobs.reduce((s, j) => s + (j.bonusSen ?? 0), 0);
 
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">{t("mech.my-earnings", lang)}</h1>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border bg-card p-4">
           <div className="text-[11px] text-muted-foreground">{t("mech.jobs-completed", lang)}</div>
           <div className="mt-1 text-2xl font-bold">{jobs.length}</div>
         </div>
         <div className="rounded-2xl border bg-card p-4">
-          <div className="text-[11px] text-muted-foreground">{t("mech.service-value", lang)}</div>
-          <div className="mt-1 text-2xl font-bold">{formatRM(totalEarned)}</div>
+          <div className="text-[11px] text-muted-foreground">{t("mech.total-commission", lang)}</div>
+          <div className="mt-1 text-2xl font-bold">{formatRM(totalCommission)}</div>
+        </div>
+        <div className="rounded-2xl border bg-card p-4">
+          <div className="text-[11px] text-muted-foreground">{t("mech.total-bonus", lang)}</div>
+          <div className="mt-1 text-2xl font-bold">{formatRM(totalBonus)}</div>
         </div>
       </div>
 
-      {pending.length > 0 && (
+      {toConfirm.length > 0 && (
         <div className="space-y-2">
-          <h3 className="text-sm font-semibold text-amber-600 dark:text-amber-400">{tpl("mech.payment-confirm", lang, { n: pending.length })}</h3>
-          <EarningsConfirm payouts={pending.map((p) => ({ id: p.id, period: p.period, periodStart: p.periodStart.toISOString(), totalSen: p.totalSen }))} />
+          <h3 className="text-sm font-semibold text-blue-600 dark:text-blue-400">{tpl("mech.payment-confirm", lang, { n: toConfirm.length })}</h3>
+          <EarningsConfirm payouts={toConfirm.map((p) => ({ id: p.id, period: p.period, periodStart: p.periodStart.toISOString(), totalSen: p.totalSen }))} />
+        </div>
+      )}
+
+      {paying.length > 0 && (
+        <div className="rounded-2xl border bg-card p-4">
+          <h3 className="font-semibold mb-2">{t("mech.paying-out", lang)}</h3>
+          <div className="space-y-1.5">
+            {paying.map((p) => (
+              <div key={p.id} className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">{p.period} · {fmtDate(p.periodStart)}</span>
+                <span className="tabular-nums font-semibold">{formatRM(p.totalSen)}</span>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -66,7 +86,7 @@ export default async function EarningsPage() {
                 <span className="font-mono text-xs font-semibold text-primary">{j.jobNumber}</span>
                 <span className="ml-2 text-muted-foreground">{j.motorcycle.brand} {j.motorcycle.model} · {j.motorcycle.plate}</span>
               </div>
-              <span className="tabular-nums font-semibold">{formatRM(j.invoice?.totalSen ?? 0)}</span>
+              <span className="text-[11px] text-muted-foreground mr-1">{t("mech.commission", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.commissionSen ?? 1000)}</span><span className="text-[11px] text-muted-foreground ml-3 mr-1">{t("mech.bonus", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.bonusSen ?? 0)}</span>
             </div>
           ))}
         </div>

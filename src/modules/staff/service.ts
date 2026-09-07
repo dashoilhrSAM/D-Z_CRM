@@ -205,7 +205,7 @@ export class StaffService {
     foremen: { id: string; name: string; totalSen: number; totalJobs: number; totalSalesSen: number;
       daily: { date: Date; jobs: number; salesSen: number; baseSen: number; commissionSen: number; addonBonusSen: number; bonusSen: number; totalSen: number;
         payout: { id: string; status: string; paidSen: number; paidAt: Date | null } | null;
-        jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number }[] }[];
+        jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number; bonusSen: number }[] }[];
       commissionRules: { commissionType: string; commissionValue: number; addonBonusSen: number } | null }[];
   }> {
     const base = ref ?? new Date();
@@ -218,7 +218,7 @@ export class StaffService {
     const org = await db.organisation.findFirst({ select: { salaryRules: true } });
     const orgRules = parseSalaryRules(org?.salaryRules);
     const users = await this.repo.listUsers(branchId);
-    const foremen: { id: string; name: string; totalSen: number; totalJobs: number; totalSalesSen: number; daily: { date: Date; jobs: number; salesSen: number; baseSen: number; commissionSen: number; addonBonusSen: number; bonusSen: number; totalSen: number; payout: { id: string; status: string; paidSen: number; paidAt: Date | null } | null; jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number }[] }[]; commissionRules: { commissionType: string; commissionValue: number; addonBonusSen: number } | null }[] = [];
+    const foremen: { id: string; name: string; totalSen: number; totalJobs: number; totalSalesSen: number; daily: { date: Date; jobs: number; salesSen: number; baseSen: number; commissionSen: number; addonBonusSen: number; bonusSen: number; totalSen: number; payout: { id: string; status: string; paidSen: number; paidAt: Date | null } | null; jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number; bonusSen: number }[] }[]; commissionRules: { commissionType: string; commissionValue: number; addonBonusSen: number } | null }[] = [];
 
     for (const u of users) {
       const rules = effectiveRules(u, orgRules);
@@ -283,7 +283,7 @@ export class StaffService {
           jobsList: day.jobs.map((jid, idx) => {
             const det = detailByJob.get(jid);
             const job = jobs.find((j) => j.id === jid);
-            return { jobId: jid, jobNumber: job?.jobNumber ?? "", serviceType: job?.packageName ?? job?.customerRequest ?? "", plate: det?.motorcycle.plate ?? "", customer: det?.customer.name ?? "", salesSen: salesByJob.get(jid) ?? 0, commissionSen: jobCommissions[idx] ?? 0 };
+            return { jobId: jid, jobNumber: job?.jobNumber ?? "", serviceType: job?.packageName ?? job?.customerRequest ?? "", plate: det?.motorcycle.plate ?? "", customer: det?.customer.name ?? "", salesSen: salesByJob.get(jid) ?? 0, commissionSen: jobCommissions[idx] ?? 0, bonusSen: job?.bonusSen ?? 0 };
           }),
         });
       }

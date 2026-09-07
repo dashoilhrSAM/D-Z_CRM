@@ -9,8 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { settlePayouts, agreePayout, addPayoutPayment } from "@/actions/payouts";
-import { updateJobCommission, setPayoutBonus, updateMechanicCommissionRules } from "@/actions/settlements";
+import { settlePayouts, addPayoutPayment } from "@/actions/payouts";
+import { updateJobCommission, updateJobBonus, setPayoutBonus, updateMechanicCommissionRules } from "@/actions/settlements";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
@@ -29,7 +29,7 @@ export interface DailyBill {
   payoutStatus: string | null;
   payoutId: string | null;
   paidSen: number;
-  jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number }[];
+  jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number; bonusSen: number }[];
 }
 
 export interface ForemanBill {
@@ -51,14 +51,13 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
   const [openForeman, setOpenForeman] = useState<string | null>(null);
   const [openDay, setOpenDay] = useState<string | null>(null);
   const [payFor, setPayFor] = useState<{ userId: string; name: string; date: Date; baseSen: number; commissionSen: number; addonBonusSen: number; totalSen: number; paidSen: number } | null>(null);
-  const [agreeFor, setAgreeFor] = useState<{ payoutId: string; name: string; totalSen: number } | null>(null);
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("CASH");
-  const [agreeMethod, setAgreeMethod] = useState("CASH");
   // per-mechanic rules editor
   const [rulesFor, setRulesFor] = useState<{ userId: string; name: string; commissionType: string; commissionValue: string; addonBonus: string } | null>(null);
   // per-job commission buffer (key=jobId)
   const [jobComm, setJobComm] = useState<Record<string, string>>({});
+  const [jobBonus, setJobBonus] = useState<Record<string, string>>({});
   // per-day bonus buffer (key = userId:date)
   const [bonusBuf, setBonusBuf] = useState<Record<string, string>>({});
 
@@ -68,11 +67,17 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
   const saveJobComm = (jobId: string) =>
     start(async () => {
       const v = jobComm[jobId];
-      const r = await updateJobCommission(jobId, v === "" ? null : Math.round(parseFloat(v || "0") * 100));
+      const r = await updateJobCommission(jobId, v === "" ? 1000 : Math.round(parseFloat(v || "0") * 100));
       if (r.ok) { setJobComm((p) => ({ ...p, [jobId]: "" })); toast.success(t("settle.save-mech", lang)); router.refresh(); }
       else toast.error(r.error);
     });
-
+  const saveJobBonus = (jobId: string) =>
+    start(async () => {
+      const v = jobBonus[jobId];
+      const r = await updateJobBonus(jobId, v === "" ? null : Math.round(parseFloat(v || "0") * 100));
+      if (r.ok) { setJobBonus((p) => ({ ...p, [jobId]: "" })); toast.success(t("settle.save-mech", lang)); router.refresh(); }
+      else toast.error(r.error);
+    });
   const saveBonus = (userId: string, date: Date, commissionSen: number, addonBonusSen: number) =>
     start(async () => {
       const v = bonusBuf[key(userId, date)];
@@ -106,7 +111,6 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
       else toast.error(r.error);
     });
 
-  const doAgree = () => start(async () => { if (!agreeFor) return; const r = await agreePayout(agreeFor.payoutId, agreeMethod); if (r.ok) { toast.success("Payment confirmed — salary paid"); setAgreeFor(null); router.refresh(); } else toast.error(r.error); });
 
   const payOne = () => start(async () => { if (!payFor) return; const r = await addPayoutPayment({ userId: payFor.userId, period: "day", periodStart: payFor.date, baseSen: payFor.baseSen, commissionSen: payFor.commissionSen, addonBonusSen: payFor.addonBonusSen, totalSen: payFor.totalSen, amountSen: Math.round(parseFloat(amount || "0") * 100), method }); if (r.ok) { toast.success(t("payout.payment-added", lang)); setPayFor(null); setAmount(""); router.refresh(); } else toast.error(r.error); });
 
@@ -164,9 +168,8 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
                             </div>
                             <ChevronDown className={"h-3.5 w-3.5 text-muted-foreground transition-transform " + (dayOpen ? "rotate-180" : "")} />
                           </button>
-                          <span className={"shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold " + (paid ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : b.payoutStatus === "MECHANIC_APPROVED" ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" : partial ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}>{paid ? t("payout.paid", lang) : b.payoutStatus === "MECHANIC_APPROVED" ? "MECHANIC OK" : partial ? t("payout.partial", lang) : t("payout.unpaid", lang)}</span>
-                          {!paid && b.payoutStatus === "MECHANIC_APPROVED" && b.payoutId && <Button size="sm" className="shrink-0" onClick={() => setAgreeFor({ payoutId: b.payoutId!, name: f.name, totalSen: b.totalSen })}>{t("payout.agree-pay", lang)}</Button>}
-                          {!paid && b.payoutStatus !== "MECHANIC_APPROVED" && (
+                          <span className={"shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold " + (paid ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : b.payoutStatus === "AWAITING_CONFIRM" ? "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300" : partial ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300")}>{paid ? t("payout.paid", lang) : b.payoutStatus === "AWAITING_CONFIRM" ? t("payout.awaiting-confirm", lang) : partial ? t("payout.partial", lang) : t("payout.unpaid", lang)}</span>
+                          {!paid && b.payoutStatus !== "AWAITING_CONFIRM" && (
                             <Button size="sm" variant="outline" className="shrink-0" onClick={() => { setPayFor({ userId: f.id, name: f.name, date: b.date, baseSen: b.baseSen, commissionSen: b.commissionSen, addonBonusSen: b.addonBonusSen, totalSen: b.totalSen, paidSen: b.paidSen }); setAmount(String((b.totalSen - b.paidSen) / 100)); setMethod("CASH"); }}>{t("payout.pay", lang)}</Button>
                           )}
                         </div>
@@ -183,8 +186,11 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
                               <div key={j.jobId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] hover:bg-muted/70">
                                 <Link href={"/workshop/jobs/" + j.jobId} className="flex items-center gap-2 flex-1 min-w-0"><span className="font-mono font-semibold text-primary">{j.jobNumber}</span><span className="font-medium">{j.plate}</span><span className="text-muted-foreground truncate">{j.customer}</span><span className="ml-auto font-bold tabular-nums">{formatRM(j.salesSen)}</span></Link>
                                 <span className="text-muted-foreground">{t("settle.job-comm", lang)}</span>
-                                <Input inputMode="decimal" placeholder={(f.commissionRules?.commissionValue ?? orgCommissionValue) / 100 + ""} value={jobComm[j.jobId] ?? ""} onChange={(e) => setJobComm((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobComm(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
-                                <span className="w-16 text-right tabular-nums font-semibold">{formatRM(j.commissionSen)}</span>
+                                <Input inputMode="decimal" placeholder="10" value={jobComm[j.jobId] ?? ""} onChange={(e) => setJobComm((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobComm(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
+                                <span className="w-16 text-right tabular-nums font-semibold">{formatRM(j.commissionSen ?? 1000)}</span>
+                                <span className="text-muted-foreground">{t("settle.job-bonus", lang)}</span>
+                                <Input inputMode="decimal" placeholder="0" value={jobBonus[j.jobId] ?? ""} onChange={(e) => setJobBonus((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobBonus(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
+                                <span className="w-16 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatRM(j.bonusSen)}</span>
                               </div>
                             ))}
                           </div>
@@ -227,15 +233,7 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
         </DialogContent>
       </Dialog>
 
-      <Dialog open={!!agreeFor} onOpenChange={(o) => !o && setAgreeFor(null)}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Agree & pay salary · {agreeFor?.name}</DialogTitle><DialogDescription>Mechanic has approved — confirm to release {agreeFor ? formatRM(agreeFor.totalSen) : ""}</DialogDescription></DialogHeader>
-          <div className="space-y-3 py-2">
-            <div><Label>{t("payout.method", lang)}</Label><div className="mt-1.5 grid grid-cols-2 gap-2">{["CASH", "QR"].map((m) => (<button key={m} type="button" onClick={() => setAgreeMethod(m)} className={"rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors " + (agreeMethod === m ? "border-primary bg-primary text-primary-foreground" : "bg-card hover:bg-accent")}>{m === "CASH" ? "💵 " + t("payout.cash", lang) : "📱 QR"}</button>))}</div></div>
-            <Button className="w-full" disabled={pending} onClick={doAgree}>Confirm — release salary</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      
     </>
   );
 }
