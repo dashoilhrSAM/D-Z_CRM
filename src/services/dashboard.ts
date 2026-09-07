@@ -10,10 +10,10 @@ export class DashboardService {
   async get(branchId?: string) {
     const [board, finance, reminders, reviews, kpi] = await Promise.all([
       jobService.listBoard(branchId),
-      this.todayFinance(),
+      this.todayFinance(branchId),
       crmService.reminders(),
       crmService.reviews(),
-      staffService.kpiBoard(30),
+      staffService.kpiBoard(branchId, 30),
     ]);
     const criticalStock = branchId ? await inventoryService.criticalStockCount(branchId) : 0;
     const deadStockValue = branchId ? await inventoryService.deadStockValue(branchId) : 0;
@@ -84,9 +84,9 @@ export class DashboardService {
     };
   }
 
-  private async todayFinance() {
+  private async todayFinance(branchId?: string | null) {
     const invoices = await db.invoice.findMany({
-      where: { status: { not: "DRAFT" } },
+      where: { status: { not: "DRAFT" }, ...(branchId ? { branchId } : {}) },
       include: { job: { include: { parts: true } } },
     });
     const now = new Date();

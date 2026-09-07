@@ -135,8 +135,8 @@ export class InventoryService {
     return rows.map((s) => ({ id: s.id, name: s.name, contactName: s.contactName, phone: s.phone, leadTimeDays: s.leadTimeDays, productCount: s.products.length }));
   }
 
-  async purchaseOrders() {
-    const rows = await this.repo.listPOs();
+  async purchaseOrders(branchId?: string | null) {
+    const rows = await this.repo.listPOs(branchId);
     return rows.map((po) => ({
       id: po.id, status: po.status, expectedAt: po.expectedAt, receivedAt: po.receivedAt, totalSen: po.totalSen, createdAt: po.createdAt,
       supplier: { id: po.supplier.id, name: po.supplier.name },
@@ -164,7 +164,7 @@ export class InventoryService {
   /** Receive a PO: mark RECEIVED, stock each line in and record movements (§34 purchase receiving). */
   async receivePurchaseOrder(poId: string, branchId: string) {
     return db.$transaction(async (tx: DbLike) => {
-      const po = await this.repo.listPOs(tx).then((rows) => rows.find((p) => p.id === poId));
+      const po = await this.repo.listPOs(undefined, tx).then((rows) => rows.find((p) => p.id === poId));
       if (!po) throw new Error("Purchase order not found");
       if (po.status === "RECEIVED") throw new Error("Purchase order already received");
       const receivedAt = new Date();

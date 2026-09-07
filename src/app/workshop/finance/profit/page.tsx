@@ -7,6 +7,8 @@ import { financeService } from "@/modules/finance/service";
 import { staffService } from "@/modules/staff/service";
 import { formatRM } from "@/lib/money";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { fmtDate } from "@/lib/format";
 
@@ -17,13 +19,14 @@ const PERIODS = ["day", "week", "month"] as const;
 /** Finance 周期收支：按日/周/月看收入、出钱（配件成本 + 薪资）与净利。 */
 export default async function ProfitPage({ searchParams }: { searchParams: Promise<{ period?: string; date?: string }> }) {
   const lang = await getLang();
+  const session = await getSessionUser();
   const sp = await searchParams;
   const period = (PERIODS as readonly string[]).includes(sp.period ?? "") ? (sp.period as "day" | "week" | "month") : "week";
   const ref = sp.date ? new Date(sp.date + "T00:00:00Z") : undefined;
 
   const [p, settle] = await Promise.all([
-    financeService.periodDashboard(period, ref),
-    staffService.settlement(period, ref),
+    financeService.periodDashboard(period, ref, scopedBranchId(session)),
+    staffService.settlement(period, ref, scopedBranchId(session)),
   ]);
   const salarySen = settle.totals.salarySen;
   const outflow = p.cogs + salarySen; // 出钱 = 配件成本 + 薪资

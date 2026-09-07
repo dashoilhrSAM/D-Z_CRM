@@ -5,6 +5,7 @@ import { staffService } from "@/modules/staff/service";
 import { formatRM } from "@/lib/money";
 import { getSessionUser } from "@/lib/session-user";
 import { getLang } from "@/lib/get-lang";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export default async function KpiPage() {
   const lang = await getLang();
   const session = await getSessionUser();
   const isMechanic = session.kind === "staff" && session.role === "MECHANIC";
-  const { staff, top } = await staffService.kpiBoard(30);
+  const { staff, top } = await staffService.kpiBoard(scopedBranchId(session), 30);
   // data isolation: MECHANIC sees only their own KPI; others see the full board
   const rows = isMechanic && session.user ? staff.filter((s) => s.id === session.user!.id) : staff;
   const myTop = isMechanic && session.user ? rows[0] ?? null : top;

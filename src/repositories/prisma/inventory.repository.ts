@@ -24,8 +24,8 @@ export class PrismaInventoryRepository implements IInventoryRepository {
   }
   createMovement(data: Prisma.StockMovementUncheckedCreateInput, client?: DbLike) { return this.c(client).stockMovement.create({ data }); }
   listSuppliers(client?: DbLike) { return this.c(client).supplier.findMany({ include: { products: true }, orderBy: { name: "asc" } }); }
-  listPOs(client?: DbLike) {
-    return this.c(client).purchaseOrder.findMany({ include: { supplier: true, items: { include: { product: true } } }, orderBy: { createdAt: "desc" } });
+  listPOs(branchId?: string | null, client?: DbLike) {
+    return this.c(client).purchaseOrder.findMany({ where: branchId ? { branchId } : undefined, include: { supplier: true, items: { include: { product: true } } }, orderBy: { createdAt: "desc" } });
   }
   createPO(data: Prisma.PurchaseOrderCreateInput, client?: DbLike) { return this.c(client).purchaseOrder.create({ data }); }
   createPOItem(data: Prisma.PurchaseOrderItemCreateInput, client?: DbLike) { return this.c(client).purchaseOrderItem.create({ data }); }

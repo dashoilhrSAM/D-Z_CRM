@@ -103,7 +103,7 @@ export async function runTool(kind: string, ctx: AssistantCtx): Promise<ToolResu
       return { context: "totalPartsUnits=" + units + "; productSkuCount=" + skus };
     }
     case "month_earnings": {
-      const d = await financeService.periodDashboard("month");
+      const d = await financeService.periodDashboard("month", undefined, undefined);
       return { context: "monthRevenue=" + formatRM(d.revenue) + " (" + d.revenue + " sen); monthInvoiceCount=" + d.count };
     }
     case "dead_stock_value": {

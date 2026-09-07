@@ -77,10 +77,10 @@ export class FinanceService {
   }
 
   /** 按业务周期（日/周/月）聚合收支：revenue / cogs / grossProfit / service-parts 拆分。薪资由页面另取 settlement。 */
-  async periodDashboard(period: "day" | "week" | "month", ref?: Date) {
+  async periodDashboard(period: "day" | "week" | "month", ref?: Date, branchId?: string | null) {
     const { start, end } = periodWindow(period, ref);
     const invoices = await this.repo.listInvoices();
-    const inWindow = invoices.filter((i) => i.status !== "DRAFT" && new Date(i.issuedAt) >= start && new Date(i.issuedAt) < end);
+    const inWindow = invoices.filter((i) => i.status !== "DRAFT" && (!branchId || i.branchId === branchId) && new Date(i.issuedAt) >= start && new Date(i.issuedAt) < end);
 
     let revenue = 0;
     let cogs = 0;

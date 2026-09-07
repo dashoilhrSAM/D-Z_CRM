@@ -4,12 +4,15 @@ import { inventoryService } from "@/modules/inventory/service";
 import { fmtDate } from "@/lib/format";
 import { POReceive } from "@/components/workshop/po-receive";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
 export default async function PurchaseOrdersPage() {
-  const rows = await inventoryService.purchaseOrders();
+  const session = await getSessionUser();
+  const rows = await inventoryService.purchaseOrders(scopedBranchId(session));
   const lang = await getLang();
   return (
     <div>

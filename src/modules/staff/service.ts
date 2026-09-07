@@ -60,7 +60,7 @@ export class StaffService {
   constructor(private repo: IStaffRepository = new PrismaStaffRepository()) {}
 
   /** Foreman 周期结算：按日/周/月聚合完成工单 + 服务金额 + 附加 + 工时（老板视角，纯查询）。 */
-  async settlement(period: "day" | "week" | "month", ref?: Date): Promise<{
+  async settlement(period: "day" | "week" | "month", ref?: Date, branchId?: string | null): Promise<{
     period: string; start: Date; end: Date;
     rules: SalaryRules;
     foremen: { id: string; name: string; jobs: number; salesSen: number; avgTicketSen: number; addonJobs: number; hours: number; salarySen: number; salaryBreakdown: { baseSen: number; commissionSen: number; addonBonusSen: number }; payout: { status: string; paidSen: number; paidAt: Date | null } | null; jobsList: { id: string; jobNumber: string; serviceType: string; packageName: string | null; completedAt: Date; salesSen: number; commissionSen: number }[] }[];
@@ -88,7 +88,7 @@ export class StaffService {
 
     const org = await db.organisation.findFirst({ select: { salaryRules: true } });
     const orgRules = parseSalaryRules(org?.salaryRules);
-    const users = await this.repo.listUsers();
+    const users = await this.repo.listUsers(branchId);
     const foremen: { id: string; name: string; jobs: number; salesSen: number; avgTicketSen: number; addonJobs: number; hours: number; salarySen: number; salaryBreakdown: { baseSen: number; commissionSen: number; addonBonusSen: number }; payout: { status: string; paidSen: number; paidAt: Date | null } | null; jobsList: { id: string; jobNumber: string; serviceType: string; packageName: string | null; completedAt: Date; salesSen: number; commissionSen: number }[] }[] = [];
 
     for (const u of users) {
@@ -145,8 +145,8 @@ export class StaffService {
     };
   }
 
-  async kpiBoard(days = 30): Promise<{ staff: KpiStaff[]; top: KpiStaff | null }> {
-    const users = await this.repo.listUsers();
+  async kpiBoard(branchId?: string | null, days = 30): Promise<{ staff: KpiStaff[]; top: KpiStaff | null }> {
+    const users = await this.repo.listUsers(branchId);
     const cutoff = new Date(Date.now() - days * 86400000);
     const staff: KpiStaff[] = [];
 
@@ -200,7 +200,7 @@ export class StaffService {
   }
 
   /** 按日薪资单：窗口（today/3d/7d/30d+）内每个 foreman 的每日账单（jobs/金额/薪资拆分/发薪状态）。 */
-  async settlementByDay(windowDays: number, ref?: Date): Promise<{
+  async settlementByDay(windowDays: number, ref?: Date, branchId?: string | null): Promise<{
     start: Date; end: Date; rules: SalaryRules;
     foremen: { id: string; name: string; totalSen: number; totalJobs: number; totalSalesSen: number;
       daily: { date: Date; jobs: number; salesSen: number; baseSen: number; commissionSen: number; addonBonusSen: number; bonusSen: number; totalSen: number;
@@ -217,7 +217,7 @@ export class StaffService {
 
     const org = await db.organisation.findFirst({ select: { salaryRules: true } });
     const orgRules = parseSalaryRules(org?.salaryRules);
-    const users = await this.repo.listUsers();
+    const users = await this.repo.listUsers(branchId);
     const foremen: { id: string; name: string; totalSen: number; totalJobs: number; totalSalesSen: number; daily: { date: Date; jobs: number; salesSen: number; baseSen: number; commissionSen: number; addonBonusSen: number; bonusSen: number; totalSen: number; payout: { id: string; status: string; paidSen: number; paidAt: Date | null } | null; jobsList: { jobId: string; jobNumber: string; serviceType: string; plate: string; customer: string; salesSen: number; commissionSen: number }[] }[]; commissionRules: { commissionType: string; commissionValue: number; addonBonusSen: number } | null }[] = [];
 
     for (const u of users) {
@@ -301,8 +301,9 @@ export class StaffService {
   }
 
   /** 发薪历史：全部 StaffPayout（含分期 payment），按发薪时间倒序。 */
-  async payoutHistory() {
+  async payoutHistory(branchId?: string | null) {
     const payouts = await db.staffPayout.findMany({
+      where: branchId ? { user: { branchId } } : undefined,
       include: { user: { select: { name: true } }, payments: { select: { amountSen: true, method: true, paidAt: true } } },
       orderBy: { paidAt: "desc" },
       take: 200,

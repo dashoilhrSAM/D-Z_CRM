@@ -49,7 +49,7 @@ export class AiService {
       }
     }
 
-    const kpi = await staffService.kpiBoard(30);
+    const kpi = await staffService.kpiBoard(branchId, 30);
     if (kpi.staff.length > 0) {
       const withPkg = kpi.staff.filter((s) => s.packageConversion > 0);
       const avgConv = withPkg.length ? withPkg.reduce((s, x) => s + x.packageConversion, 0) / withPkg.length : 0;

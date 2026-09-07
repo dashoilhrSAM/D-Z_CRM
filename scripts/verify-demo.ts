@@ -30,7 +30,7 @@ async function main() {
   console.log("reviews:", reviews.length, "avg", (reviews.reduce((s, r) => s + r.rating!, 0) / reviews.length).toFixed(2));
   const bookings = await db.booking.count();
   console.log("bookings:", bookings);
-  const kpi = await staffService.kpiBoard(30);
+  const kpi = await staffService.kpiBoard(undefined, 30);
   console.log("KPI top:", kpi.top?.name, kpi.top?.score, "| jobs:", kpi.top?.jobs, "avgTicket RM", (kpi.top?.avgTicketSen ?? 0) / 100);
   const kl = await db.branch.findFirst({ where: { isMain: true } });
   const status = await inventoryService.stockStatus(kl!.id);
