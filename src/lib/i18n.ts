@@ -2108,6 +2108,8 @@ export const DICT: Dict = {
   "settings-form.lost-hint": { en: "One per line — selectable when closing a lead.", zh: "每行一条——关闭线索时可选择。", ms: "Satu setiap baris — boleh dipilih semasa menutup prospek." },
   "settings-form.saved-reasons": { en: "Saved {n} reasons ✓", zh: "已保存 {n} 条原因 ✓", ms: "{n} sebab disimpan ✓" },
   "settings-form.branches-title": { en: "Branches", zh: "门店", ms: "Cawangan" },
+  "settings-form.edit-branch": { en: "Edit", zh: "编辑", ms: "Sunting" },
+  "settings-form.cancel": { en: "Cancel", zh: "取消", ms: "Batal" },
   "settings-form.main": { en: "MAIN", zh: "总店", ms: "UTAMA" },
   "settings-form.hours-set": { en: "hours set", zh: "已设置营业时间", ms: "waktu ditetapkan" },
   "settings-form.no-days": { en: "Working hours", zh: "营业时间", ms: "Waktu Operasi" },

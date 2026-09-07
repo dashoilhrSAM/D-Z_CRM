@@ -252,6 +252,7 @@ pnpm db:studio    # Prisma Studio 可视化
 
 | 日期 | 改动 | 影响 |
 | --- | --- | --- |
+| 2026-09-07 | 修复 owner 无法编辑分行（feat/fix-branch-edit）：BranchManager 增加每行 Edit（内联编辑 name/city/phone/address/appointmentCapacity + 按天 operatingHours），Save 调 updateBranch；updateBranch 新增 city 字段（org 级可改）；settings 页给 BranchManager 传 appointmentCapacity | owner 现可在 Settings 编辑每个分行详情（此前只能列+加，且不能改 city）；build0/tsc0/test48 全绿 |
 | 2026-09-07 | 产品目录管理（feat/product-management）：新增 src/actions/products.ts（createProduct/updateProduct/deleteProduct(软删 active=false)/setProductActive，均 org 级鉴权 + SKU 唯一校验）；产品页 /workshop/inventory/products 由只读改为 ProductManager 客户端组件（org 级可增/改/软删/启停，branch 级只读）；i18n 增 ws.products.* 管理键。产品页 module=PARTS 访问=OWNER+COUNTER_STAFF+MANAGER（方案①）。⚠️ DB Permission MANAGER|PARTS 需 canView/canEdit=1（本地已设），生产需同样启用否则 MANAGER 进不去（Developer Settings/seed）。 | 可新增/编辑/归档产品目录（org 级共享）；软删保留工单/PO/库存引用；build0/tsc0/test48 全绿 |
 | 2026-09-07 | Settings 页角色分流（feat/manager-branch-settings）：org 级(OWNER/SUPER_ADMIN/HEAD_OFFICE_ADMIN)管理全部分行+组织资料+服务目录；branch 级(MANAGER 等)仅见「My Branch Settings」编辑自己分行(operatingHours 按天/预约容量/电话/地址)，隐藏多分行/org 区块。actions/settings.ts 加 getSessionUser 鉴权 + isOrgLevelRole + updateBranch 强制 id===session.branchId（branch 级）。i18n 增 settings-form.no-* 与 day.* 键 | 修复越权：branch 级 manager 只能改自己分行（此前 updateBranch 无鉴权、Settings 页对所有分支可见）；新增分行工作时间/容量编辑；build0/tsc0/test48 全绿 |
 

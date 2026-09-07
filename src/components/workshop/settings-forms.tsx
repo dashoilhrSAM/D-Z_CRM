@@ -53,21 +53,63 @@ export function LostReasonsEditor({ current }: { current: string }) {
   );
 }
 
-export function BranchManager({ branches }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null }[] }) {
+export function BranchManager({ branches }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null; appointmentCapacity: number | null }[] }) {
   const router = useRouter();
   const lang = useLang();
   const [nf, setNf] = useState({ name: "D&Z Smart Workshop", city: "", phone: "", address: "" });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [edit, setEdit] = useState<{ name: string; city: string; phone: string; address: string; capacity: string; hours: Record<string, DayHours> }>({ name: "", city: "", phone: "", address: "", capacity: "", hours: {} });
+  const [msg, setMsg] = useState("");
+
+  function startEdit(b: { id: string; name: string; city: string; phone: string | null; address: string | null; operatingHours: string | null; appointmentCapacity: number | null }) {
+    setEditingId(b.id); setMsg("");
+    setEdit({ name: b.name, city: b.city, phone: b.phone ?? "", address: b.address ?? "", capacity: String(b.appointmentCapacity ?? ""), hours: parseHours(b.operatingHours) });
+  }
+  async function saveEdit() {
+    const res = await updateBranch(editingId!, { name: edit.name, city: edit.city, phone: edit.phone, address: edit.address, operatingHours: serializeHours(edit.hours), appointmentCapacity: Number(edit.capacity) || 0 });
+    setMsg(res.ok ? "" : (res.error ?? "Failed"));
+    if (res.ok) { setEditingId(null); router.refresh(); }
+  }
+
   return (
     <div className="rounded-xl border bg-card p-4">
       <h2 className="font-semibold text-sm mb-3">{t("settings-form.branches-title", lang)}</h2>
       <div className="space-y-2">
-        {branches.map((b) => (
+        {branches.map((b) => editingId === b.id ? (
+          <div key={b.id} className="rounded-lg border p-3 space-y-2 bg-muted/20">
+            <div className="grid grid-cols-2 gap-2">
+              <input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder={t("ws.products.col.name", lang)} />
+              <input className={inputCls} value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} placeholder={t("settings-form.city", lang)} />
+              <input className={inputCls} value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} placeholder={t("common.phone", lang)} />
+              <input className={inputCls} value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} placeholder={t("form.address", lang)} />
+              <input className={inputCls} type="number" min="1" value={edit.capacity} onChange={(e) => setEdit({ ...edit, capacity: e.target.value })} placeholder={t("settings-form.no-capacity", lang)} />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold text-muted-foreground">{t("settings-form.no-hours-label", lang)}</h4>
+              {DAYS.map(([k]) => (
+                <div key={k} className="flex items-center gap-2 text-sm">
+                  <span className="w-9 text-muted-foreground">{t("day." + k, lang)}</span>
+                  <input type="time" className={"rounded-md border bg-background px-2 py-1 text-sm " + (edit.hours[k]?.closed ? "opacity-40" : "")} disabled={edit.hours[k]?.closed ?? true} value={edit.hours[k]?.open ?? ""} onChange={(e) => setEdit({ ...edit, hours: { ...edit.hours, [k]: { open: e.target.value, close: edit.hours[k]?.close ?? "", closed: edit.hours[k]?.closed ?? true } } })} />
+                  <span className="text-muted-foreground">–</span>
+                  <input type="time" className={"rounded-md border bg-background px-2 py-1 text-sm " + (edit.hours[k]?.closed ? "opacity-40" : "")} disabled={edit.hours[k]?.closed ?? true} value={edit.hours[k]?.close ?? ""} onChange={(e) => setEdit({ ...edit, hours: { ...edit.hours, [k]: { close: e.target.value, open: edit.hours[k]?.open ?? "", closed: edit.hours[k]?.closed ?? true } } })} />
+                  <label className="flex items-center gap-1 text-xs text-muted-foreground"><input type="checkbox" checked={edit.hours[k]?.closed ?? true} onChange={(e) => setEdit({ ...edit, hours: { ...edit.hours, [k]: { ...(edit.hours[k] ?? { open: "", close: "" }), closed: e.target.checked } } })} /> {t("settings-form.no-closed", lang)}</label>
+                </div>
+              ))}
+            </div>
+            {msg && <p className="text-xs text-destructive">{msg}</p>}
+            <div className="flex gap-2">
+              <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" onClick={saveEdit}>{t("common.save", lang)}</button>
+              <button className="rounded-md border px-3 py-1.5 text-sm font-medium" onClick={() => { setEditingId(null); setMsg(""); }}>{t("settings-form.cancel", lang)}</button>
+            </div>
+          </div>
+        ) : (
           <div key={b.id} className="flex items-center gap-2 text-sm">
             <span className="font-medium">{b.name} · {b.city}</span>
             {b.isMain && <span className="rounded-full bg-primary/10 text-primary text-[10px] px-2 py-0.5">{t("settings-form.main", lang)}</span>}
             <span className="text-xs text-muted-foreground">{b.phone}</span>
             <div className="flex-1" />
             <span className="text-[11px] text-muted-foreground">{t(b.operatingHours ? "settings-form.hours-set" : "settings-form.no-hours", lang)}</span>
+            <button className="text-primary hover:underline" onClick={() => startEdit(b)}>{t("settings-form.edit-branch", lang)}</button>
           </div>
         ))}
       </div>
@@ -82,6 +124,7 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
     </div>
   );
 }
+
 
 export function ServiceTypeManager({ serviceTypes }: { serviceTypes: { id: string; name: string; category: string | null; durationMin: number | null; priceSen: number | null; active: boolean }[] }) {
   const router = useRouter();

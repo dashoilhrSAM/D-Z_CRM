@@ -73,3 +73,4 @@
 - feat/product-management：产品目录管理含图片展示/Image URL 编辑（恢复被删的图片列）。
 - feat/product-management：产品目录管理 + 图片显示/上传（storageProvider）。
 - 已修：Testing Manager 侧边栏/问候语显示其自身分行（767e324/a241bb4），测试分行城市=Subang Jaya；Vercel 部署排队。
+- feat/fix-branch-edit：owner 编辑每个分行（BranchManager 内联 Edit + updateBranch 支持 city）。
