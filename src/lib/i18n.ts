@@ -1891,6 +1891,7 @@ export const DICT: Dict = {
   "ws.products.min-stock": { en: "Min stock", zh: "最小库存", ms: "Stok Minimum" },
   "ws.products.cost-label": { en: "Cost (RM)", zh: "成本(RM)", ms: "Kos (RM)" },
   "ws.products.sell-label": { en: "Sell (RM)", zh: "售价(RM)", ms: "Jual (RM)" },
+  "ws.products.image-url": { en: "Image URL", zh: "图片地址", ms: "URL Gambar" },
   "ws.products.col.mfr-no": { en: "Mfr No", zh: "厂商编号", ms: "No. Pengilang" },
   "ws.stock.col.adjust-transfer": { en: "Adjust / Transfer", zh: "调整 / 调拨", ms: "Laras / Pindah" },
 

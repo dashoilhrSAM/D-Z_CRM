@@ -7,16 +7,16 @@ import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 
-type PRow = { id: string; name: string; sku: string; manufacturerPartNo: string | null; category: string | null; brand: string | null; sellPriceSen: number; costPriceSen: number; minStock: number; active: boolean };
-type Draft = { name: string; sku: string; category: string; brand: string; cost: string; sell: string; minStock: string };
+type PRow = { id: string; name: string; sku: string; manufacturerPartNo: string | null; category: string | null; brand: string | null; sellPriceSen: number; costPriceSen: number; minStock: number; active: boolean; imageUrl: string | null };
+type Draft = { name: string; sku: string; category: string; brand: string; cost: string; sell: string; minStock: string; imageUrl: string };
 
 const inputCls = "w-full rounded-md border bg-background px-2.5 py-1.5 text-sm";
 const labelCls = "text-[11px] font-medium text-muted-foreground mb-0.5 block";
 
 function toSen(rm: string): number { return Number(rm) ? Math.round(parseFloat(rm) * 100) : 0; }
 function toRM(sen: number): string { return (sen / 100).toFixed(2); }
-function empty(): Draft { return { name: "", sku: "", category: "", brand: "", cost: "", sell: "", minStock: "5" }; }
-function fromRow(p: PRow): Draft { return { name: p.name, sku: p.sku, category: p.category ?? "", brand: p.brand ?? "", cost: toRM(p.costPriceSen), sell: toRM(p.sellPriceSen), minStock: String(p.minStock) }; }
+function empty(): Draft { return { name: "", sku: "", category: "", brand: "", cost: "", sell: "", minStock: "5", imageUrl: "" }; }
+function fromRow(p: PRow): Draft { return { name: p.name, sku: p.sku, category: p.category ?? "", brand: p.brand ?? "", cost: toRM(p.costPriceSen), sell: toRM(p.sellPriceSen), minStock: String(p.minStock), imageUrl: p.imageUrl ?? "" }; }
 
 export function ProductManager({ products, canManage }: { products: PRow[]; canManage: boolean }) {
   const router = useRouter();
@@ -27,12 +27,12 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
   const [msg, setMsg] = useState("");
 
   async function doCreate() {
-    const res = await createProduct({ name: add.name, sku: add.sku.trim().toUpperCase(), category: add.category || null, brand: add.brand || null, costPriceSen: toSen(add.cost), sellPriceSen: toSen(add.sell), minStock: Number(add.minStock) || 5 });
+    const res = await createProduct({ name: add.name, sku: add.sku.trim().toUpperCase(), category: add.category || null, brand: add.brand || null, costPriceSen: toSen(add.cost), sellPriceSen: toSen(add.sell), minStock: Number(add.minStock) || 5, imageUrl: add.imageUrl || null });
     setMsg(res.ok ? "" : (res.error ?? "Failed"));
     if (res.ok) { setAdd(empty()); router.refresh(); }
   }
   async function doUpdate(id: string) {
-    const res = await updateProduct(id, { name: draft.name, sku: draft.sku.trim().toUpperCase(), category: draft.category || null, brand: draft.brand || null, costPriceSen: toSen(draft.cost), sellPriceSen: toSen(draft.sell), minStock: Number(draft.minStock) || 5 });
+    const res = await updateProduct(id, { name: draft.name, sku: draft.sku.trim().toUpperCase(), category: draft.category || null, brand: draft.brand || null, costPriceSen: toSen(draft.cost), sellPriceSen: toSen(draft.sell), minStock: Number(draft.minStock) || 5, imageUrl: draft.imageUrl || null });
     setMsg(res.ok ? "" : (res.error ?? "Failed"));
     if (res.ok) { setEditingId(null); router.refresh(); }
   }
@@ -62,6 +62,7 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
             <input className={inputCls} placeholder={t("ws.products.sell-label", lang)} value={add.sell} onChange={(e) => setAdd({ ...add, sell: e.target.value })} />
             <input className={inputCls} type="number" placeholder={t("ws.products.min-stock", lang)} value={add.minStock} onChange={(e) => setAdd({ ...add, minStock: e.target.value })} />
           </div>
+          <input className={inputCls + " mb-2"} placeholder={t("ws.products.image-url", lang)} value={add.imageUrl} onChange={(e) => setAdd({ ...add, imageUrl: e.target.value })} />
           <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" disabled={!add.name || !add.sku} onClick={doCreate}>{t("ws.products.add", lang)}</button>
           {msg && <p className="mt-2 text-xs text-destructive">{msg}</p>}
         </div>
@@ -89,6 +90,7 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
                       <td className="px-2 py-1.5"><input className={inputCls} value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} /></td>
                       <td className="px-2 py-1.5"><input className={inputCls} value={draft.sell} onChange={(e) => setDraft({ ...draft, sell: e.target.value })} /></td>
                       <td className="px-2 py-1.5 text-xs text-muted-foreground"><input className={inputCls} type="number" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><input className={inputCls} placeholder={t("ws.products.image-url", lang)} value={draft.imageUrl} onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })} /></td>
                       <td className="px-2 py-1.5"><span className="text-[11px]">{t("ws.products.col.status", lang)}</span></td>
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <button className="text-primary hover:underline mr-2" onClick={() => doUpdate(p.id)}>{t("ws.products.save", lang)}</button>
@@ -97,7 +99,7 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
                     </>
                   ) : (
                     <>
-                      <td className="px-4 py-2.5 font-medium">{p.name}</td>
+                      <td className="px-4 py-2.5"><div className="flex items-center gap-2.5">{p.imageUrl ? <img src={p.imageUrl} alt={p.name} className="h-9 w-9 shrink-0 rounded-md object-cover" loading="lazy" /> : <span className="h-9 w-9 shrink-0 rounded-md bg-muted" />}<span className="font-medium">{p.name}</span></div></td>
                       <td className="px-4 py-2.5 font-mono text-xs">{p.sku}</td>
                       <td className="px-4 py-2.5 text-xs">{p.category?.replace("_", " ") ?? "—"}</td>
                       <td className="px-4 py-2.5 text-xs">{p.brand ?? "—"}</td>

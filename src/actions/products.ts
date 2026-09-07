@@ -18,6 +18,7 @@ export type ProductInput = {
   sellPriceSen: number; costPriceSen: number;
   minStock?: number; safetyStock?: number; leadTimeDays?: number;
   supplierId?: string | null;
+  imageUrl?: string | null;
 };
 
 /** 新增产品（org 级）。 */
@@ -35,7 +36,7 @@ export async function createProduct(input: ProductInput) {
       category: input.category ?? null, brand: input.brand ?? null, unit: input.unit ?? "unit",
       sellPriceSen: input.sellPriceSen, costPriceSen: input.costPriceSen,
       minStock: input.minStock ?? 5, safetyStock: input.safetyStock ?? 2, leadTimeDays: input.leadTimeDays ?? 3,
-      supplierId: input.supplierId ?? null,
+      supplierId: input.supplierId ?? null, imageUrl: input.imageUrl ?? null,
     },
   });
   revalidatePath("/workshop/inventory/products");
@@ -56,7 +57,7 @@ export async function updateProduct(id: string, input: ProductInput) {
       category: input.category ?? null, brand: input.brand ?? null, unit: input.unit ?? "unit",
       sellPriceSen: input.sellPriceSen, costPriceSen: input.costPriceSen,
       minStock: input.minStock ?? 5, safetyStock: input.safetyStock ?? 2, leadTimeDays: input.leadTimeDays ?? 3,
-      supplierId: input.supplierId ?? null,
+      supplierId: input.supplierId ?? null, imageUrl: input.imageUrl ?? null,
     },
   });
   revalidatePath("/workshop/inventory/products");

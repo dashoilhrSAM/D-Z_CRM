@@ -21,7 +21,7 @@ export default async function ProductsPage() {
         products={rows.map((p) => ({
           id: p.id, name: p.name, sku: p.sku, manufacturerPartNo: p.manufacturerPartNo ?? null,
           category: p.category ?? null, brand: p.brand ?? null, sellPriceSen: p.sellPriceSen,
-          costPriceSen: p.costPriceSen, minStock: p.minStock, active: p.active,
+          costPriceSen: p.costPriceSen, minStock: p.minStock, active: p.active, imageUrl: p.imageUrl,
         }))}
       />
     </div>
