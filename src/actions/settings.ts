@@ -29,13 +29,14 @@ export async function updateOrganisation(input: { name?: string; contactPhone?: 
  * - org 级：可改任意分行（含 name/city/isMain 由 owner 管理）；
  * - branch 级：只能改 **自己** 分行，且仅运营细节（phone/address/operatingHours/appointmentCapacity），name/city 不可改。
  */
-export async function updateBranch(id: string, input: { name?: string; phone?: string; address?: string; operatingHours?: string; appointmentCapacity?: number }) {
+export async function updateBranch(id: string, input: { name?: string; city?: string; phone?: string; address?: string; operatingHours?: string; appointmentCapacity?: number }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   if (!auth.orgLevel && auth.branchId !== id) return { ok: false as const, error: "You can only edit your own branch." };
 
   const data: Prisma.BranchUpdateInput = {};
   if (auth.orgLevel && input.name != null) data.name = input.name;
+  if (auth.orgLevel && input.city != null) data.city = input.city;
   if (input.phone != null) data.phone = input.phone;
   if (input.address != null) data.address = input.address;
   if (input.operatingHours != null) data.operatingHours = input.operatingHours;
