@@ -32,7 +32,7 @@ export default async function EarningsPage() {
 
   const pending = payouts.filter((p) => p.status !== "PAID");
   const done = payouts.filter((p) => p.status === "PAID");
-  const totalCommission = jobs.reduce((s, j) => s + (j.commissionSen ?? 0), 0);
+  const totalCommission = jobs.reduce((s, j) => s + (j.commissionSen ?? 1000), 0);
   const totalBonus = jobs.reduce((s, j) => s + (j.bonusSen ?? 0), 0);
 
   return (
@@ -71,7 +71,7 @@ export default async function EarningsPage() {
                 <span className="font-mono text-xs font-semibold text-primary">{j.jobNumber}</span>
                 <span className="ml-2 text-muted-foreground">{j.motorcycle.brand} {j.motorcycle.model} · {j.motorcycle.plate}</span>
               </div>
-              <span className="text-[11px] text-muted-foreground mr-1">{t("mech.commission", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.commissionSen ?? 0)}</span><span className="text-[11px] text-muted-foreground ml-3 mr-1">{t("mech.bonus", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.bonusSen ?? 0)}</span>
+              <span className="text-[11px] text-muted-foreground mr-1">{t("mech.commission", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.commissionSen ?? 1000)}</span><span className="text-[11px] text-muted-foreground ml-3 mr-1">{t("mech.bonus", lang)}</span><span className="tabular-nums font-semibold">{formatRM(j.bonusSen ?? 0)}</span>
             </div>
           ))}
         </div>

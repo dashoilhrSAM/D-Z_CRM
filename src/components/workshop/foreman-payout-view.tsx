@@ -69,7 +69,7 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
   const saveJobComm = (jobId: string) =>
     start(async () => {
       const v = jobComm[jobId];
-      const r = await updateJobCommission(jobId, v === "" ? null : Math.round(parseFloat(v || "0") * 100));
+      const r = await updateJobCommission(jobId, v === "" ? 1000 : Math.round(parseFloat(v || "0") * 100));
       if (r.ok) { setJobComm((p) => ({ ...p, [jobId]: "" })); toast.success(t("settle.save-mech", lang)); router.refresh(); }
       else toast.error(r.error);
     });
@@ -190,8 +190,8 @@ export function ForemanPayoutView({ foremen, lang, orgCommissionValue }: { forem
                               <div key={j.jobId} className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] hover:bg-muted/70">
                                 <Link href={"/workshop/jobs/" + j.jobId} className="flex items-center gap-2 flex-1 min-w-0"><span className="font-mono font-semibold text-primary">{j.jobNumber}</span><span className="font-medium">{j.plate}</span><span className="text-muted-foreground truncate">{j.customer}</span><span className="ml-auto font-bold tabular-nums">{formatRM(j.salesSen)}</span></Link>
                                 <span className="text-muted-foreground">{t("settle.job-comm", lang)}</span>
-                                <Input inputMode="decimal" placeholder={(f.commissionRules?.commissionValue ?? orgCommissionValue) / 100 + ""} value={jobComm[j.jobId] ?? ""} onChange={(e) => setJobComm((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobComm(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
-                                <span className="w-16 text-right tabular-nums font-semibold">{formatRM(j.commissionSen)}</span>
+                                <Input inputMode="decimal" placeholder="10" value={jobComm[j.jobId] ?? ""} onChange={(e) => setJobComm((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobComm(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
+                                <span className="w-16 text-right tabular-nums font-semibold">{formatRM(j.commissionSen ?? 1000)}</span>
                                 <span className="text-muted-foreground">{t("settle.job-bonus", lang)}</span>
                                 <Input inputMode="decimal" placeholder="0" value={jobBonus[j.jobId] ?? ""} onChange={(e) => setJobBonus((p) => ({ ...p, [j.jobId]: e.target.value }))} onBlur={() => saveJobBonus(j.jobId)} className="h-7 w-20 rounded-md border bg-background px-1.5 text-right text-xs tabular-nums" />
                                 <span className="w-16 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{formatRM(j.bonusSen)}</span>
