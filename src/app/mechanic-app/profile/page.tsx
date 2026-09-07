@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { AttendanceButton } from "@/components/mechanic/attendance-button";
 import { EarningsConfirm } from "@/components/mechanic/earnings-confirm";
+import { MonthlyEarningsChart } from "@/components/mechanic/monthly-earnings-chart";
 import { SignOutIconButton } from "@/components/rider/sign-out-button";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
@@ -66,7 +67,6 @@ export default async function MechanicProfilePage() {
     ms.count = cur?.count ?? 0;
     ms.earningsSen = cur?.earningsSen ?? 0;
   }
-  const maxMonth = Math.max(...monthStats.map((m) => m.count), 1);
 
   return (
     <div className="space-y-4">
@@ -136,17 +136,7 @@ export default async function MechanicProfilePage() {
         </div>
         {/* 月度趋势 */}
         <div className="text-xs font-semibold text-muted-foreground mb-2">{t("mech.monthly-jobs", lang)}</div>
-        <div className="space-y-1.5">
-          {monthStats.map((ms) => (
-            <div key={ms.key} className="flex items-center gap-2 text-[11px]">
-              <span className="w-14 shrink-0 font-mono text-muted-foreground">{ms.label}</span>
-              <div className="h-4 flex-1 rounded bg-muted/50 overflow-hidden">
-                <div className="h-full rounded bg-primary/80" style={{ width: Math.max(2, (ms.count / maxMonth) * 100) + "%" }} />
-              </div>
-              <span className="w-20 shrink-0 text-right text-muted-foreground">{ms.count} · {formatRM(ms.earningsSen)}</span>
-            </div>
-          ))}
-        </div>
+        <MonthlyEarningsChart data={monthStats.map((ms) => ({ label: ms.label, count: ms.count, earningsSen: ms.earningsSen }))} />
       </div>
     </div>
   );
