@@ -18,6 +18,15 @@ function toRM(sen: number): string { return (sen / 100).toFixed(2); }
 function empty(): Draft { return { name: "", sku: "", category: "", brand: "", cost: "", sell: "", minStock: "5", imageUrl: "" }; }
 function fromRow(p: PRow): Draft { return { name: p.name, sku: p.sku, category: p.category ?? "", brand: p.brand ?? "", cost: toRM(p.costPriceSen), sell: toRM(p.sellPriceSen), minStock: String(p.minStock), imageUrl: p.imageUrl ?? "" }; }
 
+async function uploadImage(file: File): Promise<{ ok: boolean; url?: string; error?: string }> {
+  const fd = new FormData(); fd.append("file", file);
+  try {
+    const res = await fetch("/api/products/image", { method: "POST", body: fd });
+    const data = await res.json();
+    return data;
+  } catch { return { ok: false, error: "Upload failed" }; }
+}
+
 export function ProductManager({ products, canManage }: { products: PRow[]; canManage: boolean }) {
   const router = useRouter();
   const lang = useLang();
@@ -63,6 +72,10 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
             <input className={inputCls} type="number" placeholder={t("ws.products.min-stock", lang)} value={add.minStock} onChange={(e) => setAdd({ ...add, minStock: e.target.value })} />
           </div>
           <input className={inputCls + " mb-2"} placeholder={t("ws.products.image-url", lang)} value={add.imageUrl} onChange={(e) => setAdd({ ...add, imageUrl: e.target.value })} />
+          <div className="mb-2 flex items-center gap-2">
+            <label className="rounded-md border px-2.5 py-1.5 text-xs font-medium cursor-pointer">{t("ws.products.upload", lang)}<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) { const u = await uploadImage(f); if (u.ok && u.url) setAdd({ ...add, imageUrl: u.url }); } }} /></label>
+            {add.imageUrl && <img src={add.imageUrl} alt="" className="h-9 w-9 rounded-md object-cover" />}
+          </div>
           <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" disabled={!add.name || !add.sku} onClick={doCreate}>{t("ws.products.add", lang)}</button>
           {msg && <p className="mt-2 text-xs text-destructive">{msg}</p>}
         </div>
@@ -90,7 +103,7 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
                       <td className="px-2 py-1.5"><input className={inputCls} value={draft.cost} onChange={(e) => setDraft({ ...draft, cost: e.target.value })} /></td>
                       <td className="px-2 py-1.5"><input className={inputCls} value={draft.sell} onChange={(e) => setDraft({ ...draft, sell: e.target.value })} /></td>
                       <td className="px-2 py-1.5 text-xs text-muted-foreground"><input className={inputCls} type="number" value={draft.minStock} onChange={(e) => setDraft({ ...draft, minStock: e.target.value })} /></td>
-                      <td className="px-2 py-1.5"><input className={inputCls} placeholder={t("ws.products.image-url", lang)} value={draft.imageUrl} onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })} /></td>
+                      <td className="px-2 py-1.5"><input className={inputCls} placeholder={t("ws.products.image-url", lang)} value={draft.imageUrl} onChange={(e) => setDraft({ ...draft, imageUrl: e.target.value })} /><div className="mt-1 flex items-center gap-2"><label className="rounded-md border px-2 py-1 text-[11px] cursor-pointer">{t("ws.products.upload", lang)}<input type="file" accept="image/*" className="hidden" onChange={async (e) => { const f = e.target.files?.[0]; if (f) { const u = await uploadImage(f); if (u.ok && u.url) setDraft({ ...draft, imageUrl: u.url }); } }} /></label>{draft.imageUrl && <img src={draft.imageUrl} alt="" className="h-6 w-6 rounded object-cover" />}</div></td>
                       <td className="px-2 py-1.5"><span className="text-[11px]">{t("ws.products.col.status", lang)}</span></td>
                       <td className="px-2 py-1.5 text-right whitespace-nowrap">
                         <button className="text-primary hover:underline mr-2" onClick={() => doUpdate(p.id)}>{t("ws.products.save", lang)}</button>
