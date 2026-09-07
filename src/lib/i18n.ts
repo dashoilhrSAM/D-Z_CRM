@@ -1879,6 +1879,18 @@ export const DICT: Dict = {
   "ws.kind.addon": { en: "Add-on", zh: "附加项", ms: "Tambahan" },
   // <<GAP-A>>
   "ws.products.col.sku": { en: "SKU", zh: "SKU", ms: "SKU" },
+  "ws.products.add": { en: "Add product", zh: "添加产品", ms: "Tambah Produk" },
+  "ws.products.edit": { en: "Edit", zh: "编辑", ms: "Sunting" },
+  "ws.products.delete": { en: "Delete", zh: "删除", ms: "Hapus" },
+  "ws.products.save": { en: "Save", zh: "保存", ms: "Simpan" },
+  "ws.products.cancel": { en: "Cancel", zh: "取消", ms: "Batal" },
+  "ws.products.confirm-delete": { en: "Delete this product? It will be archived (kept in history).", zh: "删除该产品？将归档（保留历史引用）。", ms: "Padam produk ini? Ia akan diarkibkan." },
+  "ws.products.col.status": { en: "Status", zh: "状态", ms: "Status" },
+  "ws.products.col.active": { en: "Active", zh: "启用", ms: "Aktif" },
+  "ws.products.col.archived": { en: "Archived", zh: "已归档", ms: "Diarib" },
+  "ws.products.min-stock": { en: "Min stock", zh: "最小库存", ms: "Stok Minimum" },
+  "ws.products.cost-label": { en: "Cost (RM)", zh: "成本(RM)", ms: "Kos (RM)" },
+  "ws.products.sell-label": { en: "Sell (RM)", zh: "售价(RM)", ms: "Jual (RM)" },
   "ws.products.col.mfr-no": { en: "Mfr No", zh: "厂商编号", ms: "No. Pengilang" },
   "ws.stock.col.adjust-transfer": { en: "Adjust / Transfer", zh: "调整 / 调拨", ms: "Laras / Pindah" },
 
