@@ -23,7 +23,7 @@ export default async function MechanicProfilePage() {
     db.user.findUnique({ where: { id: me.id }, include: { attendance: { orderBy: { date: "desc" }, take: 1 } } }),
     db.serviceJob.findMany({ where: { mechanicId: me.id, status: "COMPLETED" }, select: { id: true, completedAt: true, invoice: { select: { totalSen: true } } } }),
     db.staffPayout.findMany({ where: { userId: me.id, status: "PAID" }, select: { totalSen: true } }),
-    db.staffPayout.findMany({ where: { userId: me.id, status: "PENDING" }, select: { id: true, period: true, periodStart: true, totalSen: true }, orderBy: { createdAt: "desc" } }),
+    db.staffPayout.findMany({ where: { userId: me.id, status: "AWAITING_CONFIRM" }, select: { id: true, period: true, periodStart: true, totalSen: true }, orderBy: { createdAt: "desc" } }),
     db.review.aggregate({ _avg: { rating: true }, _count: true, where: { job: { mechanicId: me.id }, rating: { not: null } } }),
   ]);
   const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()) + "T00:00:00Z";
