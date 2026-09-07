@@ -19,10 +19,9 @@ export default async function MechanicProfilePage() {
   if (session.kind !== "staff" || !session.user) redirect("/workshop/dashboard");
   const me = session.user;
 
-  const [user, jobs, payouts, pendingPayouts, reviews] = await Promise.all([
+  const [user, jobs, pendingPayouts, reviews] = await Promise.all([
     db.user.findUnique({ where: { id: me.id }, include: { attendance: { orderBy: { date: "desc" }, take: 1 } } }),
-    db.serviceJob.findMany({ where: { mechanicId: me.id, status: "COMPLETED" }, select: { id: true, completedAt: true, invoice: { select: { totalSen: true } } } }),
-    db.staffPayout.findMany({ where: { userId: me.id, status: "PAID" }, select: { totalSen: true } }),
+    db.serviceJob.findMany({ where: { mechanicId: me.id, status: "COMPLETED" }, select: { id: true, completedAt: true, commissionSen: true, bonusSen: true } }),
     db.staffPayout.findMany({ where: { userId: me.id, status: "AWAITING_CONFIRM" }, select: { id: true, period: true, periodStart: true, totalSen: true }, orderBy: { createdAt: "desc" } }),
     db.review.aggregate({ _avg: { rating: true }, _count: true, where: { job: { mechanicId: me.id }, rating: { not: null } } }),
   ]);
@@ -36,9 +35,9 @@ export default async function MechanicProfilePage() {
     : { state: "OFF" as const, checkInAt: lastIn.toISOString(), checkOutAt: lastOut.toISOString() };
 
   const completed = jobs.length;
-  const value = jobs.reduce((s, j) => s + (j.invoice?.totalSen ?? 0), 0);
-  const paid = payouts.reduce((s, p) => s + p.totalSen, 0);
-  const avgTicket = completed > 0 ? Math.round(value / completed) : 0;
+  const earnings = jobs.reduce((s, j) => s + (j.commissionSen ?? 1000), 0);
+  const bonus = jobs.reduce((s, j) => s + (j.bonusSen ?? 0), 0);
+  const avgEarnings = completed > 0 ? Math.round(earnings / completed) : 0;
   const rating = reviews._avg.rating ?? 0;
   const initials = me.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase();
 
@@ -46,26 +45,26 @@ export default async function MechanicProfilePage() {
   const now = new Date();
   const ymdNow = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit" }).format(now).split("-").map(Number);
   const [cy, cm] = ymdNow as [number, number];
-  const monthStats: { key: string; label: string; count: number; valueSen: number }[] = [];
+  const monthStats: { key: string; label: string; count: number; earningsSen: number }[] = [];
   for (let i = 11; i >= 0; i--) {
     const m = cm - i;
     const yy = cy + Math.floor((m - 1) / 12);
     const mm = ((m - 1) % 12 + 12) % 12 + 1;
-    monthStats.push({ key: yy + "-" + mm, label: yy + "/" + String(mm).padStart(2, "0"), count: 0, valueSen: 0 });
+    monthStats.push({ key: yy + "-" + mm, label: yy + "/" + String(mm).padStart(2, "0"), count: 0, earningsSen: 0 });
   }
-  const byMonth = new Map<string, { count: number; valueSen: number }>();
+  const byMonth = new Map<string, { count: number; earningsSen: number }>();
   for (const j of jobs) {
     if (!j.completedAt) continue;
     const ymd = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit" }).format(j.completedAt);
-    const cur = byMonth.get(ymd) ?? { count: 0, valueSen: 0 };
+    const cur = byMonth.get(ymd) ?? { count: 0, earningsSen: 0 };
     cur.count += 1;
-    cur.valueSen += j.invoice?.totalSen ?? 0;
+    cur.earningsSen += j.commissionSen ?? 1000;
     byMonth.set(ymd, cur);
   }
   for (const ms of monthStats) {
     const cur = byMonth.get(ms.key);
     ms.count = cur?.count ?? 0;
-    ms.valueSen = cur?.valueSen ?? 0;
+    ms.earningsSen = cur?.earningsSen ?? 0;
   }
   const maxMonth = Math.max(...monthStats.map((m) => m.count), 1);
 
@@ -90,15 +89,15 @@ export default async function MechanicProfilePage() {
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border bg-card p-4 text-center">
           <div className="text-2xl font-bold tabular-nums">{completed}</div>
-          <div className="text-xs text-muted-foreground">{t("mech.jobs", lang)}</div>
+          <div className="text-xs text-muted-foreground">{t("mech.jobs-completed", lang)}</div>
         </div>
         <div className="rounded-2xl border bg-card p-4 text-center">
-          <div className="text-2xl font-bold tabular-nums">{formatRM(value)}</div>
-          <div className="text-xs text-muted-foreground">{t("mech.value", lang)}</div>
+          <div className="text-2xl font-bold tabular-nums">{formatRM(earnings)}</div>
+          <div className="text-xs text-muted-foreground">{t("mech.total-commission", lang)}</div>
         </div>
         <div className="rounded-2xl border bg-card p-4 text-center">
-          <div className="text-2xl font-bold tabular-nums">{formatRM(paid)}</div>
-          <div className="text-xs text-muted-foreground">{t("mech.paid", lang)}</div>
+          <div className="text-2xl font-bold tabular-nums">{formatRM(bonus)}</div>
+          <div className="text-xs text-muted-foreground">{t("mech.total-bonus", lang)}</div>
         </div>
       </div>
 
@@ -127,8 +126,8 @@ export default async function MechanicProfilePage() {
             <div className="text-[10px] text-muted-foreground">{t("mech.jobs", lang)}</div>
           </div>
           <div className="rounded-xl bg-muted/50 p-3 text-center">
-            <div className="text-lg font-bold tabular-nums">{formatRM(avgTicket)}</div>
-            <div className="text-[10px] text-muted-foreground">{t("settle.col-avg", lang)}</div>
+            <div className="text-lg font-bold tabular-nums">{formatRM(avgEarnings)}</div>
+            <div className="text-[10px] text-muted-foreground">{t("mech.avg-earnings", lang)}</div>
           </div>
           <div className="rounded-xl bg-muted/50 p-3 text-center">
             <div className="text-lg font-bold tabular-nums">{rating ? rating.toFixed(1) : "—"}</div>
@@ -144,7 +143,7 @@ export default async function MechanicProfilePage() {
               <div className="h-4 flex-1 rounded bg-muted/50 overflow-hidden">
                 <div className="h-full rounded bg-primary/80" style={{ width: Math.max(2, (ms.count / maxMonth) * 100) + "%" }} />
               </div>
-              <span className="w-20 shrink-0 text-right text-muted-foreground">{ms.count} · {formatRM(ms.valueSen)}</span>
+              <span className="w-20 shrink-0 text-right text-muted-foreground">{ms.count} · {formatRM(ms.earningsSen)}</span>
             </div>
           ))}
         </div>

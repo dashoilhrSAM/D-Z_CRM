@@ -993,6 +993,7 @@ export const DICT: Dict = {
   "mech.bonus": { en: "Bonus", zh: "奖金", ms: "Bonus" },
   "mech.total-commission": { en: "Total commission", zh: "总佣金", ms: "Jumlah Komisen" },
   "mech.total-bonus": { en: "Total bonus", zh: "总奖金", ms: "Jumlah Bonus" },
+  "mech.avg-earnings": { en: "Avg earnings", zh: "平均收入", ms: "Purata pendapatan" },
   "mech.paid": { en: "Paid", zh: "已发薪", ms: "Dibayar" },
   "mech.payment-confirm": { en: "Confirm payment received ({n})", zh: "待确认收款（{n}）", ms: "Sahkan bayaran diterima ({n})" },
   "mech.completed-jobs": { en: "Completed jobs", zh: "已完成工单", ms: "Kerja siap" },
