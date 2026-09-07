@@ -9,6 +9,7 @@ import { FeatureTutorial } from "@/components/workshop/feature-tutorial";
 import { TutorialHelpMenu } from "@/components/workshop/tutorial-help-menu";
 import { WorkshopAIAssistant } from "@/components/workshop/ai-assistant";
 import { headers } from "next/headers";
+import { db } from "@/lib/db";
 import { redirect } from "next/navigation";
 import { can } from "@/lib/auth/permissions";
 import { navForRoleWithPerms, navItemForPath } from "@/lib/nav-perms";
@@ -38,6 +39,11 @@ export default async function WorkshopLayout({ children }: { children: React.Rea
   const sidebarUser = session.authenticated
     ? { id: session.user?.id ?? "", name: session.name, roleLabel: session.role, initials: session.initials }
     : undefined;
+  // 侧边栏品牌区显示登录用户所在分行（branch 级=其分行；org 级=主店）
+  const sidebarBranch = session.branchId
+    ? await db.branch.findUnique({ where: { id: session.branchId }, select: { name: true, city: true } })
+    : await db.branch.findFirst({ where: { isMain: true }, select: { name: true, city: true } });
+  const branchLabel = sidebarBranch ? `${sidebarBranch.name} · ${sidebarBranch.city}` : undefined;
 
   // 导航：DB Permission 覆盖感知（Developer Settings 开关即时反映）；sidebar/mobile 共用
   const filteredNav = session.authenticated ? await navForRoleWithPerms(session.orgId, session.role, persona) : [];
@@ -50,7 +56,7 @@ export default async function WorkshopLayout({ children }: { children: React.Rea
 
   return (
     <div className="flex min-h-screen bg-muted/30 bg-[radial-gradient(90%_70%_at_88%_-12%,oklch(0.62_0.19_45/0.07),transparent_60%)]">
-      <Sidebar persona={persona} sections={filteredNav} role={session.authenticated ? session.role : undefined} user={sidebarUser} lang={lang} />
+      <Sidebar persona={persona} sections={filteredNav} role={session.authenticated ? session.role : undefined} user={sidebarUser} branchLabel={branchLabel} lang={lang} />
       <div className="flex-1 flex flex-col min-w-0">
         <div className="hidden lg:flex items-center gap-4 border-b bg-background px-6 h-16">
           <CommandPalette />

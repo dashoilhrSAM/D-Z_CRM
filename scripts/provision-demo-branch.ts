@@ -15,7 +15,7 @@ if (process.env.NODE_ENV === "production" && process.env.PROVISION_ALLOWED !== "
 const prisma = new PrismaClient();
 
 const DEMO_BRANCH_NAME = process.env.DEMO_BRANCH_NAME ?? "D&Z Testing Branch";
-const DEMO_CITY = process.env.DEMO_BRANCH_CITY ?? "Kuala Lumpur";
+const DEMO_CITY = process.env.DEMO_BRANCH_CITY ?? "Subang Jaya";
 const SLOT_TIMES = ["09:00", "11:00", "14:00", "16:00"];
 const SLOT_DAYS = Number(process.env.SLOT_DAYS ?? 7);
 const MAX_BOOKINGS = Number(process.env.MAX_BOOKINGS ?? 2);

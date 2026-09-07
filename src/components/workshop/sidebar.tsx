@@ -48,7 +48,7 @@ function isActive(pathname: string, href: string): boolean {
   return pathname.startsWith(href + "/");
 }
 
-export function Sidebar({ persona, role, sections, user, lang = "en" }: { persona: WorkshopPersona; role?: string; sections?: NavSectionData[]; user?: SidebarUser | null; lang?: Lang }) {
+export function Sidebar({ persona, role, sections, user, branchLabel, lang = "en" }: { persona: WorkshopPersona; role?: string; sections?: NavSectionData[]; user?: SidebarUser | null; branchLabel?: string; lang?: Lang }) {
   const pathname = usePathname();
   const [expanded, setExpanded] = useState(false);
   // 有真实 role → 使用 server 已按权限矩阵（含 DB 覆盖）过滤的 sections；否则退回 persona 过滤
@@ -72,7 +72,7 @@ export function Sidebar({ persona, role, sections, user, lang = "en" }: { person
         </div>
         <div className={cn("leading-tight overflow-hidden whitespace-nowrap transition-opacity duration-200", expanded ? "opacity-100" : "opacity-0 w-0")}>
           <div className="font-bold text-sm">D&Z WORKSHOP OS</div>
-          <div className="text-[10px] text-sidebar-foreground/60">Smart Workshop · KL</div>
+          <div className="text-[10px] text-sidebar-foreground/60">{branchLabel ?? "D&Z Workshop"}</div>
         </div>
       </Link>
       {user && (
