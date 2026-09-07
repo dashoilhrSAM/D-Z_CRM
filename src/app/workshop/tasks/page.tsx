@@ -6,6 +6,8 @@ import { TaskList } from "@/components/workshop/task-list";
 import { NewTaskForm } from "@/components/workshop/new-task-form";
 import { PageTransition } from "@/components/shared/page-transition";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +16,8 @@ export default async function TasksPage({ searchParams }: { searchParams: Promis
   const lang = await getLang();
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
-  const { items, total, rawTotal } = await tasksModule.list({ organisationId: org!.id, ownerId: sp.owner || undefined, status: sp.status });
+  const session = await getSessionUser();
+  const { items, total, rawTotal } = await tasksModule.list({ organisationId: org!.id, branchId: scopedBranchId(session) ?? undefined, ownerId: sp.owner || undefined, status: sp.status });
   const users = await db.user.findMany({ where: { organisationId: org!.id, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } });
   const leads = await db.lead.findMany({ where: { organisationId: org!.id, status: "OPEN" }, orderBy: { createdAt: "desc" }, take: 30, select: { id: true, customerName: true } });
 

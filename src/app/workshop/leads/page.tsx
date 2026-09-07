@@ -7,6 +7,8 @@ import { fmtDate } from "@/lib/format";
 import { PendingForm } from "@/components/shared/search-form";
 import { PageTransition } from "@/components/shared/page-transition";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +17,14 @@ export default async function LeadsPage({ searchParams }: { searchParams: Promis
   const lang = await getLang();
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
+  const session = await getSessionUser();
   const [stages, sources] = await Promise.all([
     db.leadStage.findMany({ where: { organisationId: org!.id, active: true }, orderBy: { order: "asc" } }),
     db.leadSource.findMany({ where: { organisationId: org!.id, active: true }, orderBy: { name: "asc" } }),
   ]);
   const { items, total } = await leadsModule.list({
     organisationId: org!.id,
+    branchId: scopedBranchId(session) ?? undefined,
     stageId: sp.stage,
     sourceId: sp.source,
     status: sp.status,

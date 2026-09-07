@@ -7,6 +7,8 @@ import { PipelineBoard } from "@/components/workshop/pipeline-board";
 import { formatRM } from "@/lib/money";
 import { PendingForm } from "@/components/shared/search-form";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { applyBranchScope } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -15,16 +17,13 @@ export default async function PipelinePage({ searchParams }: { searchParams: Pro
   const lang = await getLang();
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
+  const session = await getSessionUser();
+  const leadWhere: Record<string, unknown> = { organisationId: org!.id, status: "OPEN", assignedUserId: sp.owner || undefined, sourceId: sp.source || undefined, ...(sp.q ? { customerName: { contains: sp.q } } : {}) };
+  applyBranchScope(leadWhere, session, null); // 严格隔离：branch 级只看本分行 leads
   const [stats, leads, sources, salespeople, stale] = await Promise.all([
     pipelineStats(org!.id, { assignedUserId: sp.owner, sourceId: sp.source }),
     db.lead.findMany({
-      where: {
-        organisationId: org!.id,
-        status: "OPEN",
-        assignedUserId: sp.owner || undefined,
-        sourceId: sp.source || undefined,
-        ...(sp.q ? { customerName: { contains: sp.q } } : {}),
-      },
+      where: leadWhere,
       include: { source: true, stage: true, assignedUser: { select: { id: true, name: true } } },
       orderBy: { updatedAt: "desc" },
       take: 200,

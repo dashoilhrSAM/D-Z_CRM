@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { MechanicBoard, type BoardJob, type MechanicSummary } from "@/components/workshop/mechanic-board";
 import { getLang } from "@/lib/get-lang";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { PageTransition } from "@/components/shared/page-transition";
 
@@ -12,7 +13,7 @@ export default async function MechanicPage() {
   const lang = await getLang();
   const session = await getSessionUser();
   const isMechanic = session.kind === "staff" && session.role === "MECHANIC";
-  const board = await jobService.listBoard();
+  const board = await jobService.listBoard(scopedBranchId(session));
   const active = board.jobs.filter((j) => ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"].includes(j.status));
   // quotation status per active job (default allowed for no-quotation legacy jobs)
   const activeIds = active.map((j) => j.id);

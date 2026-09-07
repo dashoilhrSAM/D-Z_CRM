@@ -9,7 +9,7 @@ import { db } from "@/lib/db";
 export class DashboardService {
   async get(branchId?: string) {
     const [board, finance, reminders, reviews, kpi] = await Promise.all([
-      jobService.listBoard(),
+      jobService.listBoard(branchId),
       this.todayFinance(),
       crmService.reminders(),
       crmService.reviews(),
@@ -22,21 +22,23 @@ export class DashboardService {
     const org = await db.organisation.findFirst();
     const orgId = org!.id;
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
+    const bWhere = branchId ? { branchId } : {};
+    const opWhere = branchId ? { branchId } : { branch: { organisationId: orgId } };
     const [totalLeads, newLeads, leadTrend, openTasks, lifecycleDist, repeatStats, upcoming] = await Promise.all([
-      db.lead.count({ where: { organisationId: orgId } }),
-      db.lead.count({ where: { organisationId: orgId, createdAt: { gte: monthStart } } }),
-      db.lead.groupBy({ by: ["createdAt"], where: { organisationId: orgId }, _count: true }).then((rows) => {
+      db.lead.count({ where: { organisationId: orgId, ...bWhere } }),
+      db.lead.count({ where: { organisationId: orgId, ...bWhere, createdAt: { gte: monthStart } } }),
+      db.lead.groupBy({ by: ["createdAt"], where: { organisationId: orgId, ...bWhere }, _count: true }).then((rows) => {
         const byDay: Record<string, number> = {};
         for (const r of rows) { const k = r.createdAt.toISOString().slice(0, 10); byDay[k] = (byDay[k] ?? 0) + 1; }
         return Object.entries(byDay).sort((a, b) => a[0].localeCompare(b[0])).slice(-14).map(([label, value]) => ({ label, value }));
       }),
-      db.task.count({ where: { organisationId: orgId, status: "OPEN", OR: [{ dueAt: null }, { dueAt: { lte: new Date(Date.now() + 7 * 86400000) } }] } }),
+      db.task.count({ where: { organisationId: orgId, ...bWhere, status: "OPEN", OR: [{ dueAt: null }, { dueAt: { lte: new Date(Date.now() + 7 * 86400000) } }] } }),
       // lifecycle distribution: active bookings+jobs bucketed by customer-facing step
       (async () => {
         const { resolveStep, LIFECYCLE_STEPS } = await import("@/modules/rider/status");
         const [jobs, bookings] = await Promise.all([
-          db.serviceJob.findMany({ where: { branch: { organisationId: orgId }, status: { in: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "QC_CHECK", "WAITING_PARTS", "ON_HOLD", "READY"] } }, select: { status: true } }),
-          db.booking.findMany({ where: { branch: { organisationId: orgId }, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED", "CHECKED_IN"] } }, select: { status: true, jobId: true } }),
+          db.serviceJob.findMany({ where: { ...opWhere, status: { in: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "QC_CHECK", "WAITING_PARTS", "ON_HOLD", "READY"] } }, select: { status: true } }),
+          db.booking.findMany({ where: { ...opWhere, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED", "CHECKED_IN"] } }, select: { status: true, jobId: true } }),
         ]);
         const buckets = new Array(LIFECYCLE_STEPS.length).fill(0) as number[];
         for (const bk of bookings) {
@@ -63,7 +65,7 @@ export class DashboardService {
         const repeat = cs.filter((c) => c.jobs.length >= 2).length;
         return { total: cs.length, repeatPct: cs.length > 0 ? Math.round((repeat / cs.length) * 100) : 0 };
       }),
-      db.booking.count({ where: { date: { gte: new Date() }, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED"] } } }),
+      db.booking.count({ where: { ...opWhere, date: { gte: new Date() }, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED"] } } }),
     ]);
     return {
       todaySales: finance.revenue,

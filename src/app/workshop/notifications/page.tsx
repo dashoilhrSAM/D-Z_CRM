@@ -5,6 +5,8 @@ import { markAllNotificationsRead } from "@/actions/notifications";
 import { fmtDateTime } from "@/lib/format";
 import { MarkReadButton } from "@/components/workshop/mark-read-button";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -13,8 +15,12 @@ export default async function NotificationsPage({ searchParams }: { searchParams
   const lang = await getLang();
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
-  // base scope (branch or system-wide) — independent of the active type filter
-  const baseWhere: Record<string, unknown> = { OR: [{ branch: { organisationId: org!.id } }, { branchId: null }] };
+  const session = await getSessionUser();
+  const scopeId = scopedBranchId(session);
+  // base scope (branch or system-wide) — branch 级只看本分行 + 系统通知；org 级看全部分行
+  const baseWhere: Record<string, unknown> = scopeId
+    ? { AND: [{ OR: [{ branchId: { equals: scopeId } }, { branchId: null }] }] }
+    : { OR: [{ branch: { organisationId: org!.id } }, { branchId: null }] };
   const where: Record<string, unknown> = { ...baseWhere };
   if (sp.type) where.type = sp.type;
   const [items, unread, typeCounts] = await Promise.all([

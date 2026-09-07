@@ -3,7 +3,7 @@
 > 本文件由 session-pack 生成，session-resume 可续接。
 
 ## 一句话状态
-本地 = main @ 635940e（已 push，生产已部署，四端全 200）。本轮：登录页三端差异化已上线（Workshop/Rider/Mechanic 专属配色+字眼+互跳）。前序：把独立 Vite 介绍站（DZ-Intro-Site）集成为 CRM 的 /intro 静态页（public/intro，base=/intro/），提供四链接（介绍页/workshop/rider/mechanic）；TESTING_GUIDE.md 新增介绍页 + 重生成 PDF。前序：AI assistant（analytics+纯文本）、checklist 可编辑、provider（WhatsApp externalId）等已上线。
+本地 = main @ 35264d5（已 push，生产已部署，四端全 200）。本轮：登录页三端差异化已上线（Workshop/Rider/Mechanic 专属配色+字眼+互跳）。前序：把独立 Vite 介绍站（DZ-Intro-Site）集成为 CRM 的 /intro 静态页（public/intro，base=/intro/），提供四链接（介绍页/workshop/rider/mechanic）；TESTING_GUIDE.md 新增介绍页 + 重生成 PDF。前序：AI assistant（analytics+纯文本）、checklist 可编辑、provider（WhatsApp externalId）等已上线。
 
 ## 会话信息
 - 原会话 ID：session-c5a58fbb-3d0a-4fd7-b8f8-bdc43069d460

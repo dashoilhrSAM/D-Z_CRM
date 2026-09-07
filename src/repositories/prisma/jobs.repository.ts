@@ -32,8 +32,8 @@ export class PrismaJobRepository implements IJobRepository {
   private c(client?: DbLike): PrismaClient | Prisma.TransactionClient {
     return client ?? db;
   }
-  list(client?: DbLike) {
-    return this.c(client).serviceJob.findMany({ include: rowInclude, orderBy: { createdAt: "desc" } });
+  list(where?: Prisma.ServiceJobWhereInput, client?: DbLike) {
+    return this.c(client).serviceJob.findMany({ where, include: rowInclude, orderBy: { createdAt: "desc" } });
   }
   getById(id: string, client?: DbLike) {
     return this.c(client).serviceJob.findUnique({ where: { id }, include: jobInclude });

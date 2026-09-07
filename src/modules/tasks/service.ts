@@ -45,8 +45,9 @@ export const tasksModule = {
     return "OPEN";
   },
 
-  async list(opts: { organisationId: string; ownerId?: string; status?: string; relatedId?: string; search?: string; skip?: number; take?: number }) {
+  async list(opts: { organisationId: string; branchId?: string; ownerId?: string; status?: string; relatedId?: string; search?: string; skip?: number; take?: number }) {
     const where: Record<string, unknown> = { organisationId: opts.organisationId };
+    if (opts.branchId) where.branchId = opts.branchId;
     if (opts.ownerId) where.ownerId = opts.ownerId;
     if (opts.relatedId) where.relatedId = opts.relatedId;
     if (opts.search) where.title = { contains: opts.search };

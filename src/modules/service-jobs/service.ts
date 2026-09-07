@@ -14,8 +14,8 @@ export class JobService {
     return canTransitionJob(from as JobStatus, to as JobStatus);
   }
 
-  async listBoard() {
-    const rows = await this.repo.list();
+  async listBoard(branchId?: string | null) {
+    const rows = await this.repo.list(branchId ? { branchId } : undefined);
     const now = new Date();
     const today = (d: Date) => d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
     return {

@@ -6,6 +6,8 @@ import { PageTransition } from "@/components/shared/page-transition";
 import { BookingActions } from "@/components/workshop/booking-actions";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
+import { applyBranchScope } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +29,7 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
   const branches = await db.branch.findMany({ where: { organisationId: org!.id } });
+  const session = await getSessionUser();
   const where: Record<string, unknown> = {};
   if (sp.branch) where.branchId = sp.branch;
   if (sp.status) where.status = sp.status;
@@ -36,6 +39,8 @@ export default async function BookingsPage({ searchParams }: { searchParams: Pro
     const next = new Date(d.getTime() + 86400000);
     where.date = { gte: d, lt: next };
   }
+  // 严格隔离：branch 级用户默认只看本分行（除非显式 ?branch= 覆盖）
+  applyBranchScope(where, session, sp.branch);
   // 统计分支/日期范围内的各 status 数量（不含当前 status 过滤，供筛选条显示）+ 总列表
   const countWhere = { ...where };
   delete countWhere.status;

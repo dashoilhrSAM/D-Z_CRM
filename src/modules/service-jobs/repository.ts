@@ -32,7 +32,7 @@ export type JobRow = Prisma.ServiceJobGetPayload<{
 }>;
 
 export interface IJobRepository {
-  list(client?: DbLike): Promise<JobRow[]>;
+  list(where?: Prisma.ServiceJobWhereInput, client?: DbLike): Promise<JobRow[]>;
   getById(id: string, client?: DbLike): Promise<JobFull | null>;
   getByNumber(jobNumber: string, client?: DbLike): Promise<JobRow | null>;
   create(data: Prisma.ServiceJobUncheckedCreateInput, client?: DbLike): Promise<JobFull>;
