@@ -18,7 +18,7 @@ export interface QrFlags {
 /**
  * QR-001..003 设置区块：三个独立开关 + 门店 QR 展示。
  */
-export function QrSettings({ orgId, flags }: { orgId: string; flags: QrFlags }) {
+export function QrSettings({ orgId, flags, showToggles = true }: { orgId: string; flags: QrFlags; showToggles?: boolean }) {
   const router = useRouter();
   const lang = useLang();
   const [pending, start] = useTransition();
@@ -55,26 +55,28 @@ export function QrSettings({ orgId, flags }: { orgId: string; flags: QrFlags }) 
         <QrCode className="h-4 w-4 text-primary" />
         <h2 className="font-semibold">{t("qr-settings.title", lang)}</h2>
       </div>
-      <div className="space-y-2.5">
-        {rows.map((r) => (
-          <label key={r.key} className="flex items-center justify-between gap-3 rounded-xl border p-3">
-            <div>
-              <div className="text-sm font-medium">{r.label}</div>
-              <div className="text-[11px] text-muted-foreground">{r.desc}</div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={local[r.key]}
-              disabled={pending}
-              onClick={() => toggle(r.key, !local[r.key])}
-              className={"relative h-6 w-11 shrink-0 rounded-full transition-colors " + (local[r.key] ? "bg-primary" : "bg-muted")}
-            >
-              <span className={"absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform " + (local[r.key] ? "translate-x-5" : "translate-x-0.5")} />
-            </button>
-          </label>
-        ))}
-      </div>
+      {showToggles && (
+        <div className="space-y-2.5">
+          {rows.map((r) => (
+            <label key={r.key} className="flex items-center justify-between gap-3 rounded-xl border p-3">
+              <div>
+                <div className="text-sm font-medium">{r.label}</div>
+                <div className="text-[11px] text-muted-foreground">{r.desc}</div>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={local[r.key]}
+                disabled={pending}
+                onClick={() => toggle(r.key, !local[r.key])}
+                className={"relative h-6 w-11 shrink-0 rounded-full transition-colors " + (local[r.key] ? "bg-primary" : "bg-muted")}
+              >
+                <span className={"absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform " + (local[r.key] ? "translate-x-5" : "translate-x-0.5")} />
+              </button>
+            </label>
+          ))}
+        </div>
+      )}
       {local.enableWorkshopQr && (
         <div className="mt-4 flex justify-center">
           <QrToggle value={workshopQrUrl(orgId)} label={t("qr-settings.workshop.label", lang)} defaultShow={false} size={96} />

@@ -54,7 +54,10 @@ export default async function SettingsPage() {
           <ServiceTypeManager serviceTypes={serviceTypes.map((s) => ({ id: s.id, name: s.name, category: s.category, durationMin: s.durationMin, priceSen: s.priceSen, active: s.active }))} />
         </>
       ) : (
-        myBranch && <MyBranchSettings branch={{ id: myBranch.id, name: myBranch.name, city: myBranch.city, phone: myBranch.phone, address: myBranch.address, operatingHours: myBranch.operatingHours, appointmentCapacity: myBranch.appointmentCapacity }} />
+        <>
+          {myBranch && <MyBranchSettings branch={{ id: myBranch.id, name: myBranch.name, city: myBranch.city, phone: myBranch.phone, address: myBranch.address, operatingHours: myBranch.operatingHours, appointmentCapacity: myBranch.appointmentCapacity }} />}
+          <QrSettings orgId={org!.qrToken ?? org!.id} flags={{ enableMotorcycleQr: org!.enableMotorcycleQr, enableRiderProfileQr: org!.enableRiderProfileQr, enableWorkshopQr: org!.enableWorkshopQr }} showToggles={false} />
+        </>
       )}
 
       <div>
