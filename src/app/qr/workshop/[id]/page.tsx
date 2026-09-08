@@ -13,14 +13,15 @@ export const dynamic = "force-dynamic";
  * QR 落地页 C（QR-003 门店码）：Rider 扫码 → 门店资料 + 「确认进入」绑定当前服务门店。
  * Deep link：/qr/workshop/<Organisation.id>
  */
-export default async function QrWorkshopPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function QrWorkshopPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ branch?: string }> }) {
   const { id } = await params;
+  const { branch: branchParam } = await searchParams;
   const lang = await getLang();
-  // QR 编码 qrToken（不可枚举）；兼容旧 id 直查
+  // QR 编码 qrToken（不可枚举）；兼容旧 id 直查；?branch= 指定某分行（per-branch 门店码）
   const org = await db.organisation.findFirst({ where: { OR: [{ qrToken: id }, { id }] }, include: { branches: true } });
   if (!org) notFound();
   const customer = await getRiderCustomer();
-  const mainBranch = org.branches.find((b) => b.isMain) ?? org.branches[0];
+  const mainBranch = (branchParam ? org.branches.find((b) => b.id === branchParam) : undefined) ?? org.branches.find((b) => b.isMain) ?? org.branches[0];
 
   let hours: Record<string, string> = {};
   try { hours = org.operatingHours ? JSON.parse(org.operatingHours) : {}; } catch {}

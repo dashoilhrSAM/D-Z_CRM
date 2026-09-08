@@ -1,11 +1,13 @@
 import Link from "next/link";
-import { Users, CalendarClock, Bot, Star, Plug, ShieldCheck, FileUp, MessageSquare, Code2 } from "lucide-react";
+import { Users, CalendarClock, Bot, Star, Plug, ShieldCheck, FileUp, MessageSquare, Code2, QrCode } from "lucide-react";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { OrgProfileForm, BranchManager, ServiceTypeManager, LostReasonsEditor, MyBranchSettings } from "@/components/workshop/settings-forms";
 import { isOrgLevelRole } from "@/lib/branch-scope";
 import { QrSettings } from "@/components/workshop/qr-settings";
 import { getLang } from "@/lib/get-lang";
+import { QrToggle } from "@/components/shared/qr-toggle";
+import { workshopQrUrl } from "@/lib/qr";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -50,6 +52,21 @@ export default async function SettingsPage() {
             <LostReasonsEditor current={org!.lostReasons ?? "[]"} />
           </div>
           <QrSettings orgId={org!.qrToken ?? org!.id} flags={{ enableMotorcycleQr: org!.enableMotorcycleQr, enableRiderProfileQr: org!.enableRiderProfileQr, enableWorkshopQr: org!.enableWorkshopQr }} />
+          <div className="rounded-2xl border bg-card p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <QrCode className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold">{t("qr-settings.branch-qrs", lang)}</h2>
+            </div>
+            {branches.length === 0 && <p className="text-sm text-muted-foreground">暂无分店 No branches</p>}
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {branches.map((b) => (
+                <div key={b.id} className="flex flex-col items-center gap-2 rounded-xl border p-3">
+                  <div className="text-center text-sm font-medium">{b.name}</div>
+                  <QrToggle value={workshopQrUrl(org!.qrToken ?? org!.id, b.id)} label={b.name} defaultShow={false} size={88} />
+                </div>
+              ))}
+            </div>
+          </div>
           <BranchManager branches={branches.map((b) => ({ id: b.id, name: b.name, city: b.city, phone: b.phone, address: b.address, isMain: b.isMain, operatingHours: b.operatingHours, appointmentCapacity: b.appointmentCapacity }))} />
           <ServiceTypeManager serviceTypes={serviceTypes.map((s) => ({ id: s.id, name: s.name, category: s.category, durationMin: s.durationMin, priceSen: s.priceSen, active: s.active }))} />
         </>
