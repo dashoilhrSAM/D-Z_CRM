@@ -2239,6 +2239,12 @@ export const DICT: Dict = {
   "package.save": { en: "Save package", zh: "保存配套", ms: "Simpan pakej" },
 
   "staff.subtitle": { en: "Add staff and manage who can access the workshop.", zh: "添加员工并管理谁可访问车间。", ms: "Tambah staf dan uruskan siapa yang boleh mengakses bengkel." },
+  "staff.edit": { en: "Edit", zh: "编辑", ms: "Sunting" },
+  "staff.save": { en: "Save", zh: "保存", ms: "Simpan" },
+  "staff.saved": { en: "Staff updated", zh: "员工已更新", ms: "Staf dikemas kini" },
+  "staff.reset-pw": { en: "Reset password", zh: "重置密码", ms: "Set semula kata laluan" },
+  "staff.pw-placeholder": { en: "New password (min 6 chars)", zh: "新密码（至少6位）", ms: "Kata laluan baru (min 6 aksara)" },
+  "staff.pw-reset": { en: "Password reset", zh: "密码已重置", ms: "Kata laluan diset semula" },
   "staff.add-staff": { en: "Add Staff", zh: "添加员工", ms: "Tambah Staf" },
   "staff.add-member-title": { en: "Add team member", zh: "添加团队成员", ms: "Tambah Ahli Pasukan" },
   "staff.label-role": { en: "Role", zh: "角色", ms: "Peranan" },
