@@ -2090,6 +2090,7 @@ export const DICT: Dict = {
   "qr-settings.workshop.desc": { en: "Shop QR — riders scan to check in at this workshop", zh: "门店二维码——车手扫码在此门店签到", ms: "QR kedai — penunggang imbas untuk daftar masuk di bengkel ini" },
   "qr-settings.saved": { en: "QR settings saved", zh: "QR 设置已保存", ms: "Tetapan QR disimpan" },
   "qr-settings.failed": { en: "Failed to save QR settings", zh: "保存 QR 设置失败", ms: "Gagal menyimpan tetapan QR" },
+  "qr-settings.branch-qrs": { en: "Branch QR Codes", zh: "分店二维码", ms: "Kod QR Cawangan" },
   "recommendation.add": { en: "ADD", zh: "添加", ms: "TAMBAH" },
   "recommendation.skip": { en: "SKIP", zh: "跳过", ms: "LANGKAU" },
   "recommendation.added": { en: "Added to job", zh: "已添加到工单", ms: "Ditambah ke kerja" },
