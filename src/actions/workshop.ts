@@ -10,6 +10,8 @@ import { inventoryService } from "@/modules/inventory/service";
 import { quotationService } from "@/modules/quotations/service";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { createClient } from "@supabase/supabase-js";
 
 export async function createJob(input: {
@@ -21,10 +23,21 @@ export async function createJob(input: {
   bookingId?: string;
 }) {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  // strict branch isolation: create the job in the current user's branch (org-level falls back to main)
+  const session = await getSessionUser();
+  const branchScope = scopedBranchId(session);
+  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
+  const branchId = branch!.id;
+  // the mechanic must belong to the job's branch (no cross-branch assignment)
+  if (input.mechanicId) {
+    const mech = await db.user.findUnique({ where: { id: input.mechanicId }, select: { branchId: true } });
+    if (mech && mech.branchId && mech.branchId !== branchId) {
+      throw new Error("Mechanic belongs to a different branch.");
+    }
+  }
   const isRepair = input.type === "REPAIR";
   const job = await jobService.create({
-    branchId: branch!.id,
+    branchId,
     customerId: input.customerId,
     motorcycleId: input.motorcycleId,
     mileage: input.mileage,
@@ -88,6 +101,13 @@ export async function assignMechanic(id: string, mechanicId: string | null) {
     const q = await db.quotation.findUnique({ where: { jobId: id } });
     const needsQuote = before?.type === "REPAIR" || !!q;
     if (needsQuote && (!q || q.status !== "APPROVED")) return { ok: false, error: "Quotation must be approved by the customer before assigning a mechanic." };
+    // strict branch isolation: the mechanic must belong to this job's branch
+    if (before?.branchId) {
+      const mech = await db.user.findUnique({ where: { id: mechanicId }, select: { branchId: true } });
+      if (mech && mech.branchId && mech.branchId !== before.branchId) {
+        return { ok: false, error: "Mechanic belongs to a different branch." };
+      }
+    }
   }
   await jobService.assignMechanic(id, mechanicId);
   // 给被指派技师发一条站内通知（mechanic app alerts feed）
@@ -193,8 +213,14 @@ export async function updateJobDetails(input: {
   if (input.mileage !== undefined) data.mileage = input.mileage;
   if (input.customerRequest !== undefined) data.customerRequest = input.customerRequest || null;
   if (input.mechanicId !== undefined) {
-    if (input.mechanicId) data.mechanic = { connect: { id: input.mechanicId } };
-    else data.mechanic = { disconnect: true };
+    if (input.mechanicId) {
+      // strict branch isolation: mechanic must belong to the job's branch
+      const mech = await db.user.findUnique({ where: { id: input.mechanicId }, select: { branchId: true } });
+      if (mech && mech.branchId && job.branchId && mech.branchId !== job.branchId) {
+        return { ok: false, error: "Mechanic belongs to a different branch." };
+      }
+      data.mechanic = { connect: { id: input.mechanicId } };
+    } else data.mechanic = { disconnect: true };
   }
   await db.serviceJob.update({ where: { id: input.jobId }, data });
   // audit: record mileage edits made while editing the job (hardening flow)
