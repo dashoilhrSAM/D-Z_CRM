@@ -9,6 +9,8 @@
  * 注意：branch 级角色若无 branchId（misconfig），回退 null（即不加 branch 过滤，等同 org 级），
  * 避免锁死数据；新建/分配员工时应确保 branchId 有值。
  */
+import type { Prisma, Role } from "@prisma/client";
+
 const ORG_LEVEL_ROLES = new Set(["SUPER_ADMIN", "OWNER", "HEAD_OFFICE_ADMIN"]);
 
 export type BranchScopeSession = { role: string; branchId: string | null | undefined };
@@ -40,4 +42,15 @@ export function applyBranchScope<T extends Record<string, unknown>>(
     (where as Record<string, unknown>).branchId = explicitBranch;
   }
   return where;
+}
+
+/**
+ * Branch-scoped where for listing assignable staff (mechanics / managers) — strict isolation.
+ * Org-level roles → all branches; branch-level roles → only their own branch's staff.
+ * Used by the mechanic-assignment dropdowns / board so a KL user never sees (or can assign)
+ * a Testing-branch mechanic, and vice versa.
+ */
+export function scopedStaffWhere(session: BranchScopeSession, roles: readonly Role[]): Prisma.UserWhereInput {
+  const id = scopedBranchId(session);
+  return { role: { in: [...roles] }, active: true, ...(id ? { branchId: id } : {}) };
 }

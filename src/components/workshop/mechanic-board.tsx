@@ -38,7 +38,7 @@ export function MechanicBoard({ mechanics, initialMechanicId, ownerView, allMech
   mechanics: MechanicSummary[];
   initialMechanicId: string;
   ownerView: boolean;
-  allMechanics?: { id: string; name: string }[];
+  allMechanics?: { id: string; name: string; branchName?: string | null }[];
 }) {
   const router = useRouter();
   const lang = useLang();
@@ -129,7 +129,7 @@ export function MechanicBoard({ mechanics, initialMechanicId, ownerView, allMech
                 >
                   <option value="">{t("ws.mech.unassigned", lang)}</option>
                   {allMechanics.map((m) => (
-                    <option key={m.id} value={m.id}>{m.name}</option>
+                    <option key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</option>
                   ))}
                 </select>
               </div>
