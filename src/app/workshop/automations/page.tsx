@@ -15,9 +15,10 @@ const TRIGGER_LABEL: Record<string, string> = {
 export default async function AutomationsPage() {
   const lang = await getLang();
   const org = await db.organisation.findFirst();
-  const [rules, executions] = await Promise.all([
+  const [rules, executions, templates] = await Promise.all([
     db.automationRule.findMany({ where: { organisationId: org!.id }, orderBy: { createdAt: "desc" }, include: { executions: { orderBy: { executedAt: "desc" }, take: 5 } } }),
     db.automationExecution.findMany({ orderBy: { executedAt: "desc" }, take: 20, include: { rule: { select: { name: true } } } }),
+    db.messageTemplate.findMany({ where: { organisationId: org!.id }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   return (
     <div className="space-y-5">
@@ -25,7 +26,7 @@ export default async function AutomationsPage() {
         <h1 className="text-2xl font-bold">{t("autom.title", lang)}</h1>
         <p className="text-sm text-muted-foreground">{t("autom.subtitle", lang)}</p>
       </div>
-      <AutomationManager />
+      <AutomationManager templates={templates} />
       <div className="rounded-xl border bg-card divide-y">
         {rules.map((r) => (
           <div key={r.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">
