@@ -23,7 +23,7 @@ export interface EditJobData {
   motorcycleType: string;
   items: { id: string; description: string; kind: "item" | "part"; unitPriceSen: number; status: string }[];
 }
-export interface MechanicOption { id: string; name: string }
+export interface MechanicOption { id: string; name: string; branchName?: string | null }
 
 export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics: MechanicOption[] }) {
   const router = useRouter();
@@ -90,7 +90,7 @@ export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics:
               <SelectTrigger className="mt-1.5"><SelectValue>{(v) => (v === "none" ? t("job-form.unassigned", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.unassigned", lang))}</SelectValue></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">{t("job-form.unassigned", lang)}</SelectItem>
-                {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>

@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { MechanicBoard, type BoardJob, type MechanicSummary } from "@/components/workshop/mechanic-board";
 import { getLang } from "@/lib/get-lang";
-import { scopedBranchId } from "@/lib/branch-scope";
+import { scopedBranchId, scopedStaffWhere } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { PageTransition } from "@/components/shared/page-transition";
 
@@ -36,7 +36,7 @@ export default async function MechanicPage() {
   }
 
   // all active mechanics (0-job mechanics still appear), plus unassigned bucket
-  const allMechanics = await db.user.findMany({ where: { role: "MECHANIC", active: true }, select: { id: true, name: true }, orderBy: { name: "asc" } });
+  const allMechanics = (await db.user.findMany({ where: scopedStaffWhere(session, ["MECHANIC"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } })).map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
   const byId = new Map<string, { id: string; name: string; jobs: BoardJob[] }>();
   for (const m of allMechanics) byId.set(m.id, { id: m.id, name: m.name, jobs: [] });
   for (const [id, jobs] of byMechanic) {

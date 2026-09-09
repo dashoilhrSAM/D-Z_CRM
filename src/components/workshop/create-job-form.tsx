@@ -18,7 +18,7 @@ import { t, tpl } from "@/lib/i18n";
 export interface CustomerOption { id: string; name: string; phone: string | null }
 export interface MotorcycleOption { id: string; customerId: string; brand: string; model: string; plate: string; year: number; type: string; currentMileage: number }
 export interface PackageOption { id: string; name: string; tier: string; priceSen: number; isBestValue?: boolean; description?: string | null }
-export interface MechanicOption { id: string; name: string }
+export interface MechanicOption { id: string; name: string; branchName?: string | null }
 export interface Rec { kind: string; description: string; reason: string; script: string; priceSen: number; productId?: string; unitCostSen?: number }
 
 export function CreateJobForm({
@@ -225,7 +225,7 @@ export function CreateJobForm({
             <SelectTrigger className="mt-1.5 max-w-sm"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">{t("job-form.assign-later", lang)}</SelectItem>
-              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</SelectItem>)}
             </SelectContent>
           </Select>
         </section>
