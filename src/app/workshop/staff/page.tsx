@@ -19,7 +19,7 @@ export default async function StaffPage() {
   return (
     <div>
       <PageHeader title={t("ws.staff.title", lang)} subtitle={t("ws.staff.subtitle", lang).replace("{n}", String(staff.length))} />
-      <StaffManager staff={staff.map((s) => ({ id: s.id, name: s.name, role: s.role, phone: s.phone, email: s.email, active: s.active, jobCount: s._count.jobs }))} />
+      <StaffManager canManage={["SUPER_ADMIN","OWNER","HEAD_OFFICE_ADMIN","MANAGER","MECHANIC"].includes(session.role)} staff={staff.map((s) => ({ id: s.id, name: s.name, role: s.role, phone: s.phone, email: s.email, active: s.active, jobCount: s._count.jobs }))} />
     </div>
   );
 }

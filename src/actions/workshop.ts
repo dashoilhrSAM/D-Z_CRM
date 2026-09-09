@@ -9,6 +9,7 @@ import { crmService } from "@/modules/crm/service";
 import { inventoryService } from "@/modules/inventory/service";
 import { quotationService } from "@/modules/quotations/service";
 import { db } from "@/lib/db";
+import { getSessionUser } from "@/lib/session-user";
 import { audit } from "@/lib/auth/audit";
 import { createClient } from "@supabase/supabase-js";
 
@@ -287,9 +288,15 @@ export async function addAiRecommendation(input: {
   return { ok: true, id: (r as { id: string }).id };
 }
 
+const STAFF_MANAGER_ROLES = ["SUPER_ADMIN", "OWNER", "HEAD_OFFICE_ADMIN", "MANAGER", "MECHANIC"];
+
 export async function createStaff(input: { name: string; role: string; phone?: string; email?: string; password?: string }) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to manage staff");
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  // 分行归属：优先创建者所在分行（branch 级 manager/mechanic 建到本分行，否则 manager 看不到）；org 级无分支回退主店
+  const branch = (session.branchId ? await db.branch.findUnique({ where: { id: session.branchId } }) : null)
+    ?? await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
   // 若提供 email + password：创建 Supabase auth 账号（staff 可登录），并绑定 User.authId。
   let authId: string | null = null;
   const email = (input.email ?? "").trim();
@@ -329,4 +336,34 @@ export async function toggleStaffActive(userId: string) {
   await db.user.update({ where: { id: userId }, data: { active: !u?.active } });
   revalidatePath("/", "layout");
   return { ok: true, active: !u?.active };
+}
+export async function updateStaff(userId: string, input: { name?: string; role?: string; phone?: string; email?: string; active?: boolean }) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to edit staff");
+  const u = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
+  if (!u) throw new Error("Staff not found");
+  const data: Record<string, unknown> = {};
+  if (input.name !== undefined) data.name = input.name.trim();
+  if (input.role !== undefined) data.role = input.role as never;
+  if (input.phone !== undefined) data.phone = input.phone || null;
+  if (input.email !== undefined) data.email = input.email || null;
+  if (input.active !== undefined) data.active = input.active;
+  await db.user.update({ where: { id: userId }, data });
+  revalidatePath("/", "layout");
+  return { ok: true };
+}
+
+/** 重置某员工登录密码（用 Supabase admin，仅支持有 authId 的账号）。密码只能重置，不能明文查看（存的是哈希）。 */
+export async function resetStaffPassword(userId: string, password: string) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to reset password");
+  if (password.length < 6) throw new Error("Password must be at least 6 characters");
+  const u = await db.user.findUnique({ where: { id: userId }, select: { id: true, authId: true } });
+  if (!u) throw new Error("Staff not found");
+  if (!u.authId) throw new Error("This staff has no login account yet");
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { error } = await supabase.auth.admin.updateUserById(u.authId, { password });
+  if (error) throw new Error("Failed to reset password: " + error.message);
+  revalidatePath("/", "layout");
+  return { ok: true };
 }

@@ -102,7 +102,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
   {
     section: "STAFF",
     items: [
-      { key: "staff", label: "Staff", labelKey: "nav.staff", href: "/workshop/staff", icon: Users2, module: "USERS", access: ["OWNER"] },
+      { key: "staff", label: "Staff", labelKey: "nav.staff", href: "/workshop/staff", icon: Users2, module: "USERS", access: ["OWNER", "MECHANIC"] },
       { key: "kpi", label: "KPI Board", labelKey: "nav.kpi", href: "/workshop/staff/kpi", icon: Gauge, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
       { key: "settlements", label: "Settlements", labelKey: "nav.settlements", href: "/workshop/settlements", icon: Wallet, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
       { key: "attendance", label: "Attendance", labelKey: "nav.attendance", href: "/workshop/attendance", icon: Clock, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
