@@ -138,8 +138,16 @@ export async function sendQuotation(jobId: string) {
 export async function bookingAction(id: string, action: "CONFIRMED" | "RESCHEDULED" | "CANCELLED" | "CHECKED_IN" | "NO_SHOW", extra?: { date?: string; timeSlot?: string; mileage?: number; packageId?: string; mechanicId?: string }) {
   if (action === "CHECKED_IN") {
     const org = await db.organisation.findFirst();
-    const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+    const session = await getSessionUser();
+    const branchScope = scopedBranchId(session);
+    const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
     const mileage = extra?.mileage ?? 0;
+    if (extra?.mechanicId) {
+      const mech = await db.user.findUnique({ where: { id: extra.mechanicId }, select: { branchId: true } });
+      if (mech && mech.branchId && mech.branchId !== branch!.id) {
+        return { ok: false as const, error: "Mechanic belongs to a different branch." };
+      }
+    }
     const result = await bookingService.checkIn(id, {
       mileage,
       branchId: branch!.id,
@@ -187,7 +195,9 @@ export async function sendReminder(customerId: string, motorcycleId: string, nex
 
 export async function createPurchaseOrder(input: { supplierId: string; items: { productId: string; quantity: number; unitCostSen: number }[] }) {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const session = await getSessionUser();
+  const branchScope = scopedBranchId(session);
+  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
   await inventoryService.createPurchaseOrder({ branchId: branch!.id, supplierId: input.supplierId, items: input.items });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -195,7 +205,9 @@ export async function createPurchaseOrder(input: { supplierId: string; items: { 
 
 export async function receivePurchaseOrder(poId: string) {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const session = await getSessionUser();
+  const branchScope = scopedBranchId(session);
+  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
   const result = await inventoryService.receivePurchaseOrder(poId, branch!.id);
   revalidatePath("/", "layout");
   return { ok: true, receivedAt: result.receivedAt };
@@ -315,7 +327,10 @@ export async function addAiRecommendation(input: {
 
 export async function createStaff(input: { name: string; role: string; phone?: string; email?: string; password?: string }) {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const session = await getSessionUser();
+  // strict branch isolation: assign the new staff to the creator's branch (org-level falls back to main)
+  const branch = (session.branchId ? await db.branch.findUnique({ where: { id: session.branchId } }) : null)
+    ?? await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
   // 若提供 email + password：创建 Supabase auth 账号（staff 可登录），并绑定 User.authId。
   let authId: string | null = null;
   const email = (input.email ?? "").trim();
