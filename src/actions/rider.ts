@@ -5,6 +5,7 @@ import { generateQrToken } from "@/lib/qr-token";
 import { bookingService } from "@/modules/bookings/service";
 import { inspectionService } from "@/modules/inspections/service";
 import { quotationService } from "@/modules/quotations/service";
+import { messagingModule } from "@/modules/messaging/service";
 import { db } from "@/lib/db";
 import { audit } from "@/lib/auth/audit";
 import { fmtKM } from "@/lib/format";
@@ -82,19 +83,8 @@ export async function submitReview(input: { customerId: string; branchId: string
   // thank-you message after a review (customer appreciation loop)
   if (customer) {
     try {
-      const org = await db.organisation.findFirst();
-      await db.message.create({
-        data: {
-          organisationId: org!.id,
-          branchId: input.branchId,
-          customerId: input.customerId,
-          direction: "OUT",
-          channel: "WHATSAPP",
-          body: "Thank you " + customer.name.split(" ")[0] + " for your " + Math.min(5, Math.max(1, Math.round(input.rating))) + "★ review! We really appreciate it — see you at the next service. 🏍️",
-          status: "SENT",
-          referenceType: "REVIEW",
-        },
-      });
+      const body = "Thank you " + customer.name.split(" ")[0] + " for your " + Math.min(5, Math.max(1, Math.round(input.rating))) + "★ review! We really appreciate it — see you at the next service. 🏍️";
+      await messagingModule.sendDirect({ customerId: input.customerId, body, referenceType: "REVIEW" });
     } catch { /* messaging must never break review submission */ }
   }
   revalidatePath("/", "layout");

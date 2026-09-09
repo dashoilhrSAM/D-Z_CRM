@@ -1968,6 +1968,8 @@ export const DICT: Dict = {
   "autom.action-send-message": { en: "Send message", zh: "发送消息", ms: "Hantar mesej" },
   "autom.action-schedule-reminder": { en: "Schedule reminder", zh: "设置提醒", ms: "Jadual peringatan" },
   "autom.action-update-tags": { en: "Update tags", zh: "更新标签", ms: "Kemas kini tag" },
+  "autom.template": { en: "Message template", zh: "消息模板", ms: "Templat mesej" },
+  "autom.template-placeholder": { en: "Select a template", zh: "选择模板", ms: "Pilih templat" },
   "autom.task-title": { en: "Task title", zh: "任务标题", ms: "Tajuk tugas" },
   "autom.due-days": { en: "Due (days)", zh: "到期 (天)", ms: "Tamat (hari)" },
   "autom.create": { en: "Create", zh: "创建", ms: "Cipta" },

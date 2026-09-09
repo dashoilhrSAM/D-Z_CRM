@@ -4,6 +4,7 @@ import type { BookingSource, BookingStatus, PrismaClient } from "@prisma/client"
 import { db } from "@/lib/db";
 import { jobService } from "@/modules/service-jobs/service";
 import { quotationService } from "@/modules/quotations/service";
+import { messagingModule } from "@/modules/messaging/service";
 import type { DbLike } from "@/modules/customers/repository";
 
 export type BookingStatusInput = BookingStatus;
@@ -73,7 +74,7 @@ export class BookingService {
       // AUTO-008: BOOKING_CREATED trigger
       try {
         const { automationModule } = await import("@/modules/automation/service");
-        await automationModule.run(org.id, "BOOKING_CREATED", { customerId: input.customerId, dedupeKey: String((created as { id: string }).id), bookingId: (created as { id: string }).id, motorcycleId: input.motorcycleId, relatedType: "BOOKING", relatedId: (created as { id: string }).id });
+        await automationModule.run(org.id, "BOOKING_CREATED", { customerId: input.customerId, dedupeKey: String((created as { id: string }).id), bookingId: (created as { id: string }).id, motorcycleId: input.motorcycleId, relatedType: "BOOKING", relatedId: (created as { id: string }).id, branchId: input.branchId });
       } catch { /* automation must never break booking */ }
     }
     return created;
@@ -90,19 +91,8 @@ export class BookingService {
       try {
         const booking = await db.booking.findUnique({ where: { id }, include: { customer: true, motorcycle: true, branch: true } });
         if (booking) {
-          await db.message.create({
-            data: {
-              organisationId: booking.branch.organisationId,
-              branchId: booking.branchId,
-              customerId: booking.customerId,
-              direction: "OUT",
-              channel: "WHATSAPP",
-              body: "Hi " + booking.customer.name + ", your " + booking.serviceType + " booking for " + booking.motorcycle.brand + " " + booking.motorcycle.model + " at " + booking.branch.name + " is confirmed for " + booking.date.toISOString().slice(0, 10) + " " + booking.timeSlot + ". Ref: " + booking.id.slice(-6).toUpperCase(),
-              status: "SENT",
-              referenceType: "BOOKING",
-              referenceId: booking.id,
-            },
-          });
+          const body = "Hi " + booking.customer.name + ", your " + booking.serviceType + " booking for " + booking.motorcycle.brand + " " + booking.motorcycle.model + " at " + booking.branch.name + " is confirmed for " + booking.date.toISOString().slice(0, 10) + " " + booking.timeSlot + ". Ref: " + booking.id.slice(-6).toUpperCase();
+          await messagingModule.sendDirect({ customerId: booking.customerId, body, referenceType: "BOOKING", referenceId: booking.id, branchId: booking.branchId });
         }
       } catch { /* messaging must never break the transition */ }
     }

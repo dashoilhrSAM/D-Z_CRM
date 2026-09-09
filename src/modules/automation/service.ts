@@ -1,5 +1,17 @@
 // Automation engine — event-triggered rules with logged executions (AUTO-001..024).
 import { db } from "@/lib/db";
+import { messagingModule, type TemplateVars } from "@/modules/messaging/service";
+
+/** Extract scalar (string/number/boolean) values from a context so template tokens resolve safely. */
+function scalarVars(ctx: Record<string, unknown>): TemplateVars {
+  const out: TemplateVars = {};
+  for (const [k, v] of Object.entries(ctx)) {
+    if (typeof v === "string" || typeof v === "number") out[k] = v;
+    else if (typeof v === "boolean") out[k] = String(v);
+    else if (v === null) out[k] = null;
+  }
+  return out;
+}
 
 export interface AutomationAction {
   type: "CREATE_TASK" | "ASSIGN_LEAD" | "SEND_MESSAGE" | "SCHEDULE_REMINDER" | "UPDATE_TAGS";
@@ -59,17 +71,27 @@ export const automationModule = {
         break;
       }
       case "SEND_MESSAGE": {
-        if (ctx.customerId) {
-          const customer = await db.customer.findUnique({ where: { id: String(ctx.customerId) } });
-          const template = a.templateId ? await db.messageTemplate.findUnique({ where: { id: String(a.templateId) } }) : null;
-          if (customer && template) {
-            const body = template.body.replace(/\{(\w+)\}/g, (m, k: string) => {
-              const v = (ctx as Record<string, unknown>)[k];
-              return v == null ? m : String(v);
-            });
-            await db.message.create({
-              data: { organisationId: org.id, branchId: customer.branchId, customerId: customer.id, direction: "OUT", channel: "WHATSAPP", body, status: "SENT", referenceType: "AUTOMATION" },
-            });
+        // AUTO: deliver via the real MessagingProvider (mock in dev / Meta in prod),
+        // honoring marketing opt-out and persisting the real status + externalId.
+        const customerId = ctx.customerId ? String(ctx.customerId) : null;
+        const templateId = a.templateId ? String(a.templateId) : null;
+        if (customerId && templateId) {
+          const vars: TemplateVars = {
+            ...scalarVars(ctx),
+            ...((a.vars as TemplateVars | undefined) ?? {}),
+          };
+          const out = await messagingModule.sendFromTemplate({
+            customerId,
+            templateId,
+            vars,
+            isMarketing: Boolean(a.isMarketing),
+            jobId: ctx.jobId ? String(ctx.jobId) : undefined,
+            branchId: ctx.branchId ? String(ctx.branchId) : undefined,
+            referenceType: "AUTOMATION",
+          });
+          if (!out.sent) {
+            // provider delivery failed — record the execution as FAILED for visibility
+            throw new Error("Automation message delivery failed");
           }
         }
         break;
