@@ -3,6 +3,7 @@ import { jobService } from "@/modules/service-jobs/service";
 import { inventoryService } from "@/modules/inventory/service";
 import { crmService } from "@/modules/crm/service";
 import { paymentProvider, messagingProvider, notificationProvider } from "@/providers";
+import { messagingModule } from "@/modules/messaging/service";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
 
 export interface CompletionResult {
@@ -23,7 +24,7 @@ export interface CompletionResult {
  */
 export class CompletionService {
   async complete(jobId: string): Promise<CompletionResult> {
-    return db.$transaction(async (tx) => {
+    const { result, notify } = await db.$transaction(async (tx) => {
       const job = await tx.serviceJob.findUnique({
         where: { id: jobId },
         include: {
@@ -39,13 +40,16 @@ export class CompletionService {
       if (!job) throw new Error("Job not found");
       if (job.status === "COMPLETED") {
         if (!job.invoice) throw new Error("Completed job has no invoice — data error");
-        // idempotent: return existing result
+        // idempotent: return existing result (no notification for an already-completed job)
         return {
-          jobId: job.id, jobNumber: job.jobNumber,
-          revenueSen: job.invoice.totalSen, cogsSen: 0, grossProfitSen: 0,
-          invoiceNumber: job.invoice.invoiceNumber,
-          nextServiceMileage: job.motorcycle.nextServiceMileage ?? 0,
-          nextServiceEstDate: job.motorcycle.nextServiceEstDate ?? new Date(),
+          result: {
+            jobId: job.id, jobNumber: job.jobNumber,
+            revenueSen: job.invoice.totalSen, cogsSen: 0, grossProfitSen: 0,
+            invoiceNumber: job.invoice.invoiceNumber,
+            nextServiceMileage: job.motorcycle.nextServiceMileage ?? 0,
+            nextServiceEstDate: job.motorcycle.nextServiceEstDate ?? new Date(),
+          },
+          notify: null,
         };
       }
       if (job.status === "CANCELLED") throw new Error("Cannot complete a cancelled job");
@@ -130,19 +134,17 @@ export class CompletionService {
       });
 
       // 5. Thank-you message + review request (§27.13-14) via providers
-      await tx.message.create({
-        data: {
-          organisationId: job.customer.organisationId,
-          branchId: job.branchId,
-          customerId: job.customerId,
-          jobId: job.id,
-          direction: "OUT",
-          channel: "WHATSAPP",
-          body: "Hi " + job.customer.name.split(" ")[0] + ", motosikal awak dah siap! Total " + "RM" + (subtotal / 100).toLocaleString() + ". Terima kasih — D&Z Smart Workshop.",
-          status: "SENT",
-          referenceType: "COMPLETION",
-        },
-      });
+      // 5. Capture the completion WhatsApp message — delivered AFTER the transaction commits
+      // via the real MessagingProvider (mock in dev / Meta in prod), so the provider call
+      // never blocks or rolls back the core completion workflow.
+      const notify = {
+        customerId: job.customerId,
+        orgId: job.customer.organisationId,
+        branchId: job.branchId,
+        body: "Hi " + job.customer.name.split(" ")[0] + ", motosikal awak dah siap! Total " + "RM" + (subtotal / 100).toLocaleString() + ". Terima kasih — D&Z Smart Workshop.",
+        jobId: job.id,
+        jobNumber: job.jobNumber,
+      };
       await tx.review.create({
         data: { branchId, customerId: job.customerId, jobId: job.id, status: "REQUESTED", requestedAt: new Date(), source: "APP" },
       });
@@ -199,10 +201,27 @@ export class CompletionService {
 
       const grossProfit = subtotal - cogs;
       return {
-        jobId: job.id, jobNumber: job.jobNumber, revenueSen: subtotal, cogsSen: cogs, grossProfitSen: grossProfit,
-        invoiceNumber, nextServiceMileage: nextMileage, nextServiceEstDate: nextDate,
+        result: {
+          jobId: job.id, jobNumber: job.jobNumber, revenueSen: subtotal, cogsSen: cogs, grossProfitSen: grossProfit,
+          invoiceNumber, nextServiceMileage: nextMileage, nextServiceEstDate: nextDate,
+        },
+        notify,
       };
     }, { timeout: 60000 });
+
+    // Post-commit side effects: deliver the completion WhatsApp message for real and run
+    // SERVICE_COMPLETED automations. Wrapped so a messaging/automation failure never
+    // breaks an already-completed job.
+    if (notify) {
+      try {
+        await messagingModule.sendDirect({ customerId: notify.customerId, body: notify.body, jobId: notify.jobId, referenceType: "COMPLETION", branchId: notify.branchId });
+      } catch { /* messaging must never break completion */ }
+      try {
+        const { automationModule } = await import("@/modules/automation/service");
+        await automationModule.run(notify.orgId, "SERVICE_COMPLETED", { customerId: notify.customerId, jobId: notify.jobId, jobNumber: notify.jobNumber, dedupeKey: notify.jobId, branchId: notify.branchId });
+      } catch { /* automation must never break completion */ }
+    }
+    return result;
   }
 }
 

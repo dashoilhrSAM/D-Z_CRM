@@ -13,24 +13,9 @@ export async function sendPosterToCustomers(posterId: string, customerIds: strin
   let skipped = 0;
   for (const cid of customerIds.slice(0, 50)) {
     try {
-      const customer = await db.customer.findUnique({ where: { id: cid } });
-      if (!customer) { skipped++; continue; }
-      // MSG-017: marketing opt-out
-      const consent = await db.customerConsent.findUnique({ where: { customerId: cid } });
-      if (consent && !consent.marketingOptIn) { skipped++; continue; }
-      const org = await db.organisation.findFirst();
-      await db.message.create({
-        data: {
-          organisationId: org!.id,
-          branchId: customer.branchId,
-          customerId: cid,
-          direction: "OUT",
-          channel: "WHATSAPP",
-          body: "Check out our latest: " + poster.title + " 🏍️ — " + base + poster.url,
-          status: "SENT",
-          referenceType: "POSTER",
-        },
-      });
+      const body = "Check out our latest: " + poster.title + " 🏍️ — " + base + poster.url;
+      // sendDirect applies the MSG-017 marketing opt-out guard internally (throws CUSTOMER_OPTED_OUT)
+      await messagingModule.sendDirect({ customerId: cid, body, referenceType: "POSTER", isMarketing: true });
       sent++;
     } catch { skipped++; }
   }

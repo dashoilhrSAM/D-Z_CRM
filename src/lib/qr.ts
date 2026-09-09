@@ -20,7 +20,7 @@ export function riderQrUrl(customerId: string): string {
   return base + QR_PATHS.rider + customerId;
 }
 
-export function workshopQrUrl(orgId: string): string {
+export function workshopQrUrl(orgId: string, branchId?: string): string {
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3002";
-  return base + QR_PATHS.workshop + orgId;
+  return base + QR_PATHS.workshop + orgId + (branchId ? "?branch=" + encodeURIComponent(branchId) : "");
 }

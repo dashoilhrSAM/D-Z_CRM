@@ -145,8 +145,6 @@ export async function runSeed(): Promise<Record<string, number>> {
   const branches = [];
   for (const [i, b] of ([
     { name: "D&Z Smart Workshop", city: "Kuala Lumpur", isMain: true },
-    { name: "D&Z Smart Workshop", city: "Shah Alam", isMain: false },
-    { name: "D&Z Smart Workshop", city: "Johor Bahru", isMain: false },
   ] as const).entries()) {
     branches.push(await prisma.branch.create({ data: { organisationId: org.id, name: b.name, city: b.city, isMain: b.isMain, phone: "03-78" + int(1000, 9999), address: "No. " + int(1, 99) + ", Jalan " + b.city.split(" ")[0] + " Utama" } }));
   }
@@ -209,13 +207,7 @@ export async function runSeed(): Promise<Record<string, number>> {
   for (const [name, sku] of PRODUCTS.map((p) => [p[0], p[1]] as [string, string])) {
     await prisma.inventory.create({ data: { branchId: kl.id, productId: bySku[sku], quantity: klQty[sku] ?? int(14, 60) } });
   }
-  // other branches: subset
-  for (const br of [branches[1], branches[2]]) {
-    for (let i = 0; i < PRODUCTS.length; i += 3) {
-      const p = PRODUCTS[i];
-      await prisma.inventory.create({ data: { branchId: br.id, productId: bySku[p[1]], quantity: int(6, 25) } });
-    }
-  }
+  // (other branches removed — only KL main)
   counts.products = PRODUCTS.length;
 
   // one DRAFT purchase order (demo: receive button on the PO page stocks these lines in)
@@ -294,7 +286,7 @@ export async function runSeed(): Promise<Record<string, number>> {
     const c = await prisma.customer.create({
       data: {
         qrToken: genQr(),
-        organisationId: org.id, branchId: pick([kl.id, kl.id, kl.id, branches[1].id, branches[2].id]),
+        organisationId: org.id, branchId: kl.id,
         name, phone: makePhone(),
         gender: pick(["M", "M", "M", "F", "F"]),
         joinedAt: joined,
