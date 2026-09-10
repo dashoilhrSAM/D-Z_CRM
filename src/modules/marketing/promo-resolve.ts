@@ -8,15 +8,23 @@ import { db } from "@/lib/db";
 import { bestPromoQuote, clampPercent, isPromoActive, type PricedLine, type PromoQuote } from "./promo";
 
 /**
- * When true, a booking is discounted by the best currently-active promo even if the
- * rider did not arrive through a campaign link. Set to false to only honour the
- * campaign a rider explicitly came through (i.e. ?campaign=<id>).
- *
- * Auto-apply matches what riders already see — the booking page shows the live promo
- * banner — but it does mean every booking during a promo window is discounted. Flip
- * this to false if the business wants opt-in-only discounting.
+ * Fallback when the organisation row cannot be read (fresh DB, migration in flight).
+ * The live value is owned by marketing via Organisation.promoAutoApply.
  */
-export const AUTO_APPLY_BEST_PROMO = true;
+export const AUTO_APPLY_BEST_PROMO_DEFAULT = true;
+
+/**
+ * Whether a booking is discounted by the best live promo even when the rider did not
+ * arrive through a campaign link.
+ *
+ * Marketing controls this from the Promotion Calendar ("Auto-apply promotions").
+ * On: every booking during a promo window is discounted. Off: only bookings that came
+ * through a campaign link (?campaign=<id>) are discounted.
+ */
+export async function isPromoAutoApplyEnabled(): Promise<boolean> {
+  const org = await db.organisation.findFirst({ select: { promoAutoApply: true } });
+  return org?.promoAutoApply ?? AUTO_APPLY_BEST_PROMO_DEFAULT;
+}
 
 /** Load the PROMO campaigns that could apply to this branch right now. */
 async function activePromosFor(branchId: string, now: Date) {
@@ -33,17 +41,21 @@ async function activePromosFor(branchId: string, now: Date) {
  * - An explicit `campaignId` (the rider followed a campaign link) wins, provided that
  *   campaign is still an active PROMO; otherwise it is ignored rather than silently
  *   discounting by some other campaign's rate.
- * - With no explicit campaign, the best active promo applies when
- *   AUTO_APPLY_BEST_PROMO is on.
+ * - With no explicit campaign, the best active promo applies only when the
+ *   organisation's promoAutoApply setting is on.
  */
 export async function resolvePromoForBooking(opts: {
   branchId: string;
   lines: PricedLine[];
   campaignId?: string | null;
   now?: Date;
+  /** Override the organisation setting (used by tests and by callers that already read it). */
+  autoApply?: boolean;
 }): Promise<PromoQuote | null> {
   const now = opts.now ?? new Date();
   if (opts.lines.length === 0) return null;
+
+  const autoApply = opts.autoApply ?? (await isPromoAutoApplyEnabled());
 
   if (opts.campaignId) {
     const campaign = await db.campaign.findUnique({
@@ -54,8 +66,8 @@ export async function resolvePromoForBooking(opts: {
     if (campaign && campaign.branchId === opts.branchId && isPromoActive(campaign, now)) {
       return bestPromoQuote(opts.lines, [campaign], now);
     }
-    if (!AUTO_APPLY_BEST_PROMO) return null;
-  } else if (!AUTO_APPLY_BEST_PROMO) {
+    if (!autoApply) return null;
+  } else if (!autoApply) {
     return null;
   }
 

@@ -9,6 +9,7 @@ import { PromoCalendarGrid, type CalendarCampaign } from "@/components/workshop/
 import { isPromoActive } from "@/modules/marketing/promo";
 import { buildAudienceWhere, rulesForCampaign } from "@/modules/marketing/audience";
 import { loadCampaignPerformance } from "@/modules/marketing/performance";
+import { PromoAutoApplyToggle } from "@/components/workshop/promo-auto-apply-toggle";
 import { formatRM } from "@/lib/money";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
@@ -85,6 +86,7 @@ export default async function MarketingCalendarPage() {
         ].join(" · ")}
         action={<CampaignForm />}
       />
+      <div className="mb-4"><PromoAutoApplyToggle enabled={org?.promoAutoApply ?? true} /></div>
       <div className="mb-5"><PromoCalendarGrid campaigns={calendarCampaigns} /></div>
       <div data-tut="calendar-list" className="space-y-2">
         {sorted.map((c) => {

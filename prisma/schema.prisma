@@ -52,6 +52,9 @@ model Organisation {
   enableMotorcycleQr Boolean @default(true)
   enableRiderProfileQr Boolean @default(true)
   enableWorkshopQr   Boolean  @default(true)
+  // MKT-013: when true, any booking during a live promo is discounted automatically,
+  // not just bookings that arrived through a campaign link. Marketing controls this.
+  promoAutoApply Boolean @default(true)
   createdAt     DateTime @default(now())
   branches      Branch[]
   users         User[]

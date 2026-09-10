@@ -1,18 +1,21 @@
 // MKT-013: promo must actually apply.
-// Regression for the state where the rider UI advertised "−20%" while booking and
+// Regression for the state where the rider UI advertised "-20%" while booking and
 // invoice both charged the full amount (bestPromoQuote existed but was never called).
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const { dbMock } = vi.hoisted(() => {
-  const dbMock = { campaign: { findMany: vi.fn(), findUnique: vi.fn() } };
+  const dbMock = {
+    campaign: { findMany: vi.fn(), findUnique: vi.fn() },
+    organisation: { findFirst: vi.fn() },
+  };
   return { dbMock };
 });
 
 vi.mock("@/lib/db", () => ({ db: dbMock }));
 
 import {
-  AUTO_APPLY_BEST_PROMO,
   discountForSubtotal,
+  isPromoAutoApplyEnabled,
   readPromoSnapshot,
   resolvePromoForBooking,
   toPromoSnapshot,
@@ -28,7 +31,10 @@ const promo = (over: Record<string, unknown> = {}) => ({
 });
 
 describe("resolvePromoForBooking", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dbMock.organisation.findFirst.mockResolvedValue({ promoAutoApply: true });
+  });
 
   it("honours the campaign the rider came through", async () => {
     dbMock.campaign.findUnique.mockResolvedValue(promo({ discountPercent: 20 }));
@@ -53,11 +59,10 @@ describe("resolvePromoForBooking", () => {
     expect(q?.campaignId).toBe("mine");
   });
 
-  it("applies the best active promo when no campaign link is present", async () => {
+  it("applies the best active promo when no campaign link is present and auto-apply is on", async () => {
     dbMock.campaign.findMany.mockResolvedValue([promo({ id: "a", discountPercent: 10 }), promo({ id: "b", discountPercent: 25 })]);
     const q = await resolvePromoForBooking({ branchId: "b1", lines: LINES, now });
     expect(q?.campaignId).toBe("b");
-    expect(AUTO_APPLY_BEST_PROMO).toBe(true);
   });
 
   it("returns null when nothing is live or there is nothing to price", async () => {
@@ -72,6 +77,37 @@ describe("resolvePromoForBooking", () => {
       promo({ id: "future", startDate: new Date("2026-10-01") }),
     ]);
     expect(await resolvePromoForBooking({ branchId: "b1", lines: LINES, now })).toBeNull();
+  });
+
+  describe("with the marketing toggle OFF (Organisation.promoAutoApply = false)", () => {
+    beforeEach(() => dbMock.organisation.findFirst.mockResolvedValue({ promoAutoApply: false }));
+
+    it("does NOT discount a booking that has no campaign link", async () => {
+      dbMock.campaign.findMany.mockResolvedValue([promo({ id: "live", discountPercent: 25 })]);
+      expect(await resolvePromoForBooking({ branchId: "b1", lines: LINES, now })).toBeNull();
+    });
+
+    it("still discounts a booking that came through a live campaign link", async () => {
+      dbMock.campaign.findUnique.mockResolvedValue(promo({ discountPercent: 20 }));
+      const q = await resolvePromoForBooking({ branchId: "b1", lines: LINES, campaignId: "c1", now });
+      expect(q?.campaignId).toBe("c1");
+    });
+  });
+});
+
+describe("isPromoAutoApplyEnabled", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("reads the organisation setting", async () => {
+    dbMock.organisation.findFirst.mockResolvedValue({ promoAutoApply: false });
+    expect(await isPromoAutoApplyEnabled()).toBe(false);
+    dbMock.organisation.findFirst.mockResolvedValue({ promoAutoApply: true });
+    expect(await isPromoAutoApplyEnabled()).toBe(true);
+  });
+
+  it("falls back to the default when no organisation exists", async () => {
+    dbMock.organisation.findFirst.mockResolvedValue(null);
+    expect(await isPromoAutoApplyEnabled()).toBe(true);
   });
 });
 

@@ -149,6 +149,19 @@ async function audienceCustomers(campaign: { audience: string | null; audienceRu
   });
 }
 
+/**
+ * MKT-013: marketing decides whether live promos auto-apply to every booking or only
+ * to bookings that arrived through a campaign link. Money-affecting, so it is an
+ * explicit opt-in toggle rather than a code constant.
+ */
+export async function setPromoAutoApply(enabled: boolean) {
+  const org = await db.organisation.findFirst();
+  if (!org) return { ok: false };
+  await db.organisation.update({ where: { id: org.id }, data: { promoAutoApply: enabled } });
+  revalidatePath("/", "layout");
+  return { ok: true, enabled };
+}
+
 /** MKT-005: how many customers a rule set currently matches (for the campaign editor). */
 export async function previewAudienceCount(rules: AudienceRules): Promise<number> {
   const org = await db.organisation.findFirst();

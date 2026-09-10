@@ -7,7 +7,7 @@ import { t, tpl } from "@/lib/i18n";
 import { db } from "@/lib/db";
 import { formatRM } from "@/lib/money";
 import { isPromoActive, type PromoCampaign } from "@/modules/marketing/promo";
-import { AUTO_APPLY_BEST_PROMO } from "@/modules/marketing/promo-resolve";
+import { isPromoAutoApplyEnabled } from "@/modules/marketing/promo-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +56,7 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
   // MKT-013: which promos the price summary may discount by. Mirrors the server-side
   // resolver in bookingService.create — an explicit campaign link wins; otherwise the
   // best active promo for this branch applies (when AUTO_APPLY_BEST_PROMO is on).
+  const autoApply = await isPromoAutoApplyEnabled();
   const applicablePromos: PromoCampaign[] = selected
     ? (() => {
         const forBranch = promos.filter(
@@ -63,7 +64,7 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
         ) as unknown as PromoCampaign[];
         const explicit = campaignId ? forBranch.find((p) => p.id === campaignId) : undefined;
         if (explicit) return [explicit];
-        return AUTO_APPLY_BEST_PROMO ? forBranch : [];
+        return autoApply ? forBranch : [];
       })()
     : [];
 
