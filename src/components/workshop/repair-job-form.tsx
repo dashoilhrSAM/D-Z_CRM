@@ -15,7 +15,7 @@ import { t, tpl } from "@/lib/i18n";
 
 export interface CustomerOption { id: string; name: string; phone: string | null }
 export interface MotorcycleOption { id: string; customerId: string; brand: string; model: string; plate: string; year: number; type: string; currentMileage: number }
-export interface MechanicOption { id: string; name: string; branchName?: string | null }
+import { spansBranches, mechanicLabel, type MechanicOption } from "./mechanic-option";
 
 export interface PartLine { productId: string; name: string; quantity: number; unitPriceSen: number; unitCostSen: number }
 export interface LabourLine { description: string; kind: string; quantity: number; unitPriceSen: number }
@@ -31,6 +31,8 @@ export function RepairJobForm({
   bookingId?: string | null;
 }) {
   const router = useRouter();
+  // The suffix only earns its width when the list really spans branches.
+  const showBranch = spansBranches(mechanics);
   const lang = useLang();
   const [pending, start] = useTransition();
   const initialBike = preselectMotorcycle ? Object.values(motorcyclesByCustomer).flat().find((m) => m.id === preselectMotorcycle) : undefined;
@@ -202,10 +204,10 @@ export function RepairJobForm({
         <section className="rounded-2xl border bg-card p-5">
           <h3 className="font-semibold mb-3">{t("job-form.heading-mechanic", lang)}</h3>
           <Select value={mechanicId} onValueChange={(v) => setMechanicId(v ?? "none")}>
-            <SelectTrigger className="mt-1.5 max-w-sm"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full max-w-sm"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
+            <SelectContent className="min-w-64">
               <SelectItem value="none">{t("job-form.assign-later", lang)}</SelectItem>
-              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</SelectItem>)}
+              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{mechanicLabel(m, showBranch)}</SelectItem>)}
             </SelectContent>
           </Select>
         </section>

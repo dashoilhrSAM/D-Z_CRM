@@ -20,7 +20,7 @@ import { db } from "@/lib/db";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedStaffWhere } from "@/lib/branch-scope";
+import { loadAssignableStaff } from "@/lib/job-branch";
 
 export const dynamic = "force-dynamic";
 
@@ -33,8 +33,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const recs = await aiService.salesRecommendations(id);
   const checklist = detail.checklist;
   const pendingApprovals = detail.approvals.filter((a) => a.status === "PENDING");
-  const rawMechanics = await db.user.findMany({ where: scopedStaffWhere(session, ["MECHANIC", "MANAGER"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
-  const mechanics = rawMechanics.map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
+  // Scoped to THIS job's branch, which is the branch assignMechanic validates against. An
+  // org-level user used to be offered every branch's mechanics here, and every one from
+  // another branch was rejected on save.
+  const mechanics = await loadAssignableStaff(detail.branchId);
   const statusHistory = await db.jobStatusHistory.findMany({ where: { jobId: id }, orderBy: { changedAt: "desc" } });
   const editData: EditJobData = {
     jobId: detail.id,

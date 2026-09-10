@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { audit } from "@/lib/auth/audit";
 import { scopedBranchId } from "@/lib/branch-scope";
+import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { createClient } from "@supabase/supabase-js";
 
 export async function createJob(input: {
@@ -22,12 +23,12 @@ export async function createJob(input: {
   labour?: { description: string; kind: string; quantity: number; unitPriceSen: number }[];
   bookingId?: string;
 }) {
-  const org = await db.organisation.findFirst();
   // strict branch isolation: create the job in the current user's branch (org-level falls back to main)
   const session = await getSessionUser();
-  const branchScope = scopedBranchId(session);
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
-  const branchId = branch!.id;
+  // The rule lives in one place because the mechanic pickers have to agree with it — see
+  // src/lib/job-branch.ts for what happened when the page and this action each had a copy.
+  const branchId = await resolveNewJobBranchId(session);
+  if (!branchId) throw new Error("Cannot create a job: no branch is configured for this organisation.");
   // the mechanic must belong to the job's branch (no cross-branch assignment)
   if (input.mechanicId) {
     const mech = await db.user.findUnique({ where: { id: input.mechanicId }, select: { branchId: true } });

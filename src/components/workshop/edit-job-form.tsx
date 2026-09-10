@@ -23,7 +23,7 @@ export interface EditJobData {
   motorcycleType: string;
   items: { id: string; description: string; kind: "item" | "part"; unitPriceSen: number; status: string }[];
 }
-export interface MechanicOption { id: string; name: string; branchName?: string | null }
+import { spansBranches, mechanicLabel, type MechanicOption } from "./mechanic-option";
 
 export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics: MechanicOption[] }) {
   const router = useRouter();
@@ -35,6 +35,7 @@ export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics:
   // "none" = unassigned sentinel — avoids a controlled Select value ("") that
   // matches no item (base-ui render-phase correction would loop → React 441).
   const [mechanicId, setMechanicId] = useState(data.mechanicId ?? "none");
+  const showBranch = spansBranches(mechanics);
   const [extra, setExtra] = useState<Record<string, { label: string; priceSen: number }>>({});
 
   const applicable = servicesForType(data.motorcycleType).flatMap((g) => g.items);
@@ -87,10 +88,13 @@ export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics:
           <div>
             <Label>{t("job-form.mechanic", lang)}</Label>
             <Select value={mechanicId} onValueChange={(v) => setMechanicId(v ?? "")}>
-              <SelectTrigger className="mt-1.5"><SelectValue>{(v) => (v === "none" ? t("job-form.unassigned", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.unassigned", lang))}</SelectValue></SelectTrigger>
-              <SelectContent>
+              {/* w-full, not a fixed width: this sits in a three-column grid and anything
+                  wider than its own column spills over the Customer Request field beside it.
+                  The dropdown is kept readable by the popup's min-width instead. */}
+              <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full"><SelectValue>{(v) => (v === "none" ? t("job-form.unassigned", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.unassigned", lang))}</SelectValue></SelectTrigger>
+              <SelectContent className="min-w-64">
                 <SelectItem value="none">{t("job-form.unassigned", lang)}</SelectItem>
-                {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</SelectItem>)}
+                {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{mechanicLabel(m, showBranch)}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
