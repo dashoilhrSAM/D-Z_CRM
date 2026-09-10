@@ -5,7 +5,8 @@ import { AiError, type AiProvider, type AiChatMessage, type AiChatOptions } from
  *
  * 使用（需要 OPENAI_API_KEY 后）：
  *   OPENAI_API_KEY  — platform.openai.com 生成的密钥
- *   OPENAI_MODEL    — 模型名（缺省 gpt-4o-mini；Workshop AI Assistant 用多轮 chat，非单发 generate）
+ *   OPENAI_MODEL    — 模型名（缺省 gpt-4.1；Workshop AI Assistant 用多轮 chat，非单发 generate）
+ *                     gpt-5 与 o 系推理模型也支持：requestBody() 会按模型调整参数名与 temperature
  *
  * 两种失败模式，刻意区分：
  *   - 默认（strict 未开）：缺 key / 请求失败 / 空回复 → 返回兜底文案。聊天场景无害。
@@ -17,7 +18,33 @@ export class OpenAIProvider implements AiProvider {
   readonly name = "openai";
 
   private get apiKey() { return process.env.OPENAI_API_KEY; }
-  private get model() { return process.env.OPENAI_MODEL || "gpt-4o-mini"; }
+  private get model() { return process.env.OPENAI_MODEL || "gpt-4.1"; }
+
+  /**
+   * The GPT-5 and o-series reasoning models reject two things the older models accept:
+   * they renamed max_tokens to max_completion_tokens, and they allow only the default
+   * temperature. Sending the old payload to them fails outright, so the request body is
+   * shaped per model instead of assuming one generation's parameters.
+   */
+  private static isReasoningModel(model: string): boolean {
+    return /^(gpt-5|o[1-9])/i.test(model);
+  }
+
+  /** Build the request body for whichever model is configured. */
+  private requestBody(messages: AiChatMessage[], opts?: AiChatOptions): Record<string, unknown> {
+    const model = this.model;
+    const body: Record<string, unknown> = {
+      model,
+      messages,
+      // The modern name is accepted by the older models too, so it is used
+      // unconditionally rather than branching on a model list that keeps growing.
+      max_completion_tokens: opts?.maxTokens ?? 500,
+    };
+    if (!OpenAIProvider.isReasoningModel(model)) {
+      body.temperature = opts?.temperature ?? 0.4;
+    }
+    return body;
+  }
 
   private fallback() {
     return "D&Z Smart Workshop — servis berkualiti untuk motosikal anda.";
@@ -37,12 +64,7 @@ export class OpenAIProvider implements AiProvider {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: this.model,
-          messages,
-          max_tokens: opts?.maxTokens ?? 500,
-          temperature: opts?.temperature ?? 0.4,
-        }),
+        body: JSON.stringify(this.requestBody(messages, opts)),
       });
       const data = await res.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
       if (!res.ok || data.error) {

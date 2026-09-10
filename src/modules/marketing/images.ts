@@ -61,7 +61,7 @@ export async function generateBackground(input: BackgroundRequest): Promise<Back
       method: "POST",
       headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-1",
+        model: process.env.OPENAI_IMAGE_MODEL || "gpt-image-2.5-sunburst",
         prompt,
         size: dims.gen,
         n: 1,
