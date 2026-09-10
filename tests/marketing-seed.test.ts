@@ -4,7 +4,7 @@
 // production and were empty, so the Content Studio came up with nothing to suggest and
 // looked broken rather than unseeded. Nothing errored — the data simply was not there.
 import { describe, expect, it } from "vitest";
-import { occasionRows, seedOccasions, PAYDAY_HORIZON_MONTHS } from "../scripts/seed-occasions";
+import { occasionRows, seedOccasions, openWindowCount, PAYDAY_HORIZON_MONTHS } from "@/modules/marketing/occasion-seed";
 import { seedPromoProducts, IMAGE_SOURCE } from "../scripts/import-promo-products";
 import { seedBrandProfiles } from "../scripts/seed-brand-profiles";
 import { seedDashoilBrand } from "../scripts/apply-dashoil-brand";
@@ -48,6 +48,40 @@ describe("occasionRows", () => {
       expect(typeof r.leadDays).toBe("number");
       expect(r.angleHint.length).toBeGreaterThan(0);
     }
+  });
+});
+
+/**
+ * The window rule is the whole value of the calendar: content has to START before the
+ * holiday, not on it. A status report that restated the rule could quietly disagree with
+ * the planner, so this checks the shared one.
+ */
+describe("openWindowCount", () => {
+  const occasion = (startDate: string, leadDays: number, endDate?: string) => ({ startDate, endDate: endDate ?? null, leadDays });
+
+  it("does not count an occasion whose lead time has not begun", () => {
+    expect(openWindowCount([occasion("2026-10-01", 7)], new Date("2026-09-10T00:00:00Z"))).toBe(0);
+  });
+
+  it("counts it from the moment the lead time opens", () => {
+    // Opens 7 days before 1 October, so 24 September is the first day.
+    expect(openWindowCount([occasion("2026-10-01", 7)], new Date("2026-09-24T00:00:00Z"))).toBe(1);
+    expect(openWindowCount([occasion("2026-10-01", 7)], new Date("2026-09-23T00:00:00Z"))).toBe(0);
+  });
+
+  it("counts it on the day itself", () => {
+    expect(openWindowCount([occasion("2026-10-01", 7)], new Date("2026-10-01T00:00:00Z"))).toBe(1);
+  });
+
+  it("runs through a multi-day occasion and then stops", () => {
+    const monsoon = occasion("2026-11-01", 7, "2027-03-31");
+    expect(openWindowCount([monsoon], new Date("2027-01-15T00:00:00Z"))).toBe(1);
+    expect(openWindowCount([monsoon], new Date("2027-04-01T00:00:00Z"))).toBe(0);
+  });
+
+  it("counts each occasion independently", () => {
+    const rows = [occasion("2026-10-01", 7), occasion("2026-12-25", 14), occasion("2026-11-01", 7, "2027-03-31")];
+    expect(openWindowCount(rows, new Date("2026-09-25T00:00:00Z"))).toBe(1);
   });
 });
 

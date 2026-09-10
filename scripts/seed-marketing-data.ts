@@ -16,7 +16,7 @@
 //   node --import tsx scripts/seed-marketing-data.ts          # the database in DATABASE_URL
 //   DATABASE_URL=... npm run seed:marketing                   # a specific target
 import { db } from "../src/lib/db";
-import { seedOccasions } from "./seed-occasions";
+import { seedOccasions, openWindowCount } from "@/modules/marketing/occasion-seed";
 import { seedPromoProducts } from "./import-promo-products";
 import { seedBrandProfiles } from "./seed-brand-profiles";
 import { seedDashoilBrand } from "./apply-dashoil-brand";
@@ -37,20 +37,17 @@ function target(): string {
  */
 async function readiness() {
   const now = new Date();
-  const [total, upcoming, openNow, products, activeProducts, profiles, unbranded] = await Promise.all([
+  // The open-window count is computed in TypeScript from the rows, not in SQL. An earlier
+  // version used a raw query and failed silently: Postgres folds an unquoted startDate to
+  // "startdate", the error was swallowed by a catch that existed for SQLite, and the report
+  // simply said "unknown". The window rule already exists as a function; use it.
+  const openNow = openWindowCount(
+    await db.occasion.findMany({ where: { active: true }, select: { startDate: true, endDate: true, leadDays: true } }),
+    now,
+  );
+  const [total, upcoming, products, activeProducts, profiles, unbranded] = await Promise.all([
     db.occasion.count(),
     db.occasion.count({ where: { startDate: { gte: now }, active: true } }),
-    // A window opens leadDays BEFORE the date, which is the whole point of the calendar.
-    //
-    // Every camelCase column is quoted. Postgres folds unquoted identifiers to lower case,
-    // so a bare startDate resolves to "startdate" and the query fails — which it did here,
-    // silently, because this is wrapped in a catch for SQLite compatibility.
-    db.$queryRaw<{ n: bigint }[]>`
-      SELECT count(*)::int AS n FROM "Occasion"
-      WHERE "active" = true
-        AND "startDate" - ("leadDays" * INTERVAL '1 day') <= ${now}
-        AND COALESCE("endDate", "startDate") >= ${now}
-    `.then((r) => Number(r[0]?.n ?? 0)).catch(() => -1),
     db.promoProduct.count(),
     db.promoProduct.count({ where: { active: true } }),
     db.brandProfile.count(),
@@ -81,7 +78,7 @@ async function main() {
   console.log("");
   console.log("readiness:");
   console.log("  calendar          " + r.total + " occasions, " + r.upcoming + " still ahead");
-  console.log("  windows open now  " + (r.openNow < 0 ? "unknown" : r.openNow));
+  console.log("  windows open now  " + r.openNow);
   console.log("  products          " + r.activeProducts + " active of " + r.products + (r.unbranded > 0 ? " (" + r.unbranded + " unbranded)" : ""));
   console.log("  brand voices      " + r.profiles);
 

@@ -3,6 +3,8 @@
 > 本文件由 session-pack 生成，session-resume 可续接。
 
 ## 一句话状态
+**✅ 两个真实缺陷已修（2026-09-10，同一分支）**：① **服务价目在 UI 里根本改不了**——`actions/settings.ts` 只有 create/toggle/delete，生产 8 个服务全部 priceSen=null 且无法设置；而 `buildFactSheet` 读到 null 就不报价（引擎拒绝编造价格），于是**整条报价能力被一个缺失的编辑入口关掉**。已加 `updateServiceType`（org 级鉴权 + 校验；undefined=不改、null=清空）+ 行内编辑 + 无价提示带（三语）。② **日历会静默过期**——发薪日按当月滚动，种一次只有 18 个月；写入路径提到 `src/modules/marketing/occasion-seed.ts`（脚本与 cron 共用），新增 **每月 1 号 cron `/api/cron/marketing-calendar`**（Bearer CRON_SECRET，实测无头 401）。顺带把就绪度报告从 raw SQL 改为复用 `isWindowOpen`（消掉 camelCase 列名引号坑，本地不再显示 unknown）。⚠️ **未验证**：设置页「编辑」按钮的点击链路（本地 staff 走 Supabase 登录、无凭据），**请 owner 点一次确认**。
+
 **✅ 营销数据已上生产（2026-09-10）**：新增唯一入口 `pnpm seed:marketing`（`scripts/seed-marketing-data.ts`）——按正确顺序种日历/产品/品牌并打印就绪度。生产实测 **38 节点 / 22 产品 / 2 品牌档案**，`rankOccasions` 当天给出 **Hari Malaysia（窗口 OPEN，D-5）**；重复执行 0 新增。四个旧脚本改为导出 seed、仅直接执行才跑（此前 import 即执行，无法编排）。**两个真实缺陷已修**：① 产品导入每次把 brand 写回 null（单独跑会把 22 个产品全去品牌）② 就绪度 SQL 里 startDate 未加引号被 Postgres 折叠成 startdate（camelCase 列名必须加引号）。**新坑**：client 按单一 schema 生成，拿 postgres URL 跑需先 `prisma generate --schema prisma/schema.pg.prisma` 再还原。⚠️ 待 owner：合并 `feat/marketing-prod-data`。
 
 **✅ 生产 schema 已应用（2026-09-10）**：直接用直连地址对生产执行了增量同步——**66 → 70 张表、657 → 743 列**，新增 `Occasion`/`TrendTopic`/`PromoProduct`/`BrandProfile` + 10 索引 + 4 外键 + `ContentScript.angle`（可空 TEXT），共 112 条语句、**0 条 DROP/TRUNCATE**，耗时 2.2s，复验「schema and database agree」。既有数据全未受影响（User 21 / ServiceJob 25 / Invoice 17 / Booking 10 / Campaign 10 / Customer 3 / Motorcycle 6）。生产 /、/login、/contact 全 200。**⚠️ 但生产库里 Occasion=0、PromoProduct=0**——日历 38 条节点与 22 个产品当初只种进了本地 dev.db；部署成功后内容引擎会因「无节点、无产品」而看起来空转，需在生产跑 `scripts/seed-occasions.ts` 与 `scripts/import-promo-products.ts`（图片 public/products/*.webp 已随代码部署）。

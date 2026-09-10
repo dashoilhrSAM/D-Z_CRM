@@ -69,6 +69,46 @@ export async function createServiceType(input: { name: string; category?: string
   return { ok: true };
 }
 
+/**
+ * Edit a service type.
+ *
+ * WHY THIS WAS MISSING AND WHY IT MATTERS: create/toggle/delete existed, so a service
+ * could be created but never corrected. In production all eight services had a null price
+ * and there was no way to set one through the UI — which quietly disabled the content
+ * engine's ability to quote a price, because it will not invent one. A catalogue you can
+ * only append to is a catalogue that keeps its mistakes forever.
+ */
+export async function updateServiceType(input: {
+  id: string;
+  name?: string;
+  category?: string | null;
+  durationMin?: number | null;
+  /** null clears the price; undefined leaves it alone. */
+  priceSen?: number | null;
+}) {
+  const auth = await requireStaff();
+  if (!auth.ok) return { ok: false as const, error: auth.error };
+  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can manage service catalogue." };
+
+  const name = input.name?.trim();
+  if (input.name !== undefined && !name) return { ok: false as const, error: "A service needs a name." };
+  if (input.priceSen != null && (!Number.isFinite(input.priceSen) || input.priceSen < 0)) {
+    return { ok: false as const, error: "A price cannot be negative." };
+  }
+
+  await db.serviceType.update({
+    where: { id: input.id },
+    data: {
+      ...(name !== undefined ? { name } : {}),
+      ...(input.category !== undefined ? { category: input.category } : {}),
+      ...(input.durationMin !== undefined ? { durationMin: input.durationMin } : {}),
+      ...(input.priceSen !== undefined ? { priceSen: input.priceSen } : {}),
+    },
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
+}
+
 export async function toggleServiceType(id: string, active: boolean) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
