@@ -65,9 +65,9 @@ async function main() {
   } finally {
     // remove everything this run created, in FK-safe order
     const jobs = await db.serviceJob.findMany({ where: { customerId: customer.id }, select: { id: true } });
-    const jobIds = jobs.map((j) => j.id);
+    const jobIds = jobs.map((j: { id: string }) => j.id);
     const invs = await db.invoice.findMany({ where: { customerId: customer.id }, select: { id: true } });
-    const invIds = invs.map((i) => i.id);
+    const invIds = invs.map((i: { id: string }) => i.id);
     const acct = await db.loyaltyAccount.findUnique({ where: { customerId: customer.id }, select: { id: true } });
     await db.payment.deleteMany({ where: { invoiceId: { in: invIds } } });
     await db.invoiceItem.deleteMany({ where: { invoiceId: { in: invIds } } });
