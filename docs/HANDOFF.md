@@ -3,7 +3,7 @@
 > 本文件由 session-pack 生成，session-resume 可续接。
 
 ## 一句话状态
-**两条分支待 review**：`fix/prod-schema-drift-guard @ 0b37413`（生产 500 修复 + schema 构建期自动同步，**合并后才生效**）与 `feat/marketing-content-engine`（内容引擎 **P1-P7 全部完成**，含候选脚本→人工选→展开→AI 出图全链路 + **海报艺术方向可选（默认平面海报）**，**从前者开出**，故须先合前者）。生产当前健康（全 200，drift 0）。基线全绿（tsc 0 / lint 0 error / vitest **285**（22 文件）/ build 0）。品牌已确认 **DASHOIL**（原卡点解除）。
+**✅ 合并顺序已解锁**：`fix/prod-schema-drift-guard` 已由 owner 合并进 main（**PR #12 → main = 3ae3bad**），所以 **`feat/marketing-content-engine` 现可干净合并**（共同祖先 0b37413 已在 main 内，无冲突）。该分支内容引擎 **P1-P7 全部完成**（候选脚本→人工选→展开→AI 出图全链路 + 海报艺术方向可选 + 抠图印刷化）。生产当前健康（全 200，drift 0）。基线全绿（tsc 0 / lint 0 error / vitest **335**（25 文件）/ build 0）。品牌已确认 **DASHOIL**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
@@ -65,7 +65,7 @@
 - **诊断命令**：`set -a; . ./.env; set +a; DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/check-prod-schema-drift.mjs`
 
 ## 下一步（按优先级）
-1. **合并 `fix/prod-schema-drift-guard @ 0b37413`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/fix/prod-schema-drift-guard）——**自动同步只有合并后才会在 Vercel 构建里生效**。生产本身已恢复且已 in sync，此分支只是把「手工加列」换成「自动同步」。
+1. **合并 `feat/marketing-content-engine`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/feat/marketing-content-engine）——前置的 `fix/prod-schema-drift-guard` 已进 main（PR #12），**基已就位、可干净合并**，不会再触发上次那种全站 500。该分支含 10 个 commit（内容引擎 P1-P7 + 海报艺术方向 + 抠图印刷化）。
 2. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂着，可择机真正 DROP（需人工决定）。
 3. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
 4. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步 —— 生产 PG 幂等加 Message.externalId 列 → push main（auto-deploy）→ Vercel 配 WHATSAPP_* env → Meta 配 webhook → 验证回执。
@@ -91,10 +91,10 @@
 ## git 状态
 - 当前分支：**feat/marketing-content-engine**（栈在 fix/prod-schema-drift-guard @ 0b37413 之上，已 push，等 owner review：内容引擎 P1-P7 + 海报艺术方向）
 - **踩坑提醒**：`git add -A scripts/` 会把项目历史遗留脚本（capture-*.ts、gen-*.ts/py、_dims.ts 等 11 个）一起提交，已 amend 撤回；加文件务必逐个列出
-- main = origin/main = **c2f8973**（PR#11 已合并）
+- main = origin/main = **3ae3bad**（PR#12 fix/prod-schema-drift-guard 已合并；本地 main 已 ff 同步）
 - 已合并分支：feat/marketing-system（eb76825/c5a7260/047f61e）、fix/branch-attribution-and-broadcast(8710683) 均已进 main，本地可删
 - 另一分支：fix/branch-attribution-and-broadcast @ 8710683（已 push，其改动已被 feat/marketing-system 包含）
-- main = origin/main = **c2f8973**（未落后）
+- 另：`feat/marketing-content-engine` 未含 main 的合并提交 3ae3bad，但共同祖先 0b37413 已在 main 内 → 合并干净；如需本地验证可 `git merge origin/main` 后再跑基线。
 - 未提交：docs/HANDOFF.md（会话文档，随功能一起提交）+ 大量 untracked（docs/setup-templates、docs/templates、screenshots/*、docs/logo-png 等历史产物，**勿 git add -A**）
 - 已合并分支：fix/mechanic-branch-scope(9f0e163) 已进 main，本地分支可删；本轮两分支待 review 后删
 
