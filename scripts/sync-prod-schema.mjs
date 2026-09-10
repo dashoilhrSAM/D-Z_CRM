@@ -111,8 +111,51 @@ function prismaBin() {
   return existsSync(local) ? local : "prisma";
 }
 
-function runPrisma(args, env) {
-  return execFileSync(prismaBin(), args, { encoding: "utf8", env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+/**
+ * Every prisma call is bounded.
+ *
+ * WHY THIS IS NOT OPTIONAL: this script runs inside the Vercel build. An unbounded call
+ * against a database that never answers does not fail — it hangs, and the build is killed
+ * by the platform after 45 minutes. That is not hypothetical: it is exactly what happened,
+ * twice, on a project whose builds normally take 90 seconds. A bounded command turns an
+ * unbounded outage into a visible, explainable result.
+ */
+const COMMAND_TIMEOUT_MS = Number(process.env.SCHEMA_SYNC_TIMEOUT_MS ?? 120000);
+
+/**
+ * Thrown when a prisma command exceeded its budget, as opposed to failing on its own.
+ * The two are handled differently: a timeout is an infrastructure problem we retry or
+ * skip, while a real error is something a human needs to read.
+ */
+export class PrismaTimeout extends Error {
+  constructor(seconds) {
+    super("prisma did not respond within " + seconds + "s");
+    this.name = "PrismaTimeout";
+    this.seconds = seconds;
+  }
+}
+
+function runPrisma(args, env, timeoutMs = COMMAND_TIMEOUT_MS) {
+  try {
+    return execFileSync(prismaBin(), args, {
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+    });
+  } catch (e) {
+    // execFileSync signals a timeout through the signal it sent, not a readable message.
+    if (e.signal === "SIGKILL" || e.killed === true || /ETIMEDOUT/.test(String(e.code))) {
+      throw new PrismaTimeout(Math.round(timeoutMs / 1000));
+    }
+    throw e;
+  }
+}
+
+/** Milliseconds since a start time, for the per-step timings in the log. */
+function elapsed(startedAt) {
+  return ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
 }
 
 /** SQL that would take the database from its current state to the schema. */
@@ -128,21 +171,68 @@ export function diffSql(url) {
     .trim();
 }
 
+/**
+ * A connection that migrations can actually use.
+ *
+ * Prisma's migrate commands need a real session; a Supabase connection pooler (port
+ * 6543, or pgbouncer=true) does not provide one and the command waits rather than
+ * failing. That is the most likely reason the build hung. So a direct URL wins when one
+ * is configured, and a pooled-looking URL gets a loud warning instead of a silent hang.
+ *
+ * @param {Record<string, string | undefined>} [env]
+ */
+export function resolveUrl(env = process.env) {
+  const explicit = env.DRIFT_CHECK_URL;
+  if (explicit) return { url: explicit, source: "DRIFT_CHECK_URL" };
+
+  const direct = env.DIRECT_URL;
+  if (direct) return { url: direct, source: "DIRECT_URL" };
+
+  const primary = env.DATABASE_URL ?? "";
+  if (!primary || primary.startsWith("file:")) return { url: "", source: "none (sqlite or unset)" };
+  return { url: primary, source: "DATABASE_URL" };
+}
+
+/**
+ * True when a connection string looks like a transaction pooler.
+ *
+ * @param {string} url
+ */
+export function looksPooled(url) {
+  return /:6543\b/.test(url) || /pgbouncer=true/.test(url) || /pooler\.supabase\.com/.test(url);
+}
+
 async function main() {
   const checkOnly = process.argv.includes("--check");
   const isProduction = process.env.VERCEL_ENV === "production";
+  const startedAt = Date.now();
 
-  const primary = process.env.DATABASE_URL ?? "";
-  const url = process.env.DRIFT_CHECK_URL || (primary.startsWith("file:") ? "" : primary);
+  const { url, source } = resolveUrl();
   if (!url) {
-    console.log("[schema-sync] no postgres url — skipping (local/sqlite build)");
+    console.log("[schema-sync] no postgres url — skipping (" + source + ")");
     return;
+  }
+  console.log("[schema-sync] database from " + source + " | timeout " + Math.round(COMMAND_TIMEOUT_MS / 1000) + "s per command");
+
+  if (looksPooled(url) && !process.env.DRIFT_CHECK_URL) {
+    console.warn("[schema-sync] WARNING: this looks like a connection-pooler url. Prisma migrate");
+    console.warn("[schema-sync] commands need a direct connection (port 5432) and will hang on a");
+    console.warn("[schema-sync] pooler. Set DIRECT_URL to the direct Supabase url.");
   }
 
   let sql;
+  const inspectStarted = Date.now();
   try {
     sql = diffSql(url);
+    console.log("[schema-sync] inspected in " + elapsed(inspectStarted));
   } catch (e) {
+    if (e instanceof PrismaTimeout) {
+      // Fail OPEN on inspection: a read-only check that cannot reach the database must
+      // never block a release. This is the rule the script already had for an unreachable
+      // database; a hang is the same situation with worse manners.
+      console.log("[schema-sync] inspection timed out after " + e.seconds + "s — skipping the check (build continues, schema NOT verified)");
+      return;
+    }
     console.log("[schema-sync] could not inspect the database — skipping (" + String(e.message).split("\n")[0] + ")");
     return;
   }
@@ -177,10 +267,21 @@ async function main() {
   }
 
   console.log("[schema-sync] applying additive changes to production…");
+  const applyStarted = Date.now();
   try {
     // Deliberately no --accept-data-loss: let prisma refuse if it sees anything risky.
-    runPrisma(["db", "push", "--schema", SCHEMA, "--skip-generate"], { DATABASE_URL: url });
+    runPrisma(["db", "push", "--schema", SCHEMA, "--skip-generate"], { DATABASE_URL: url, DIRECT_URL: url });
+    console.log("[schema-sync] applied in " + elapsed(applyStarted));
   } catch (e) {
+    if (e instanceof PrismaTimeout) {
+      // Fail CLOSED on apply: a half-applied push is worse than a build that stops.
+      // The point of the timeout is that this takes two minutes to say so, not 45.
+      console.error("[schema-sync] applying changes timed out after " + e.seconds + "s.");
+      console.error("[schema-sync] The database may be partially updated. Nothing destructive is ever");
+      console.error("[schema-sync] applied by this script, so re-running is safe. Check that DIRECT_URL is a");
+      console.error("[schema-sync] direct (non-pooled) connection and run: node scripts/sync-prod-schema.mjs");
+      process.exit(1);
+    }
     console.error("[schema-sync] db push failed: " + String(e.stderr ?? e.message).split("\n").slice(0, 20).join("\n"));
     process.exit(1);
   }
@@ -190,7 +291,7 @@ async function main() {
     console.error("[schema-sync] schema still differs after sync:\n" + after);
     process.exit(1);
   }
-  console.log("[schema-sync] production schema is now in sync");
+  console.log("[schema-sync] production schema is now in sync (total " + elapsed(startedAt) + ")");
 }
 
 const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
