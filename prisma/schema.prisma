@@ -82,6 +82,7 @@ model Organisation {
   promoProducts PromoProduct[]
   brandProfiles BrandProfile[]
   occasions     Occasion[]
+  trendTopics   TrendTopic[]
 }
 
 
@@ -120,6 +121,48 @@ model Occasion {
 
   @@index([startDate])
   @@index([type])
+}
+
+/// A trending or high-performing piece the workshop can learn STRUCTURE from.
+///
+/// Deliberate constraint: this stores what made a piece work — its hook pattern, format
+/// and shape — never its wording. Copying a viral script is a copyright problem and
+/// produces derivative content; learning that "the hook is a cost-of-inaction question"
+/// is legitimate and reusable.
+model TrendTopic {
+  id             String    @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  /// The day this trend was captured (UTC midnight).
+  asOf           DateTime
+  /// YOUTUBE | TIKTOK | INSTAGRAM | NEWS | MANUAL
+  source         String
+  title          String
+  url            String?
+  author         String?
+  /// Engagement snapshot at capture time.
+  views          Int?
+  likes          Int?
+  comments       Int?
+  durationSec    Int?
+  language       String?
+  /// What the piece is about, in one or two lines.
+  summary        String?
+  /// AI-extracted STRUCTURE — the reusable part.
+  hookPattern    String?
+  format         String?
+  whyItWorks     String?
+  /// Angles this trend suggests for our own content (JSON array).
+  borrowableAngles String?
+  /// 1-5 relevance to a Malaysian motorcycle workshop.
+  relevance      Int       @default(3)
+  /// Stable identity so repeated ingestion does not duplicate.
+  dedupeKey      String    @unique
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  @@index([asOf])
+  @@index([source])
 }
 
 // ---------- Marketing content engine ----------
