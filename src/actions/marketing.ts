@@ -2,12 +2,23 @@
 
 import { revalidatePath } from "next/cache";
 import { marketingService } from "@/modules/marketing/service";
-import { messagingProvider } from "@/providers";
+import { messagingModule } from "@/modules/messaging/service";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { db } from "@/lib/db";
 
-async function mainBranchId() {
+/** 分行归属：branch 级用户的操作落在自己分行，org 级回退主店。 */
+async function defaultBranch() {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const session = await getSessionUser();
+  const branchScope = scopedBranchId(session);
+  return branchScope
+    ? await db.branch.findFirst({ where: { id: branchScope, organisationId: org!.id } })
+    : await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+}
+
+async function mainBranchId() {
+  const branch = await defaultBranch();
   return branch!.id;
 }
 
@@ -128,30 +139,30 @@ async function audienceCustomers(audience: string | null): Promise<{ id: string;
 export async function broadcastCampaign(input: { campaignId: string; message?: string }) {
   const campaign = await db.campaign.findUnique({ where: { id: input.campaignId } });
   if (!campaign) throw new Error("Campaign not found");
-  const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const branch = await defaultBranch();
 
   const customers = await audienceCustomers(campaign.audience);
   const body = input.message?.trim() || "Hi, " + campaign.name + " is on now at D&Z Smart Workshop" + (campaign.discountPercent ? " — save " + campaign.discountPercent + "%!" : " — book your service today!");
-  let sent = 0;
+  // 群发是营销消息：必须走 messagingModule，以便遵守 MSG-017 opt-out、真实送达状态与
+  // MSG-020 失败记录；计数按真实结果，不能把失败也算成已发。
+  let sent = 0, failed = 0, skipped = 0;
   for (const c of customers) {
-    const result = await messagingProvider.send(c.phone ?? c.name, body);
-    await db.message.create({
-      data: {
-        organisationId: org!.id,
-        branchId: branch?.id,
+    try {
+      const { sent: ok } = await messagingModule.sendDirect({
         customerId: c.id,
-        direction: "OUT",
-        channel: "WHATSAPP",
         body,
-        status: result.status,
-        externalId: result.externalId ?? null,
+        channel: "WHATSAPP",
+        isMarketing: true,
         referenceType: "CAMPAIGN",
         referenceId: campaign.id,
-      },
-    });
-    sent++;
+        branchId: branch?.id ?? null,
+      });
+      if (ok) sent++; else failed++;
+    } catch (e) {
+      if (e instanceof Error && e.message === "CUSTOMER_OPTED_OUT") { skipped++; continue; }
+      failed++;
+    }
   }
   revalidatePath("/", "layout");
-  return { ok: true, sent, audience: customers.length };
+  return { ok: true, sent, failed, skipped, audience: customers.length };
 }
