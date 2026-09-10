@@ -2,7 +2,7 @@ import type { DbLike } from "@/modules/customers/repository";
 import type { ReminderStatus } from "@prisma/client";
 import type { ICrmRepository } from "./repository";
 import { PrismaCrmRepository } from "@/repositories/prisma/crm.repository";
-import { messagingProvider } from "@/providers";
+import { messagingModule } from "@/modules/messaging/service";
 import { db } from "@/lib/db";
 import { DEFAULT_SERVICE_INTERVAL_KM } from "@/lib/constants";
 
@@ -90,27 +90,23 @@ export class CrmService {
       .sort((a, b) => (b.daysSinceVisit ?? 0) - (a.daysSinceVisit ?? 0));
   }
 
-  /** Send a WhatsApp-style message via the mock provider and persist to history (§31). */
-  async sendMessage(input: { customerId: string; body: string; channel?: "WHATSAPP" | "SMS" | "APP" | "SYSTEM"; jobId?: string; isMarketing?: boolean }) {
+  /**
+   * Send a WhatsApp-style message and persist to history (§31).
+   * 统一走 messagingModule：真实送达状态 + externalId、MSG-017 opt-out、MSG-020 失败记录，
+   * 并按客户所在分行归属（不再硬编码 branchId:null）。
+   */
+  async sendMessage(input: { customerId: string; body: string; channel?: "WHATSAPP" | "SMS" | "APP" | "SYSTEM"; jobId?: string; isMarketing?: boolean; referenceType?: string }) {
     const customer = await db.customer.findUnique({ where: { id: input.customerId } });
     if (!customer) throw new Error("Customer not found");
-    // MSG-017: block marketing sends to opted-out customers
-    if (input.isMarketing) {
-      const consent = await db.customerConsent.findUnique({ where: { customerId: customer.id } });
-      if (consent && !consent.marketingOptIn) throw new Error("CUSTOMER_OPTED_OUT");
-    }
-    const result = await messagingProvider.send(customer.phone ?? customer.name, input.body);
-    const message = await this.repo.createMessage({
+    const { message } = await messagingModule.sendDirect({
       customerId: input.customerId,
-      organisationId: (await db.organisation.findFirst())!.id,
-      branchId: null as never,
-      direction: "OUT",
-      channel: input.channel ?? "WHATSAPP",
       body: input.body,
-      status: result.status,
-      externalId: result.externalId ?? null,
+      // "SYSTEM" 不是投递渠道（仅站内记录），按 WhatsApp 送达
+      channel: input.channel === "SMS" || input.channel === "APP" ? input.channel : "WHATSAPP",
       jobId: input.jobId,
-      referenceType: "REMINDER",
+      isMarketing: input.isMarketing,
+      referenceType: input.referenceType ?? "REMINDER",
+      branchId: customer.branchId,
     });
     return message;
   }

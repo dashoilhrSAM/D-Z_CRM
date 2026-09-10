@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { jobService } from "@/modules/service-jobs/service";
 import { quotationService } from "@/modules/quotations/service";
 import { messagingModule } from "@/modules/messaging/service";
+import { resolvePromoForBooking, toPromoSnapshot } from "@/modules/marketing/promo-resolve";
+import type { PricedLine } from "@/modules/marketing/promo";
 import type { DbLike } from "@/modules/customers/repository";
 
 export type BookingStatusInput = BookingStatus;
@@ -49,6 +51,24 @@ export class BookingService {
     if (slot && !slot.isHoliday && slot.bookedCount >= slot.maxBookings) {
       throw new Error("SLOT_FULL");
     }
+    // MKT-013: resolve the promo BEFORE persisting so the quoted price is real.
+    // Snapshot it — the booking keeps the price the rider was shown even if the
+    // campaign is later edited, deactivated or allowed to expire.
+    const pricedLines: PricedLine[] = [];
+    if (input.packageId) {
+      const pkg = await db.servicePackage.findUnique({ where: { id: input.packageId }, select: { name: true, priceSen: true } });
+      if (pkg) pricedLines.push({ description: pkg.name, priceSen: pkg.priceSen });
+    }
+    for (const a of input.addons ?? []) {
+      pricedLines.push({ description: a.description, priceSen: a.unitPriceSen * a.quantity });
+    }
+    const promoQuote = await resolvePromoForBooking({
+      branchId: input.branchId,
+      lines: pricedLines,
+      campaignId: input.campaignId,
+    });
+    const promoSnapshot = promoQuote ? toPromoSnapshot(promoQuote) : null;
+
     const created = await this.repo.create({
       branch: { connect: { id: input.branchId } },
       customer: { connect: { id: input.customerId } },
@@ -61,7 +81,10 @@ export class BookingService {
       timeSlot: input.timeSlot,
       notes: input.notes,
       source: input.source,
-      campaign: input.campaignId ? { connect: { id: input.campaignId } } : undefined,
+      // An auto-applied promo also records which campaign produced the discount.
+      campaign: (promoSnapshot?.campaignId ?? input.campaignId) ? { connect: { id: (promoSnapshot?.campaignId ?? input.campaignId)! } } : undefined,
+      promoDiscountSen: promoSnapshot?.savedSen ?? 0,
+      promoSnapshot: promoSnapshot ? (promoSnapshot as never) : undefined,
     });
     if (slot) {
       await db.appointmentSlot.update({ where: { id: slot.id }, data: { bookedCount: { increment: 1 } } });

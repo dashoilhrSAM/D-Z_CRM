@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { bookService } from "@/actions/rider";
 import { SERVICE_CATALOG, servicesForType } from "@/lib/service-catalog";
+import { bestPromoQuote, type PromoCampaign } from "@/modules/marketing/promo";
 import { motorcycleTypeInfo, MOTORCYCLE_TYPE_LABELS } from "@/lib/motorcycle-types";
 import { cn } from "@/lib/utils";
 import { formatRM } from "@/lib/money";
@@ -22,8 +23,12 @@ const TOMORROW = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 export interface BikeOption { id: string; brand: string; model: string; plate: string; type: string }
 export interface PackageOption { id: string; name: string; tier: string; priceSen: number; isBestValue?: boolean; description?: string | null }
 
-export function BookForm({ customerId, bikes, packages, campaignId, availableSlots = [], branchId }: {
+export function BookForm({ customerId, bikes, packages, campaignId, availableSlots = [], branchId, activePromos = [] }: {
   customerId: string; bikes: BikeOption[]; packages: PackageOption[]; campaignId?: string | null; availableSlots?: { date: string; time: string; remaining?: number }[]; branchId?: string;
+  /** MKT-013: promos that apply to this booking; the server narrows them (campaign link
+   *  wins, otherwise the best active promo). Punched through the same pure engine the
+   *  server uses, so the displayed price matches the charged price. */
+  activePromos?: PromoCampaign[];
 }) {
   const router = useRouter();
   const lang = useLang();
@@ -58,6 +63,16 @@ export function BookForm({ customerId, bikes, packages, campaignId, availableSlo
   const pkg = packages.find((p) => p.id === packageId);
   const extrasList = Object.values(extras);
   const totalSen = (pkg?.priceSen ?? 0) + extrasList.reduce((s, x) => s + x.priceSen, 0);
+
+  // MKT-013: the booking page used to advertise "−20%" while charging full price.
+  // Same pure engine as the server, so what is shown is what is charged.
+  const quote = bestPromoQuote(
+    [
+      ...(pkg ? [{ description: pkg.name, priceSen: pkg.priceSen }] : []),
+      ...extrasList.map((x) => ({ description: x.label, priceSen: x.priceSen })),
+    ],
+    activePromos,
+  );
 
   const submit = () =>
     start(async () => {
@@ -209,7 +224,24 @@ export function BookForm({ customerId, bikes, packages, campaignId, availableSlo
             <div key={x.label} className="flex justify-between text-xs"><span>{x.label}</span><span className="tabular-nums">{formatRM(x.priceSen)}</span></div>
           ))}
           {!pkg && extrasList.length === 0 && <p className="text-xs text-muted-foreground">{t("book.no-services", lang)}</p>}
-          <div className="flex justify-between border-t pt-1.5 mt-1.5 font-bold"><span>{t("book.estimated-total", lang)}</span><span className="tabular-nums">{formatRM(totalSen)}</span></div>
+          {quote ? (
+            <>
+              <div className="flex justify-between border-t pt-1.5 mt-1.5 text-[13px] text-muted-foreground">
+                <span>{t("book.estimated-total", lang)}</span>
+                <span className="tabular-nums line-through">{formatRM(quote.originalSen)}</span>
+              </div>
+              <div className="flex justify-between text-[13px] font-medium text-emerald-600 dark:text-emerald-400">
+                <span>{quote.campaignName} −{quote.discountPercent}%</span>
+                <span className="tabular-nums">−{formatRM(quote.savedSen)}</span>
+              </div>
+              <div className="flex justify-between font-bold">
+                <span>{t("book.total-payable", lang)}</span>
+                <span className="tabular-nums">{formatRM(quote.discountedSen)}</span>
+              </div>
+            </>
+          ) : (
+            <div className="flex justify-between border-t pt-1.5 mt-1.5 font-bold"><span>{t("book.estimated-total", lang)}</span><span className="tabular-nums">{formatRM(totalSen)}</span></div>
+          )}
         </div>
       </div>
 

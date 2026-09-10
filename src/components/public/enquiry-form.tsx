@@ -6,7 +6,7 @@ import { submitWebsiteEnquiry } from "@/actions/website";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 
-export function EnquiryForm({ defaultModel, branches }: { defaultModel?: string; branches: { id: string; label: string }[] }) {
+export function EnquiryForm({ defaultModel, branches, campaignId }: { defaultModel?: string; branches: { id: string; label: string }[]; campaignId?: string | null }) {
   const lang = useLang();
   const [form, setForm] = useState({ name: "", phone: "", email: "", model: defaultModel ?? "", notes: "", branchId: "" });
   const [done, setDone] = useState<{ ok: boolean; leadNumber?: string; error?: string } | null>(null);
@@ -21,6 +21,7 @@ export function EnquiryForm({ defaultModel, branches }: { defaultModel?: string;
     const res = await submitWebsiteEnquiry({
       name: form.name, phone: form.phone, email: form.email || undefined, model: form.model || undefined,
       notes: form.notes || undefined, branchId: form.branchId || undefined,
+      campaignId: campaignId || undefined,
     });
     setBusy(false);
     setDone(res);

@@ -2,11 +2,22 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
+import { getSessionUser } from "@/lib/session-user";
+import { scopedBranchId } from "@/lib/branch-scope";
 import { leadsModule } from "@/modules/leads/service";
 
+/**
+ * 分行归属：lead 属分行级运营数据。branch 级用户建的单必须落在自己分行，
+ * 否则会被 leads 列表（按 session.branchId 过滤）立即过滤掉——建完即消失。
+ * org 级角色回退主店。
+ */
 async function defaultOrgBranch() {
   const org = await db.organisation.findFirst();
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  const session = await getSessionUser();
+  const branchScope = scopedBranchId(session);
+  const branch = branchScope
+    ? await db.branch.findFirst({ where: { id: branchScope, organisationId: org!.id } })
+    : await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
   return { org: org!, branch: branch! };
 }
 
@@ -23,6 +34,8 @@ export async function createLead(input: {
   assignedUserId?: string;
   nextFollowUpAt?: string;
   tags?: string;
+  /** MKT-015: campaign attribution from a campaign landing link. */
+  campaignId?: string;
 }) {
   const { org, branch } = await defaultOrgBranch();
   const dupes = await leadsModule.findDuplicates(org.id, input.phone, input.email);
@@ -49,6 +62,7 @@ export async function createLead(input: {
     assignedUserId: input.assignedUserId,
     nextFollowUpAt: input.nextFollowUpAt ? new Date(input.nextFollowUpAt) : null,
     tags: input.tags,
+    campaignId: input.campaignId ?? null,
   });
   revalidatePath("/", "layout");
   return { ok: true, id: lead.id, leadNumber: lead.leadNumber, duplicates: dupes.length };
@@ -93,9 +107,13 @@ export async function addLeadNote(id: string, note: string) {
 }
 
 export async function convertLead(id: string) {
-  const { org, branch } = await defaultOrgBranch();
+  const { org, branch: defaultBranch } = await defaultOrgBranch();
   const lead = await db.lead.findUnique({ where: { id } });
   if (!lead) return { ok: false, error: "Lead not found" };
+  // 客户归属沿用 lead 自己的分行，缺失时才回退 session/主店归属
+  const branch = lead.branchId
+    ? ((await db.branch.findFirst({ where: { id: lead.branchId, organisationId: org.id } })) ?? defaultBranch)
+    : defaultBranch;
   // re-check duplicates on the phone/email before converting
   const dupes = await leadsModule.findDuplicates(org.id, lead.phone, lead.email, lead.id);
   let customerId: string;

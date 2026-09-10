@@ -2,25 +2,30 @@
 
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
-import { messagingModule } from "@/modules/messaging/service";
+import { broadcast } from "@/modules/marketing/broadcast";
 
-/** Send a poster (title + link) to a list of customers via WhatsApp. */
-export async function sendPosterToCustomers(posterId: string, customerIds: string[]): Promise<{ ok: boolean; sent: number; skipped: number }> {
+/**
+ * Send a poster (title + link) to a list of customers via WhatsApp.
+ *
+ * Uses the shared broadcast pipeline. The previous inline loop counted *every* thrown
+ * error as "skipped" — provider failures were indistinguishable from opt-outs and
+ * vanished from the failure count.
+ */
+export async function sendPosterToCustomers(posterId: string, customerIds: string[]): Promise<{ ok: boolean; sent: number; failed: number; skipped: number }> {
   const poster = await db.marketingAsset.findUnique({ where: { id: posterId } });
-  if (!poster) return { ok: false, sent: 0, skipped: 0 };
+  if (!poster) return { ok: false, sent: 0, failed: 0, skipped: 0 };
   const base = process.env.NEXT_PUBLIC_BASE_URL ?? "http://localhost:3002";
-  let sent = 0;
-  let skipped = 0;
-  for (const cid of customerIds.slice(0, 50)) {
-    try {
-      const body = "Check out our latest: " + poster.title + " 🏍️ — " + base + poster.url;
-      // sendDirect applies the MSG-017 marketing opt-out guard internally (throws CUSTOMER_OPTED_OUT)
-      await messagingModule.sendDirect({ customerId: cid, body, referenceType: "POSTER", isMarketing: true });
-      sent++;
-    } catch { skipped++; }
-  }
+  const body = "Check out our latest: " + poster.title + " 🏍️ — " + base + poster.url;
+  const result = await broadcast({
+    customerIds,
+    body,
+    referenceType: "POSTER",
+    referenceId: poster.id,
+    branchId: poster.branchId,
+    isMarketing: true,
+  });
   revalidatePath("/", "layout");
-  return { ok: true, sent, skipped };
+  return { ok: true, ...result, skipped: result.optedOut + result.capped };
 }
 
 /** Publish / unpublish a poster to the Rider News feed (workshop-side control). */
