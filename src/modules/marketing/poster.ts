@@ -12,6 +12,7 @@ import sharp from "sharp";
 import type { OverlayOptions } from "sharp";
 import { renderTextBlocks, type TextBlock } from "./poster-text";
 import { sampleFromMean, type ColourSample } from "./poster-grade";
+import { applyPrint, type PrintTreatment } from "./poster-print";
 
 export interface ProductPlacement {
   buffer: Buffer;
@@ -40,6 +41,13 @@ export interface ProductPlacement {
    * matchGrade(). Without it a warm poster keeps a cool studio bottle in it.
    */
   channel?: [number, number, number];
+  /**
+   * Print treatment for the cut-out, for flat/print art directions.
+   *
+   * A photograph inside flat shapes always reads as pasted on, whatever its lighting, so
+   * the photograph is flattened into a screen-printed look. Null on photographic styles.
+   */
+  print?: PrintTreatment | null;
 }
 
 /**
@@ -206,6 +214,11 @@ export async function composePoster(spec: PosterSpec): Promise<Buffer> {
       saturation: p.saturation,
       channel: p.channel,
     });
+    // Treatment runs on the fitted image rather than the source: the dot pitch is
+    // expressed against the size the product is actually rendered at.
+    if (p.print) {
+      fitted.buffer = await applyPrint(fitted.buffer, p.print);
+    }
     const cx = px(p.centerX ?? 0.72, width);
     const bottom = px(p.bottomY ?? 0.82, height);
     const top = Math.max(0, bottom - fitted.height);

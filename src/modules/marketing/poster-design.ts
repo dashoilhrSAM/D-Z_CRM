@@ -104,7 +104,7 @@ export interface PosterStyle {
 export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
   GRAPHIC: {
     key: "GRAPHIC", label: "Graphic", summary: "Flat vector, bold colour blocks, print feel", medium: "graphic",
-    stageLook: "a clean flat panel in the poster's own palette with a crisp edge and a small corner radius, as if a product photo had been pasted into a print layout",
+    stageLook: "the existing flat colour field simply continuing through it, with no border, no frame and no separate panel",
     swatch: "linear-gradient(135deg,#0f766e,#f97316 55%,#fef3c7)",
     direction:
       "Design a FLAT GRAPHIC EDITORIAL poster. VISUAL: bold flat vector shapes and strong colour blocking in teal, burnt orange and cream; " +
@@ -113,7 +113,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
   },
   INDUSTRIAL: {
     key: "INDUSTRIAL", label: "Industrial", summary: "Concrete, hazard stripes, oversized type", medium: "graphic",
-    stageLook: "a hard rectangle framed by a stencilled border or thin hazard-stripe edge, like a spec plate mounted on the layout",
+    stageLook: "the concrete or metal surface already in the artwork continuing through it, with no plate, no frame and no stencilled border",
     swatch: "linear-gradient(135deg,#1c1917,#f97316)",
     direction:
       "Design an INDUSTRIAL / BRUTALIST advertising poster. VISUAL: raw concrete and brushed metal textures; heavy black with safety-orange accents; " +
@@ -122,7 +122,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
   },
   BLUEPRINT: {
     key: "BLUEPRINT", label: "Blueprint", summary: "Technical drawing, navy grid, callouts", medium: "graphic",
-    stageLook: "a rectangle outlined in thin white technical rules with small corner ticks, presented as an inset viewport in the drawing",
+    stageLook: "the navy grid field continuing through it, still showing the same grid, with no viewport outline and no frame",
     swatch: "linear-gradient(135deg,#0c1e3d,#38bdf8)",
     direction:
       "Design a TECHNICAL BLUEPRINT poster. VISUAL: deep navy blueprint background with a fine white technical grid; precise exploded-view line drawings of " +
@@ -131,7 +131,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
   },
   BOLD: {
     key: "BOLD", label: "Bold promo", summary: "Diagonal energy, big shapes, sale energy", medium: "graphic",
-    stageLook: "a strong panel cut on a diagonal or a bold rounded shape with a thick contrasting edge, sitting on top of the background shapes",
+    stageLook: "the background colour blocks continuing through it, with no separate shape laid on top and no thick contrasting edge",
     swatch: "linear-gradient(135deg,#1e3a8a,#f97316)",
     direction:
       "Design a BOLD PROMOTIONAL poster with advertising-poster energy. VISUAL: giant diagonal colour blocks in deep navy and vivid orange slicing across the frame; " +
@@ -139,7 +139,7 @@ export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
   },
   CINEMATIC: {
     key: "CINEMATIC", label: "Cinematic", summary: "Moody hero shot, minimal, expensive", medium: "photo",
-    stageLook: "a soft-edged pool of light with no hard border at all, fading into the surrounding scene",
+    stageLook: "a soft pool of light with no hard border at all, fading into the surrounding scene",
     swatch: "linear-gradient(135deg,#09090b,#78716c)",
     direction:
       "Design a CINEMATIC HERO poster, like a premium automotive brand campaign. VISUAL: one dramatic light source; deep shadow; volumetric haze; " +
@@ -235,14 +235,14 @@ export function buildDesignPrompt(brief: DesignBrief): string {
     ...textInstructions(brief),
     "Place all typography in " + layout.textZoneHint + ".",
     "",
-    "CRITICAL — THE RESERVED PRODUCT WINDOW",
+    "CRITICAL — THE RESERVED PRODUCT AREA",
     "- Do NOT draw any bottle, jug, can, container, tube, packaging or product of any kind, and do not draw an illustration of one.",
-    "- Build " + stageLook + " occupying " + windowPct + " of the canvas — " + layout.stageHint + ".",
-    "- Inside that window paint ONLY a plain seamless studio backdrop and the soft shadow a photographed object would cast onto it: an evenly lit surface, like the sweep a product is photographed on. Nothing else.",
-    "- That backdrop must be a colour taken from your own poster palette and must sit at the same brightness and mood as the rest of the design — a seamless sweep that continues the artwork. It must NOT be plain white or a bright empty box: a white panel punches a hole in a dark poster and makes the product read as a sticker.",
-    "- Let the window take a shape that belongs to the layout (a panel, an arch, a circle, a torn edge) rather than a plain rectangle with a hard border.",
-    "- The window must contain no object, no product, no text, no logo and no pattern that would sit behind a product. It is deliberately empty.",
-    "- That window is where a real product photograph is placed afterwards, so design the surrounding layout to frame it.",
+    "- Keep " + windowPct + " of the canvas clear of objects and clutter — " + layout.stageHint + ".",
+    "- That area is " + stageLook + ". Whatever surface is already there must simply continue through it, at the same colour, lighting and texture as its surroundings.",
+    "- It must NOT read as a separate panel, inset, frame, box, plate or contrasting block. A visible container around the product is the single most common way this design fails: it makes the product look placed into a window instead of standing in your scene.",
+    "- Leave the soft shadow a standing object would cast on that surface, and nothing else there.",
+    "- No text, no logo and no busy pattern in that area. It is deliberately empty.",
+    "- A real product is placed there afterwards, so keep it uncluttered rather than framing it.",
     "",
     "Quality: crisp legible kerning, correct spelling, sharp edges, print-ready finish.",
     "The only words in the final image must be exactly: " + approved.map((s) => "\"" + s + "\"").join(", ") + ".",

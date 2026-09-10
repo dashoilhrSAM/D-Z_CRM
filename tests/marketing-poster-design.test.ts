@@ -51,21 +51,26 @@ describe("buildDesignPrompt", () => {
     expect(prompt).toMatch(/do not draw an illustration of one/i);
   });
 
-  it("reserves a product window and keeps it empty", () => {
-    expect(prompt).toMatch(/RESERVED PRODUCT WINDOW/i);
-    expect(prompt).toMatch(/must contain no object/i);
+  it("reserves a product area and keeps it empty", () => {
+    expect(prompt).toMatch(/RESERVED PRODUCT AREA/i);
     expect(prompt).toMatch(/deliberately empty/i);
+    expect(prompt).toMatch(/no text, no logo and no busy pattern/i);
   });
 
   /**
-   * The composited product is a photograph. Surrounded by flat shapes it reads as pasted
-   * on, and the critiques said so twice; telling the model to build a photographic window
-   * is what makes a photograph there look intentional instead of accidental.
+   * The window the model used to be asked for is what produced the complaint: a distinct
+   * panel around the bottle reads as an inset and separates the product from the scene.
+   * The product is now print-treated (poster-print.ts) so it no longer needs a
+   * photographic home — the reserved area should simply be part of the artwork.
    */
-  it("asks for the window to be photographable, so the photo has somewhere to belong", () => {
-    expect(prompt).toMatch(/seamless studio backdrop/i);
-    expect(prompt).toMatch(/soft shadow a photographed object would cast/i);
+  it("asks for the reserved area to continue the artwork rather than be a panel", () => {
+    expect(prompt).toMatch(/must NOT read as a separate panel, inset, frame, box, plate or contrasting block/i);
+    expect(prompt).toMatch(/must simply continue through it, at the same colour, lighting and texture/i);
     expect(prompt).toContain(POSTER_STYLES.GRAPHIC.stageLook);
+  });
+
+  it("still asks for a ground shadow, so the product does not float", () => {
+    expect(prompt).toMatch(/soft shadow a standing object would cast/i);
   });
 
   it("gives the model the window position in the same percentages the compositor uses", () => {

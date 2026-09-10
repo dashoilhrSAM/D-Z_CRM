@@ -11,6 +11,7 @@ import { generateFromPrompt, SIZE_MAP, type PosterSizeKey } from "./images";
 import { POSTER_LAYOUTS, buildDesignPrompt, stageRect, styleFor, type DesignBrief, type PosterStyleKey } from "./poster-design";
 import { matchGrade } from "./poster-grade";
 import { readProductColours } from "./product-colours-read";
+import { treatmentFor } from "./poster-print";
 import sharp from "sharp";
 import { verifyPosterText, type VerificationResult } from "./poster-verify";
 import type { ExpandedContent } from "./expand";
@@ -39,6 +40,8 @@ export interface RenderResult {
   verification: VerificationResult;
   /** How the product was graded to sit on this poster, for diagnosing a bad placement. */
   grade: string;
+  /** Print treatment applied to the cut-out, or null when the style is photographic. */
+  treatment: string | null;
   /** True when a second attempt was generated because the first had missing words. */
   retried: boolean;
 }
@@ -128,6 +131,7 @@ export async function renderScriptPoster(
   const artwork = await generateFromPrompt(prompt, size);
 
   let gradeReason = "no product placed";
+  let treatmentReason: string | null = null;
 
   /**
    * Composite the finished poster from one piece of artwork.
@@ -147,7 +151,15 @@ export async function renderScriptPoster(
     if (productBuffer) {
       const stage = await sampleRegion(canvas, stageRect(layout, dims.width, dims.height));
       const grade = matchGrade(stage);
+      // Flat art directions get the photographic cut-out flattened to a printed look;
+      // photographic ones keep the photograph. See poster-print.ts for the measurements
+      // behind that decision.
+      const treatment = treatmentFor(
+        style.medium,
+        Math.round(layout.stage.heightRatio * dims.height),
+      );
       gradeReason = grade.reason;
+      treatmentReason = treatment ? treatment.reason : null;
       products.push({
         buffer: productBuffer,
         sku: productSku ?? "unknown",
@@ -157,6 +169,7 @@ export async function renderScriptPoster(
         brightness: grade.brightness,
         saturation: grade.saturation,
         channel: grade.channel,
+        print: treatment,
       });
     }
 
@@ -206,6 +219,7 @@ export async function renderScriptPoster(
     expectedText,
     verification,
     grade: gradeReason,
+    treatment: treatmentReason,
     retried,
   };
 }
