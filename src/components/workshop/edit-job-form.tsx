@@ -88,8 +88,11 @@ export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics:
           <div>
             <Label>{t("job-form.mechanic", lang)}</Label>
             <Select value={mechanicId} onValueChange={(v) => setMechanicId(v ?? "")}>
-              <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full sm:w-80"><SelectValue>{(v) => (v === "none" ? t("job-form.unassigned", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.unassigned", lang))}</SelectValue></SelectTrigger>
-              <SelectContent>
+              {/* w-full, not a fixed width: this sits in a three-column grid and anything
+                  wider than its own column spills over the Customer Request field beside it.
+                  The dropdown is kept readable by the popup's min-width instead. */}
+              <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full"><SelectValue>{(v) => (v === "none" ? t("job-form.unassigned", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.unassigned", lang))}</SelectValue></SelectTrigger>
+              <SelectContent className="min-w-64">
                 <SelectItem value="none">{t("job-form.unassigned", lang)}</SelectItem>
                 {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{mechanicLabel(m, showBranch)}</SelectItem>)}
               </SelectContent>

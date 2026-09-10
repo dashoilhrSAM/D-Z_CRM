@@ -109,18 +109,30 @@ test("the mechanic picker lists only this branch staff, and clips nothing", asyn
   expect(options.filter((o) => o.clipped).map((o) => o.text), "option text was clipped").toEqual([]);
 });
 
-test("an existing job reassign picker is scoped to that job branch", async ({ page, context }) => {
+test("an existing job reassign picker is scoped to that job branch, and fits its column", async ({ page, context }) => {
+  // A real job id, looked up rather than linked to. The first /workshop/jobs/* link on the
+  // jobs list is "Create Job" — an earlier version of this test followed it and spent its
+  // time on the create page while claiming to check the edit one.
+  const job = await db.serviceJob.findFirstOrThrow({ select: { id: true } });
+
   await setPersona(context, "OWNER");
-  await page.goto(BASE_URL + "/workshop/jobs");
+  await page.goto(BASE_URL + "/workshop/jobs/" + job.id);
   await settle(page);
 
-  await page.locator('a[href^="/workshop/jobs/"]').first().click();
-  await page.waitForURL("**/workshop/jobs/**");
-  await settle(page);
+  await page.getByRole("button", { name: /edit details/i }).click();
+  await expect(page.getByText("Edit Job Details")).toBeVisible();
 
-  await page.getByTestId("mechanic-select").click();
+  // The dialog puts mileage, mechanic and customer request in three equal columns. A fixed
+  // width on the trigger spilled it over the field beside it, so this is checked as
+  // geometry — a class name cannot tell you that two boxes overlap.
+  const mechanic = page.getByTestId("mechanic-select");
+  const request = page.locator('input[placeholder="—"]');
+  const m = (await mechanic.boundingBox())!;
+  const r = (await request.boundingBox())!;
+  expect(m.x + m.width, "the mechanic picker overlaps the Customer Request field").toBeLessThanOrEqual(r.x + 1);
+
+  await mechanic.click();
   const options = await readOptions(page);
-
   expect(options.length).toBeGreaterThan(0);
   expect(await popupWidth(page), "the dropdown is too narrow to show its options").toBeGreaterThanOrEqual(240);
   expect(options.filter((o) => o.clipped).map((o) => o.text), "option text was clipped").toEqual([]);

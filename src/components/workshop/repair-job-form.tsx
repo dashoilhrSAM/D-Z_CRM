@@ -204,8 +204,8 @@ export function RepairJobForm({
         <section className="rounded-2xl border bg-card p-5">
           <h3 className="font-semibold mb-3">{t("job-form.heading-mechanic", lang)}</h3>
           <Select value={mechanicId} onValueChange={(v) => setMechanicId(v ?? "none")}>
-            <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full max-w-md"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
-            <SelectContent>
+            <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full max-w-sm"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
+            <SelectContent className="min-w-64">
               <SelectItem value="none">{t("job-form.assign-later", lang)}</SelectItem>
               {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{mechanicLabel(m, showBranch)}</SelectItem>)}
             </SelectContent>
