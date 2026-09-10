@@ -45,6 +45,13 @@ export interface AiProvider {
    * never be mistaken for data. Never returns a partial or guessed object.
    */
   chatJson<T>(messages: AiChatMessage[], opts?: AiChatOptions & { retries?: number }): Promise<T>;
+  /**
+   * Read text out of an image. Used to verify that generated artwork actually contains
+   * the words it was asked to render — an image model can produce a beautiful poster with
+   * a subtly misspelled word, and nothing else in the pipeline would notice.
+   * Always strict: a failed read must not look like a clean read.
+   */
+  chatVision(image: Buffer, prompt: string, opts?: { maxTokens?: number }): Promise<string>;
 }
 
 /** A chat message for the AiProvider.chat (system / user / assistant). */

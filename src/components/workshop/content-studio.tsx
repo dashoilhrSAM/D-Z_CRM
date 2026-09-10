@@ -47,6 +47,7 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
   const [selectedId, setSelectedId] = useState("");
   const [expanded, setExpanded] = useState<Expanded | null>(null);
   const [posterUrl, setPosterUrl] = useState("");
+  const [posterCheck, setPosterCheck] = useState<{ ok: boolean; missing: string[]; readError?: string; retried: boolean; transcribed?: string } | null>(null);
   const [copied, setCopied] = useState("");
 
   async function call(payload: Record<string, unknown>) {
@@ -86,10 +87,11 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
 
   const renderPoster = async (size: string) => {
     if (!selectedId) return;
-    setBusy("poster"); setError("");
+    setBusy("poster"); setError(""); setPosterCheck(null);
     try {
       const d = await call({ action: "poster", id: selectedId, size });
       setPosterUrl(d.url);
+      setPosterCheck(d.verification ? { ...d.verification, retried: Boolean(d.retried) } : null);
     } catch (e) { setError((e as Error).message); }
     setBusy("");
   };
@@ -270,9 +272,31 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
                 <div className="space-y-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={posterUrl} alt={t("ws.mkt.studio.poster", lang)} className="w-full rounded-xl border" />
-                  <a href={posterUrl} download className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
-                    <ImageIcon className="h-3.5 w-3.5" /> {t("ws.mkt.studio.download", lang)}
-                  </a>
+
+                  {posterCheck && !posterCheck.ok && (
+                    <p className="rounded-lg bg-amber-50 px-3 py-2 text-[11px] text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                      {posterCheck.readError
+                        ? t("ws.mkt.studio.check-unreadable", lang)
+                        : t("ws.mkt.studio.check-missing", lang).replace("{words}", posterCheck.missing.join(", "))}
+                      {posterCheck.retried ? " " + t("ws.mkt.studio.check-retried", lang) : ""}
+                    </p>
+                  )}
+                  {posterCheck?.ok && (
+                    <p className="rounded-lg bg-emerald-50 px-3 py-2 text-[11px] text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      {t("ws.mkt.studio.check-ok", lang)}
+                    </p>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <a href={posterUrl} download className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:underline">
+                      <ImageIcon className="h-3.5 w-3.5" /> {t("ws.mkt.studio.download", lang)}
+                    </a>
+                    {posterCheck?.transcribed && (
+                      <a href={posterUrl} target="_blank" rel="noreferrer" className="text-[11px] text-muted-foreground hover:text-foreground">
+                        {t("ws.mkt.studio.open-full", lang)}
+                      </a>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="flex h-64 items-center justify-center rounded-xl border border-dashed text-xs text-muted-foreground">

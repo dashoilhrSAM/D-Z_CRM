@@ -84,6 +84,42 @@ export class OpenAIProvider implements AiProvider {
     }
   }
 
+  /** Read text out of an image (vision). Always strict. */
+  async chatVision(image: Buffer, prompt: string, opts?: { maxTokens?: number }): Promise<string> {
+    const key = this.apiKey;
+    if (!key) throw new AiError("OPENAI_API_KEY is not configured");
+
+    const body = {
+      model: this.model,
+      max_completion_tokens: opts?.maxTokens ?? 700,
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: prompt },
+            { type: "image_url", image_url: { url: "data:image/png;base64," + image.toString("base64") } },
+          ],
+        },
+      ],
+    };
+
+    let res: Response;
+    try {
+      res = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new AiError("Vision request threw: " + (e as Error).message, e);
+    }
+    const data = await res.json() as { choices?: { message?: { content?: string } }[]; error?: { message?: string } };
+    if (!res.ok || data.error) throw new AiError("Vision request failed: " + (data.error?.message ?? "HTTP " + res.status));
+    const text = data.choices?.[0]?.message?.content?.trim() ?? "";
+    if (!text) throw new AiError("Vision returned an empty transcription");
+    return text;
+  }
+
   /**
    * Structured output. Always strict — a fallback string must never be parsed as data.
    * Retries once on an unparseable reply, telling the model what went wrong.

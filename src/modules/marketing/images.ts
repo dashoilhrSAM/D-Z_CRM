@@ -48,12 +48,23 @@ export interface BackgroundResult {
  * can see and retry.
  */
 export async function generateBackground(input: BackgroundRequest): Promise<BackgroundResult> {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) throw new AiError("OPENAI_API_KEY is not configured — cannot generate poster backgrounds");
-
   const sizeKey = input.size ?? "SQUARE";
-  const dims = SIZE_MAP[sizeKey];
   const prompt = [BACKGROUND_RULES, input.scene, input.mood ? "Mood: " + input.mood : ""].filter(Boolean).join(" ");
+  return generateFromPrompt(prompt, sizeKey);
+}
+
+/**
+ * Generate an image from a fully-formed prompt.
+ *
+ * Used by the poster designer, which composes its own detailed art direction rather than
+ * the generic background rules above. Always strict — a poster silently missing its
+ * artwork is worse than an error the operator can see and retry.
+ */
+export async function generateFromPrompt(prompt: string, sizeKey: PosterSizeKey): Promise<BackgroundResult> {
+  const key = process.env.OPENAI_API_KEY;
+  if (!key) throw new AiError("OPENAI_API_KEY is not configured — cannot generate poster artwork");
+
+  const dims = SIZE_MAP[sizeKey];
 
   let res: Response;
   try {

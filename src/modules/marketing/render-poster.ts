@@ -1,11 +1,15 @@
 // Render a finished poster for a selected script and store it.
 //
-// Split from the compositor so the expensive, failure-prone part (an image generation
-// call) is a single unit that a route handler can time out and retry around.
+// The model designs the poster — typography, layout, graphic language — and this module
+// adds the one thing it must not invent: the real product. The staged area it is told to
+// leave empty and the coordinates used to composite the bottle come from the same
+// POSTER_LAYOUTS entry, so they cannot drift apart.
 import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
-import { composePoster, footerBlocks, type ProductPlacement } from "./poster";
-import { generateBackground, sceneFor, SIZE_MAP, type PosterSizeKey } from "./images";
+import { composePoster, type ProductPlacement } from "./poster";
+import { generateFromPrompt, SIZE_MAP, type PosterSizeKey } from "./images";
+import { POSTER_LAYOUTS, buildDesignPrompt, type DesignBrief } from "./poster-design";
+import { verifyPosterText, type VerificationResult } from "./poster-verify";
 import type { ExpandedContent } from "./expand";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,17 +26,49 @@ export interface RenderResult {
   height: number;
   bytes: number;
   usedProduct: string | null;
-  scene: string;
+  /** The exact prompt the artwork was generated from, for review and reuse. */
+  prompt: string;
+  /** Summary of the words the poster was instructed to contain. */
+  expectedText: string[];
+  /** Read-back check of the rendered poster. */
+  verification: VerificationResult;
+  /** True when a second attempt was generated because the first had missing words. */
+  retried: boolean;
 }
 
 /**
- * Generate the background, composite the product and the text, store the PNG and record
- * its URL on the script. Throws on any failure — a poster that silently failed to render
- * would be indistinguishable from one that is still working.
+ * Turn expanded content into a design brief.
+ *
+ * Pure and exported so the mapping from script to poster text can be reviewed and tested
+ * without generating an image.
+ */
+export function briefFrom(expanded: ExpandedContent, opts: {
+  size: PosterSizeKey;
+  brandName: string;
+  badge?: string | null;
+}): DesignBrief {
+  const pt = expanded.posterText;
+  // The caption line carries the product identity, which is what a buyer needs to match
+  // the bottle on the shelf. Spec line preferred when both exist.
+  const caption = [pt.productLine, pt.specsLine].filter(Boolean).join(" · ") || null;
+  return {
+    size: opts.size,
+    brandName: opts.brandName,
+    badge: opts.badge ?? null,
+    headline: pt.headline,
+    sub: pt.sub ?? null,
+    caption,
+    cta: pt.cta ?? null,
+  };
+}
+
+/**
+ * Generate a designed poster and store it. Throws on any failure — a poster that
+ * silently failed would be indistinguishable from one still rendering.
  */
 export async function renderScriptPoster(
   scriptId: string,
-  opts?: { size?: PosterSizeKey; background?: Buffer },
+  opts?: { size?: PosterSizeKey },
 ): Promise<RenderResult> {
   const script = await db.contentScript.findUnique({ where: { id: scriptId } });
   if (!script) throw new Error("Script not found");
@@ -40,51 +76,84 @@ export async function renderScriptPoster(
   if (!expanded?.posterText) throw new Error("Script has not been expanded yet — expand it before rendering a poster");
 
   const size = opts?.size ?? "SQUARE";
+  const layout = POSTER_LAYOUTS[size];
   const dims = SIZE_MAP[size];
-  const width = dims.width;
-  const height = dims.height;
 
-  const background = opts?.background ?? (await generateBackground({
-    scene: expanded.posterScene || sceneFor({ kind: script.includeProduct ? "product" : "service", subject: script.angle }),
-    size,
-  })).buffer;
+  const product = script.includeProduct && script.productSku
+    ? await db.promoProduct.findUnique({ where: { sku: script.productSku } })
+    : null;
+  const org = await db.organisation.findFirst();
+  const brandName = org?.name ?? "D&Z Smart Workshop";
 
-  // product, only when the script actually calls for one
-  const products: ProductPlacement[] = [];
-  let usedProduct: string | null = null;
-  if (script.includeProduct && script.productSku) {
-    const p = await db.promoProduct.findUnique({ where: { sku: script.productSku } });
-    if (p?.imageUrl) {
-      products.push({ buffer: loadProductImage(p.imageUrl), sku: p.sku, heightRatio: 0.48, centerX: 0.76, bottomY: 0.70 });
-      usedProduct = p.sku;
-    }
+  // The occasion makes a good badge — "PROMO CUTI" is more useful than a blank corner.
+  let badge: string | null = null;
+  if (script.occasionKey) {
+    const occ = await db.occasion.findUnique({ where: { key: script.occasionKey }, select: { name: true } });
+    if (occ) badge = occ.name;
   }
 
-  const org = await db.organisation.findFirst();
-  const scale = width / 1080;
-  const pt = expanded.posterText;
+  const brief = briefFrom(expanded, { size, brandName, badge });
+  const prompt = buildDesignPrompt(brief);
 
-  const blocks = [
-    { text: pt.headline || script.title, x: Math.round(70 * scale), y: Math.round(190 * scale), size: Math.round(90 * scale), weight: "bold" as const, colour: "#ffffff", maxWidth: Math.round(width * 0.72) },
-    ...(pt.sub ? [{ text: pt.sub, x: Math.round(70 * scale), y: Math.round(280 * scale), size: Math.round(40 * scale), weight: "body" as const, colour: "#ffd166", maxWidth: Math.round(width * 0.66) }] : []),
-    ...(pt.productLine ? [{ text: pt.productLine, x: Math.round(70 * scale), y: Math.round(830 * scale), size: Math.round(44 * scale), weight: "bold" as const, colour: "#ffffff", maxWidth: Math.round(width * 0.6) }] : []),
-    ...(pt.specsLine ? [{ text: pt.specsLine, x: Math.round(70 * scale), y: Math.round(886 * scale), size: Math.round(30 * scale), weight: "body" as const, colour: "#7ee787", maxWidth: Math.round(width * 0.6) }] : []),
-    ...footerBlocks({ width, height, name: org?.name ?? "D&Z Smart Workshop", phone: org?.contactPhone ?? null, tagline: "Walk-in welcome", accent: "#ffd166" }),
-  ];
+  const artwork = await generateFromPrompt(prompt, size);
 
-  const png = await composePoster({
-    width, height, background, products,
-    scrims: [
-      { x: 0, y: 0, width: 1, height: 0.44, from: "#000000", to: "#000000", opacity: 0.55 },
-      { x: 0, y: 0.66, width: 1, height: 0.34, from: "#000000", to: "#000000", opacity: 0.68 },
-    ],
-    backgroundDarken: 0.12,
-    blocks,
+  // Only the product is composited — the model already placed the typography.
+  const products: ProductPlacement[] = [];
+  let usedProduct: string | null = null;
+  if (product?.imageUrl) {
+    products.push({
+      buffer: loadProductImage(product.imageUrl),
+      sku: product.sku,
+      heightRatio: layout.stage.heightRatio,
+      centerX: layout.stage.centerX,
+      bottomY: layout.stage.bottomY,
+    });
+    usedProduct = product.sku;
+  }
+
+  const compose = (bg: Buffer) => composePoster({
+    width: dims.width,
+    height: dims.height,
+    background: bg,
+    products,
+    blocks: [],
+    backgroundDarken: 0,
   });
+
+  const expectedText = [brief.headline, brief.sub, brief.caption, brief.brandName, brief.cta, brief.badge]
+    .filter((v): v is string => Boolean(v));
+
+  let png = await compose(artwork.buffer);
+
+  // Read the poster back. The model wrote the typography, so a misspelling is possible in
+  // a way it never was when we drew the text ourselves; one retry is cheap next to
+  // publishing a poster with a wrong word on it.
+  let verification = await verifyPosterText(png, expectedText);
+  let retried = false;
+  if (!verification.ok && !verification.readError) {
+    retried = true;
+    const second = await generateFromPrompt(prompt, size);
+    const secondPng = await compose(second.buffer);
+    const secondCheck = await verifyPosterText(secondPng, expectedText);
+    if (secondCheck.missing.length < verification.missing.length) {
+      png = secondPng;
+      verification = secondCheck;
+    }
+  }
 
   const key = "content-posters/" + script.id + "-" + Date.now().toString(36) + ".png";
   const url = await storageProvider.put(key, new Uint8Array(png), "image/png");
   await db.contentScript.update({ where: { id: script.id }, data: { posterUrl: url, posterRenderedAt: new Date() } });
 
-  return { url, width, height, bytes: png.length, usedProduct, scene: expanded.posterScene };
+  return {
+    url,
+    width: dims.width,
+    height: dims.height,
+    bytes: png.length,
+    usedProduct,
+    prompt,
+    expectedText,
+    verification,
+    retried,
+  };
 }

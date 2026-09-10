@@ -41,6 +41,11 @@ export class MockAIProvider implements AiProvider {
       "MockAIProvider cannot produce structured output. Configure OPENAI_API_KEY to enable the content engine.",
     );
   }
+
+  /** Refuses rather than pretending a poster was verified. */
+  async chatVision(): Promise<string> {
+    throw new AiError("MockAIProvider cannot read images. Configure OPENAI_API_KEY.");
+  }
 }
 
 export const aiProvider = new MockAIProvider();
