@@ -82,9 +82,48 @@ model Organisation {
   integrationConfigs IntegrationConfig[]
   promoProducts PromoProduct[]
   brandProfiles BrandProfile[]
+  occasions     Occasion[]
   permissions   Permission[]
   roleConfigs   RoleConfig[]
   serviceHistory ServiceHistory[]
+}
+
+
+/// A dated moment worth planning content around.
+///
+/// Not just festivals: for a motorcycle workshop the *rhythm* around a date matters more
+/// than the date itself — the long-distance travel rush before a major holiday, the
+/// monsoon months, the school-break travel peaks, payday. `angleHint` carries that
+/// editorial angle so generation knows what to actually say, not merely that a date exists.
+///
+/// Reference data with an optional organisation override: organisationId null means the
+/// row is shared nationwide calendar data.
+model Occasion {
+  id             String    @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  /// Stable identifier, e.g. MY-2026-RAYA-AIDILFITRI or MY-PAYDAY-2026-09
+  key            String    @unique
+  name           String
+  nameEn         String?
+  nameZh         String?
+  /// Dates are stored at UTC midnight (project convention) so they never shift with timezone.
+  startDate      DateTime
+  endDate        DateTime?
+  /// FESTIVAL | NATIONAL | SCHOOL_HOLIDAY | PAYDAY | MONSOON | INDUSTRY
+  type           String
+  /// 1-5, how much this matters to a motorcycle workshop. 5 = peak demand driver.
+  relevance      Int       @default(3)
+  /// How many days before startDate content should begin (pre-travel service window).
+  leadDays       Int       @default(7)
+  /// The editorial angle: what the workshop should actually say or offer.
+  angleHint      String?
+  notes          String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  @@index([startDate])
+  @@index([type])
 }
 
 // ---------- Marketing content engine ----------
