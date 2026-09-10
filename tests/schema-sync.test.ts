@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseSchema, ddlFor } from "../scripts/sync-prod-schema.mjs";
+import { parseSchema, ddlFor, resolveUrl, looksPooled } from "../scripts/sync-prod-schema.mjs";
 
 const schemaSrc = readFileSync(path.join(process.cwd(), "prisma/schema.pg.prisma"), "utf8");
 const models = parseSchema(schemaSrc) as Record<string, { column: string; type: string; optional: boolean; ddlDefault: string | null }[]>;
@@ -53,3 +53,44 @@ describe("ddlFor", () => {
     expect(notes.join(" ")).toContain("backfill");
   });
 });
+
+/**
+ * The build hung for 45 minutes on a database call that never returned, twice, on a
+ * project whose builds normally take 90 seconds. These cover the two decisions that stop
+ * it happening again: which url migrations are given, and whether a hang is even
+ * possible.
+ */
+describe("resolveUrl", () => {
+  it("prefers an explicit diagnostic url above everything", () => {
+    expect(resolveUrl({ DRIFT_CHECK_URL: "postgres://x", DIRECT_URL: "postgres://y", DATABASE_URL: "postgres://z" }))
+      .toEqual({ url: "postgres://x", source: "DRIFT_CHECK_URL" });
+  });
+
+  it("prefers the direct url over the pooled one, which is the whole point", () => {
+    // Prisma migrate commands need a real session and will hang on a pooler.
+    expect(resolveUrl({ DIRECT_URL: "postgres://direct", DATABASE_URL: "postgres://pooled" }))
+      .toEqual({ url: "postgres://direct", source: "DIRECT_URL" });
+  });
+
+  it("falls back to DATABASE_URL when no direct url is configured", () => {
+    expect(resolveUrl({ DATABASE_URL: "postgres://only" })).toEqual({ url: "postgres://only", source: "DATABASE_URL" });
+  });
+
+  it("skips a local sqlite build entirely, so a dev machine can never reach production", () => {
+    expect(resolveUrl({ DATABASE_URL: "file:./dev.db" }).url).toBe("");
+    expect(resolveUrl({}).url).toBe("");
+  });
+});
+
+describe("looksPooled", () => {
+  it("recognises the pooled shapes that break migrations", () => {
+    expect(looksPooled("postgresql://u:p@aws-0-ap.pooler.supabase.com:5432/postgres")).toBe(true);
+    expect(looksPooled("postgresql://u:p@db.x.supabase.co:6543/postgres")).toBe(true);
+    expect(looksPooled("postgresql://u:p@db.x.supabase.co:5432/postgres?pgbouncer=true")).toBe(true);
+  });
+
+  it("leaves a direct connection alone", () => {
+    expect(looksPooled("postgresql://u:p@db.dukbfgqbrprivnzcsrlh.supabase.co:5432/postgres")).toBe(false);
+  });
+});
+

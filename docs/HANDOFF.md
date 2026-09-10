@@ -3,6 +3,10 @@
 > 本文件由 session-pack 生成，session-resume 可续接。
 
 ## 一句话状态
+**✅ 生产 schema 已应用（2026-09-10）**：直接用直连地址对生产执行了增量同步——**66 → 70 张表、657 → 743 列**，新增 `Occasion`/`TrendTopic`/`PromoProduct`/`BrandProfile` + 10 索引 + 4 外键 + `ContentScript.angle`（可空 TEXT），共 112 条语句、**0 条 DROP/TRUNCATE**，耗时 2.2s，复验「schema and database agree」。既有数据全未受影响（User 21 / ServiceJob 25 / Invoice 17 / Booking 10 / Campaign 10 / Customer 3 / Motorcycle 6）。生产 /、/login、/contact 全 200。**⚠️ 但生产库里 Occasion=0、PromoProduct=0**——日历 38 条节点与 22 个产品当初只种进了本地 dev.db；部署成功后内容引擎会因「无节点、无产品」而看起来空转，需在生产跑 `scripts/seed-occasions.ts` 与 `scripts/import-promo-products.ts`（图片 public/products/*.webp 已随代码部署）。
+
+**🔴 当前最要紧**：生产部署连续超时——PR#12 45.6 分钟 ERROR、PR#13 仍在 BUILDING（正常部署只要 1–2 分钟）。根因 = buildCommand 里的 schema 同步步骤连生产库、而 `execFileSync` 默认无超时，池化连接下 Prisma 不报错只是**一直等**。已在分支 **fix/build-timeout-schema-sync** 修好（优先 DIRECT_URL + 每命令硬超时 + 检查失败放行/应用失败快速失败），**待 owner 合并**；另需 owner 在 Vercel 设 `DIRECT_URL`（Supabase 直连 5432）。**marketing 分支已被 owner 合并进 main（PR #13 → 22c4d73）**。
+
 **✅ 合并顺序已解锁**：`fix/prod-schema-drift-guard` 已由 owner 合并进 main（**PR #12 → main = 3ae3bad**），所以 **`feat/marketing-content-engine` 现可干净合并**（共同祖先 0b37413 已在 main 内，无冲突）。该分支内容引擎 **P1-P7 全部完成**（候选脚本→人工选→展开→AI 出图全链路 + 海报艺术方向可选 + 抠图印刷化）。生产当前健康（全 200，drift 0）。基线全绿（tsc 0 / lint 0 error / vitest **335**（25 文件）/ build 0）。品牌已确认 **DASHOIL**。
 
 ## 会话信息
@@ -65,7 +69,8 @@
 - **诊断命令**：`set -a; . ./.env; set +a; DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/check-prod-schema-drift.mjs`
 
 ## 下一步（按优先级）
-1. **合并 `feat/marketing-content-engine`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/feat/marketing-content-engine）——前置的 `fix/prod-schema-drift-guard` 已进 main（PR #12），**基已就位、可干净合并**，不会再触发上次那种全站 500。该分支含 10 个 commit（内容引擎 P1-P7 + 海报艺术方向 + 抠图印刷化）。
+1. **合并 `fix/build-timeout-schema-sync`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/fix/build-timeout-schema-sync）——**部署超时修复**，合并后生产才可能部署成功。**同时需在 Vercel 加 `DIRECT_URL`**（Supabase 直连 5432，非池化）。
+2. **（原）合并 `feat/marketing-content-engine`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/feat/marketing-content-engine）——前置的 `fix/prod-schema-drift-guard` 已进 main（PR #12），**基已就位、可干净合并**，不会再触发上次那种全站 500。该分支含 10 个 commit（内容引擎 P1-P7 + 海报艺术方向 + 抠图印刷化）。
 2. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂着，可择机真正 DROP（需人工决定）。
 3. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
 4. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步 —— 生产 PG 幂等加 Message.externalId 列 → push main（auto-deploy）→ Vercel 配 WHATSAPP_* env → Meta 配 webhook → 验证回执。
