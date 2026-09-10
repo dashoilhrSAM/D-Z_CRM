@@ -1092,6 +1092,36 @@ model ContentScript {
   body       String
   tone       String?
   createdAt  DateTime @default(now())
+
+  // ---------- Content engine (P4) ----------
+  // A candidate is simply a ContentScript that has not been chosen yet, so the existing
+  // Script Bank page keeps working unchanged while gaining the candidate workflow.
+  /// MANUAL | CANDIDATE | SELECTED | REJECTED | USED
+  status          String   @default("MANUAL")
+  /// MANUAL | AI
+  source          String   @default("MANUAL")
+  /// Groups the candidates produced by one generation run, so a whole batch can be
+  /// reviewed or discarded together.
+  batchId         String?
+  /// The angle this candidate takes — what makes it different from its siblings.
+  angle           String?
+  cta             String?
+  language        String?
+  /// Which brand voice produced it (BrandProfile.key).
+  brandKey        String?
+  /// What it was written for: an occasion window and/or a trend structure.
+  occasionKey     String?
+  trendKey        String?
+  /// The product toggle: whether this script shows a product, and which one.
+  includeProduct  Boolean  @default(false)
+  productSku      String?
+  /// Model self-assessment and its reason for picking this angle.
+  score           Int?
+  reasoning       String?
+  generatedAt     DateTime?
+
+  @@index([batchId])
+  @@index([status])
 }
 // ---------- Requirements §30 DATA: missing entities ----------
 
