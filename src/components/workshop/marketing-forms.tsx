@@ -44,6 +44,7 @@ export interface CampaignDraft {
   id: string; name: string; type: string; status: string; audience: string | null;
   audienceRules?: AudienceRules | null;
   startDate: Date; endDate: Date | null; discountPercent: number | null;
+  pointsBonus?: number | null;
 }
 
 function iso(d: Date): string { return d.toISOString().slice(0, 10); }
@@ -58,6 +59,7 @@ export function CampaignForm({ initial, onDone }: { initial?: CampaignDraft; onD
   const [startDate, setStartDate] = useState(initial ? iso(initial.startDate) : "");
   const [endDate, setEndDate] = useState(initial?.endDate ? iso(initial.endDate) : "");
   const [discount, setDiscount] = useState(initial?.discountPercent != null ? String(initial.discountPercent) : "");
+  const [pointsBonus, setPointsBonus] = useState(initial?.pointsBonus != null ? String(initial.pointsBonus) : "");
   const isEdit = !!initial;
 
   const submit = () => {
@@ -68,6 +70,8 @@ export function CampaignForm({ initial, onDone }: { initial?: CampaignDraft; onD
       audience: hasRules ? undefined : (initial?.audience ?? "ALL"),
       audienceRules: hasRules ? rules : null,
       startDate, endDate: endDate || undefined, discountPercent: discount ? Number(discount) : undefined,
+      // MKT-014: bonus loyalty points for bookings this campaign drove
+      pointsBonus: pointsBonus ? Number(pointsBonus) : null,
     };
     if (isEdit) {
       run(() => updateCampaign({ id: initial.id, ...payload }), t("ws.mkt.form.campaign-updated", lang));
@@ -106,9 +110,12 @@ export function CampaignForm({ initial, onDone }: { initial?: CampaignDraft; onD
             <div><Label>{t("ws.mkt.form.start-date", lang)}</Label><Input data-testid="campaign-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="mt-1.5" /></div>
             <div><Label>{t("ws.mkt.form.end-date", lang)}</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="mt-1.5" /></div>
           </div>
-          {type === "PROMO" && (
-            <div><Label>{t("ws.mkt.form.discount", lang)}</Label><Input data-testid="campaign-discount" type="number" min={1} max={100} value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder={t("ws.mkt.form.discount-placeholder", lang)} className="mt-1.5" /></div>
-          )}
+          <div className="grid grid-cols-2 gap-3">
+            {type === "PROMO" && (
+              <div><Label>{t("ws.mkt.form.discount", lang)}</Label><Input data-testid="campaign-discount" type="number" min={1} max={100} value={discount} onChange={(e) => setDiscount(e.target.value)} placeholder={t("ws.mkt.form.discount-placeholder", lang)} className="mt-1.5" /></div>
+            )}
+            <div><Label>{t("ws.mkt.form.points-bonus", lang)}</Label><Input data-testid="campaign-points-bonus" type="number" min={0} value={pointsBonus} onChange={(e) => setPointsBonus(e.target.value)} placeholder={t("ws.mkt.form.points-bonus-placeholder", lang)} className="mt-1.5" /></div>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>{t("ws.mkt.form.cancel", lang)}</Button>

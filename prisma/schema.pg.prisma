@@ -868,6 +868,9 @@ model Campaign {
   startDate      DateTime
   endDate        DateTime?
   discountPercent Int?                       // PROMO only: 1-100
+  // MKT-014: bonus loyalty points awarded when a booking attributed to this campaign
+  // completes, on top of the normal service points.
+  pointsBonus    Int?
   createdAt      DateTime       @default(now())
   bookings       Booking[]
   leads          Lead[]

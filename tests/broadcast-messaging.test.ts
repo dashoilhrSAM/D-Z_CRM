@@ -12,7 +12,8 @@ const { mockSend, mockMessageCreate, dbMock } = vi.hoisted(() => {
     campaign: { findUnique: vi.fn() },
     branch: { findFirst: vi.fn() },
     organisation: { findFirst: vi.fn() },
-    message: { create: mockMessageCreate },
+    // frequency cap looks up recent marketing messages; default to "none"
+    message: { create: mockMessageCreate, findMany: vi.fn().mockResolvedValue([]) },
   };
   return { mockSend, mockMessageCreate, dbMock };
 });

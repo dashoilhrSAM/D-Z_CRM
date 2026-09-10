@@ -9,6 +9,7 @@ import { PromoCalendarGrid, type CalendarCampaign } from "@/components/workshop/
 import { isPromoActive } from "@/modules/marketing/promo";
 import { buildAudienceWhere, rulesForCampaign } from "@/modules/marketing/audience";
 import { loadCampaignPerformance } from "@/modules/marketing/performance";
+import { syncCampaignStatuses } from "@/modules/marketing/lifecycle";
 import { PromoAutoApplyToggle } from "@/components/workshop/promo-auto-apply-toggle";
 import { formatRM } from "@/lib/money";
 import { getLang } from "@/lib/get-lang";
@@ -37,6 +38,12 @@ const statusTone: Record<string, string> = {
 
 export default async function MarketingCalendarPage() {
   const lang = await getLang();
+  const org = await db.organisation.findFirst();
+  // Apply the campaign lifecycle before reading: a SCHEDULED campaign whose start date
+  // has passed becomes ACTIVE here, so the status shown matches what the discount
+  // engine does. Idempotent, and a no-op when nothing is due.
+  if (org) await syncCampaignStatuses(org.id);
+
   const { campaigns } = await marketingService.overview();
 
   // audience size: customers due for service — a shop-wide figure for the page header
@@ -44,7 +51,6 @@ export default async function MarketingCalendarPage() {
   // MKT-005: the REAL reach of each campaign. The list below used to render the
   // shop-wide `dueCustomers` number against every campaign, which read as if each
   // campaign targeted those customers — it did not.
-  const org = await db.organisation.findFirst();
   const audienceSize = new Map<string, number>();
   if (org) {
     for (const c of campaigns) {
@@ -104,7 +110,7 @@ export default async function MarketingCalendarPage() {
                 )}
                 <span className={"rounded-full px-2.5 py-0.5 text-[11px] font-bold " + (statusTone[c.status] ?? "bg-slate-100 text-slate-600 dark:text-slate-300")}>{statusKey[c.status] ? t(statusKey[c.status], lang) : c.status}</span>
                 <CampaignForm
-                  initial={{ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience ?? null, audienceRules: c.audienceRules as never, startDate: c.startDate, endDate: c.endDate, discountPercent: c.discountPercent }}
+                  initial={{ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience ?? null, audienceRules: c.audienceRules as never, startDate: c.startDate, endDate: c.endDate, discountPercent: c.discountPercent, pointsBonus: c.pointsBonus }}
                 />
                 <BroadcastButton campaignId={c.id} stats={p?.messages ?? { sent: 0, delivered: 0, failed: 0 }} />
                 <CampaignActions id={c.id} status={c.status} />

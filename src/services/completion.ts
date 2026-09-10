@@ -35,7 +35,8 @@ export class CompletionService {
           parts: { include: { product: true } },
           approvals: true,
           invoice: true,
-          booking: true,
+          // MKT-014: the campaign carries the promo discount snapshot and points bonus
+          booking: { include: { campaign: true } },
         },
       });
       if (!job) throw new Error("Job not found");
@@ -184,18 +185,31 @@ export class CompletionService {
         data: { jobId: job.id, fromStatus: job.status, toStatus: "COMPLETED", changedAt: new Date() },
       });
       // LOY-017: award service-based loyalty points (1 pt per RM1 spent, rounded)
+      // MKT-014: a campaign can top that up with a bonus for bookings it drove.
       try {
         const pts = Math.max(10, Math.round(subtotal / 100));
+        const bonusPoints = Math.max(0, job.booking?.campaign?.pointsBonus ?? 0);
+        const total = pts + bonusPoints;
+
         await tx.loyaltyAccount.upsert({
           where: { customerId: job.customerId },
-          create: { organisationId: job.customer.organisationId, customerId: job.customerId, membershipId: "DZ-M-" + Date.now().toString(36).toUpperCase(), pointsBalance: pts, totalEarned: pts },
-          update: { pointsBalance: { increment: pts }, totalEarned: { increment: pts } },
+          create: { organisationId: job.customer.organisationId, customerId: job.customerId, membershipId: "DZ-M-" + Date.now().toString(36).toUpperCase(), pointsBalance: total, totalEarned: total },
+          update: { pointsBalance: { increment: total }, totalEarned: { increment: total } },
         });
         const acct = await tx.loyaltyAccount.findUnique({ where: { customerId: job.customerId } });
         if (acct) {
           await tx.loyaltyTransaction.create({
             data: { accountId: acct.id, type: "EARN", points: pts, balanceAfter: acct.pointsBalance, reason: "Service completed " + job.jobNumber, referenceType: "JOB", referenceId: job.id },
           });
+          if (bonusPoints > 0) {
+            await tx.loyaltyTransaction.create({
+              data: {
+                accountId: acct.id, type: "EARN", points: bonusPoints, balanceAfter: acct.pointsBalance,
+                reason: "Campaign bonus — " + (job.booking?.campaign?.name ?? "promotion"),
+                referenceType: "CAMPAIGN", referenceId: job.booking!.campaignId,
+              },
+            });
+          }
           const tier = await tx.loyaltyTier.findFirst({ where: { organisationId: job.customer.organisationId, active: true, minPoints: { lte: acct.totalEarned } }, orderBy: { minPoints: "desc" } });
           if (tier) await tx.loyaltyAccount.update({ where: { id: acct.id }, data: { tierId: tier.id } });
         }

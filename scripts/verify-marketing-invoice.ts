@@ -18,7 +18,8 @@ async function main() {
   const tag = "__mktverify_" + Date.now().toString(36);
   const customer = await db.customer.create({ data: { organisationId: org.id, branchId: branch.id, name: tag, phone: "+60100000000" } });
   const bike = await db.motorcycle.create({ data: { customerId: customer.id, brand: "Test", model: tag, plate: tag.slice(-8).toUpperCase(), year: 2020, currentMileage: 1000, type: "AUTO" } });
-  const campaign = await db.campaign.create({ data: { branchId: branch.id, name: tag, type: "PROMO", status: "ACTIVE", startDate: new Date(Date.now() - 86400000), endDate: new Date(Date.now() + 86400000), discountPercent: 20, audience: "ALL" } });
+  const pointsBonus = 50;
+  const campaign = await db.campaign.create({ data: { branchId: branch.id, name: tag, type: "PROMO", status: "ACTIVE", startDate: new Date(Date.now() - 86400000), endDate: new Date(Date.now() + 86400000), discountPercent: 20, pointsBonus, audience: "ALL" } });
 
   const subtotal = 6000;
   const expectedDiscount = 1200;
@@ -50,6 +51,17 @@ async function main() {
     record("invoice deducts the promo (MKT-017)", inv?.discountSen === expectedDiscount, "discountSen=" + inv?.discountSen + " expected " + expectedDiscount);
     record("invoice total is discounted", inv?.totalSen === expectedTotal, "totalSen=" + inv?.totalSen + " expected " + expectedTotal);
     record("receivable matches the discounted total", inv?.payments?.[0]?.amountSen === expectedTotal, "payment=" + inv?.payments?.[0]?.amountSen);
+
+    // MKT-014: campaign bonus points land on top of the normal service points
+    const acct = await db.loyaltyAccount.findUnique({ where: { customerId: customer.id } });
+    const basePoints = Math.max(10, Math.round(subtotal / 100));
+    record("loyalty points include the campaign bonus (MKT-014)", acct?.totalEarned === basePoints + pointsBonus,
+      "totalEarned=" + acct?.totalEarned + " expected " + (basePoints + pointsBonus));
+    const bonusTx = acct
+      ? await db.loyaltyTransaction.findFirst({ where: { accountId: acct.id, referenceType: "CAMPAIGN" } })
+      : null;
+    record("bonus is recorded as a separate campaign transaction", bonusTx?.points === pointsBonus,
+      "bonusTx.points=" + bonusTx?.points);
   } finally {
     // remove everything this run created, in FK-safe order
     const jobs = await db.serviceJob.findMany({ where: { customerId: customer.id }, select: { id: true } });

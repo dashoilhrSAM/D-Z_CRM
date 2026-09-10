@@ -14,6 +14,8 @@ export interface CreateCampaignInput {
   startDate: Date;
   endDate?: Date | null;
   discountPercent?: number | null;
+  /** MKT-014: bonus loyalty points awarded for bookings this campaign drove. */
+  pointsBonus?: number | null;
 }
 
 export interface CreateAssetInput {
@@ -44,7 +46,7 @@ export class MarketingService {
       this.repo.listScripts(),
     ]);
     return {
-      campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience, audienceRules: c.audienceRules, discountPercent: c.discountPercent, startDate: c.startDate, endDate: c.endDate, branch: c.branch.city })),
+      campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience, audienceRules: c.audienceRules, discountPercent: c.discountPercent, pointsBonus: c.pointsBonus, startDate: c.startDate, endDate: c.endDate, branch: c.branch.city })),
       assets: assets.map((a) => ({ id: a.id, title: a.title, type: a.type, month: a.month, description: a.description, url: a.url, published: a.published })),
       scripts: scripts.map((s) => ({ id: s.id, title: s.title, platform: s.platform, hook: s.hook, body: s.body, tone: s.tone })),
     };
@@ -61,6 +63,7 @@ export class MarketingService {
       startDate: input.startDate,
       endDate: input.endDate ?? null,
       discountPercent: input.discountPercent ?? null,
+      pointsBonus: input.pointsBonus ?? null,
     });
   }
 

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { marketingService } from "@/modules/marketing/service";
-import { messagingModule } from "@/modules/messaging/service";
+import { broadcast } from "@/modules/marketing/broadcast";
 import { getSessionUser } from "@/lib/session-user";
 import { scopedBranchId } from "@/lib/branch-scope";
 import { buildAudienceWhere, rulesForCampaign, type AudienceRules } from "@/modules/marketing/audience";
@@ -33,6 +33,8 @@ export async function createCampaign(input: {
   startDate: string;
   endDate?: string;
   discountPercent?: number;
+  /** MKT-014: bonus loyalty points for bookings this campaign drove. */
+  pointsBonus?: number | null;
 }) {
   const branchId = await mainBranchId();
   await marketingService.createCampaign({
@@ -45,6 +47,7 @@ export async function createCampaign(input: {
     startDate: new Date(input.startDate),
     endDate: input.endDate ? new Date(input.endDate) : null,
     discountPercent: input.discountPercent ?? null,
+    pointsBonus: input.pointsBonus ?? null,
   });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -58,6 +61,7 @@ export async function updateCampaign(input: {
   startDate?: string;
   endDate?: string | null;
   discountPercent?: number | null;
+  pointsBonus?: number | null;
   audience?: string;
   audienceRules?: AudienceRules | null;
 }) {
@@ -68,6 +72,7 @@ export async function updateCampaign(input: {
   if (input.startDate !== undefined) data.startDate = new Date(input.startDate);
   if (input.endDate !== undefined) data.endDate = input.endDate ? new Date(input.endDate) : null;
   if (input.discountPercent !== undefined) data.discountPercent = input.discountPercent;
+  if (input.pointsBonus !== undefined) data.pointsBonus = input.pointsBonus;
   if (input.audience !== undefined) data.audience = input.audience;
   // null clears the rules and falls the campaign back to its legacy audience code
   if (input.audienceRules !== undefined) data.audienceRules = input.audienceRules;
@@ -178,27 +183,18 @@ export async function broadcastCampaign(input: { campaignId: string; message?: s
 
   const customers = await audienceCustomers({ audience: campaign.audience, audienceRules: campaign.audienceRules });
   const body = input.message?.trim() || "Hi, " + campaign.name + " is on now at D&Z Smart Workshop" + (campaign.discountPercent ? " — save " + campaign.discountPercent + "%!" : " — book your service today!");
-  // 群发是营销消息：必须走 messagingModule，以便遵守 MSG-017 opt-out、真实送达状态与
-  // MSG-020 失败记录；计数按真实结果，不能把失败也算成已发。
-  let sent = 0, failed = 0, skipped = 0;
-  for (const c of customers) {
-    try {
-      const { sent: ok } = await messagingModule.sendDirect({
-        customerId: c.id,
-        body,
-        channel: "WHATSAPP",
-        isMarketing: true,
-        referenceType: "CAMPAIGN",
-        referenceId: campaign.id,
-        // attribute to the campaign's own branch, not the operator's session branch
-        branchId: campaign.branchId,
-      });
-      if (ok) sent++; else failed++;
-    } catch (e) {
-      if (e instanceof Error && e.message === "CUSTOMER_OPTED_OUT") { skipped++; continue; }
-      failed++;
-    }
-  }
+  // Single shared pipeline: MSG-017 opt-out, real delivery status, MSG-020 failure
+  // records, real-outcome counting and the frequency cap all live in marketing/broadcast.
+  const result = await broadcast({
+    customerIds: customers.map((c) => c.id),
+    body,
+    referenceType: "CAMPAIGN",
+    referenceId: campaign.id,
+    // attribute to the campaign's own branch, not the operator's session branch
+    branchId: campaign.branchId,
+    isMarketing: true,
+  });
   revalidatePath("/", "layout");
-  return { ok: true, sent, failed, skipped, audience: customers.length };
+  // `skipped` kept as an alias of optedOut for the existing broadcast button
+  return { ok: true, ...result, skipped: result.optedOut, audience: customers.length };
 }
