@@ -429,6 +429,7 @@ export const DICT: Dict = {
   "ws.mkt.studio.check-unreadable": { en: "Could not read the poster back to verify its text. Check the words visually before posting.", zh: "无法读回海报以校验文字。发布前请目视检查。", ms: "Tidak dapat membaca semula poster untuk semakan. Sila periksa teks secara manual." },
   "ws.mkt.studio.check-retried": { en: "A second attempt was generated automatically.", zh: "已自动重新生成过一次。", ms: "Percubaan kedua dijana secara automatik." },
   "ws.mkt.studio.open-full": { en: "Open full size", zh: "查看原图", ms: "Buka saiz penuh" },
+  "ws.mkt.studio.style": { en: "Art direction", zh: "设计风格", ms: "Arah seni" },
   "ws.mkt.studio.empty": { en: "Describe what you want above, then generate a batch of candidate scripts.", zh: "在上面描述需求，然后生成一批候选脚本。", ms: "Terangkan apa yang anda mahu di atas, kemudian jana kelompok skrip calon." },
   "nav.content-studio": { en: "Content Studio", zh: "内容工作室", ms: "Studio Kandungan" },
   "ws.mkt.calendar.type.RETURN": { en: "Return", zh: "回流", ms: "Pulangan" },

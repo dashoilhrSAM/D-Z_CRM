@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { cn } from "@/lib/utils";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
+import { POSTER_STYLES, DEFAULT_POSTER_STYLE, type PosterStyleKey } from "@/modules/marketing/poster-design";
 
 interface Candidate {
   id: string; angle: string; title: string; hook: string; body: string; cta: string;
@@ -46,6 +47,7 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
   const [batchId, setBatchId] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [expanded, setExpanded] = useState<Expanded | null>(null);
+  const [posterStyle, setPosterStyle] = useState<PosterStyleKey>(DEFAULT_POSTER_STYLE);
   const [posterUrl, setPosterUrl] = useState("");
   const [posterCheck, setPosterCheck] = useState<{ ok: boolean; missing: string[]; readError?: string; retried: boolean; transcribed?: string } | null>(null);
   const [copied, setCopied] = useState("");
@@ -89,7 +91,7 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
     if (!selectedId) return;
     setBusy("poster"); setError(""); setPosterCheck(null);
     try {
-      const d = await call({ action: "poster", id: selectedId, size });
+      const d = await call({ action: "poster", id: selectedId, size, style: posterStyle });
       setPosterUrl(d.url);
       setPosterCheck(d.verification ? { ...d.verification, retried: Boolean(d.retried) } : null);
     } catch (e) { setError((e as Error).message); }
@@ -248,6 +250,33 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
               <Button size="sm" variant="outline" onClick={() => renderPoster("SQUARE")} disabled={busy !== ""}>1:1</Button>
               <Button size="sm" variant="outline" onClick={() => renderPoster("STORY")} disabled={busy !== ""}>9:16</Button>
               <Button size="sm" variant="outline" onClick={() => renderPoster("BANNER")} disabled={busy !== ""}>16:9</Button>
+            </div>
+          </div>
+
+          {/* Art direction. Graphic styles score highest: their typography is composed
+              into the layout rather than laid over a photograph. */}
+          <div className="mt-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t("ws.mkt.studio.style", lang)}</div>
+            <div className="mt-1.5 flex flex-wrap gap-2">
+              {(Object.values(POSTER_STYLES)).map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  data-testid={"poster-style-" + s.key}
+                  onClick={() => setPosterStyle(s.key)}
+                  title={s.summary}
+                  className={cn(
+                    "flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-left transition-colors",
+                    posterStyle === s.key ? "border-primary ring-1 ring-primary/40" : "hover:border-primary/40",
+                  )}
+                >
+                  <span className="h-6 w-6 shrink-0 rounded-md border" style={{ backgroundImage: s.swatch }} />
+                  <span className="text-xs font-medium leading-tight">
+                    {s.label}
+                    <span className="block text-[10px] font-normal text-muted-foreground">{s.summary}</span>
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
 

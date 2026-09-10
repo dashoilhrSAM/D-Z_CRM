@@ -84,7 +84,8 @@ export async function POST(req: NextRequest) {
         const id = String(body.id ?? "");
         if (!id) return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
         const size = body.size === "STORY" || body.size === "BANNER" ? body.size : "SQUARE";
-        const result = await renderScriptPoster(id, { size });
+        const style = body.style ? String(body.style) : undefined;
+        const result = await renderScriptPoster(id, { size, style: style as never });
         return NextResponse.json({ ok: true, ...result });
       }
 

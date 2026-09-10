@@ -8,7 +8,7 @@ import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
 import { composePoster, type ProductPlacement } from "./poster";
 import { generateFromPrompt, SIZE_MAP, type PosterSizeKey } from "./images";
-import { POSTER_LAYOUTS, buildDesignPrompt, type DesignBrief } from "./poster-design";
+import { POSTER_LAYOUTS, buildDesignPrompt, styleFor, type DesignBrief, type PosterStyleKey } from "./poster-design";
 import { verifyPosterText, type VerificationResult } from "./poster-verify";
 import type { ExpandedContent } from "./expand";
 import { readFileSync } from "node:fs";
@@ -22,6 +22,8 @@ function loadProductImage(imageUrl: string): Buffer {
 
 export interface RenderResult {
   url: string;
+  /** Art direction used, so the operator can tell which style produced this poster. */
+  style: PosterStyleKey;
   width: number;
   height: number;
   bytes: number;
@@ -46,6 +48,8 @@ export function briefFrom(expanded: ExpandedContent, opts: {
   size: PosterSizeKey;
   brandName: string;
   badge?: string | null;
+  style?: PosterStyleKey;
+  subject?: string | null;
 }): DesignBrief {
   const pt = expanded.posterText;
   // The caption line carries the product identity, which is what a buyer needs to match
@@ -53,12 +57,14 @@ export function briefFrom(expanded: ExpandedContent, opts: {
   const caption = [pt.productLine, pt.specsLine].filter(Boolean).join(" · ") || null;
   return {
     size: opts.size,
+    style: opts.style,
     brandName: opts.brandName,
     badge: opts.badge ?? null,
     headline: pt.headline,
     sub: pt.sub ?? null,
     caption,
     cta: pt.cta ?? null,
+    subject: opts.subject ?? null,
   };
 }
 
@@ -68,7 +74,7 @@ export function briefFrom(expanded: ExpandedContent, opts: {
  */
 export async function renderScriptPoster(
   scriptId: string,
-  opts?: { size?: PosterSizeKey },
+  opts?: { size?: PosterSizeKey; style?: PosterStyleKey },
 ): Promise<RenderResult> {
   const script = await db.contentScript.findUnique({ where: { id: scriptId } });
   if (!script) throw new Error("Script not found");
@@ -92,7 +98,8 @@ export async function renderScriptPoster(
     if (occ) badge = occ.name;
   }
 
-  const brief = briefFrom(expanded, { size, brandName, badge });
+  const style = styleFor(opts?.style);
+  const brief = briefFrom(expanded, { size, brandName, badge, style: style.key, subject: expanded.posterScene });
   const prompt = buildDesignPrompt(brief);
 
   const artwork = await generateFromPrompt(prompt, size);
@@ -147,6 +154,7 @@ export async function renderScriptPoster(
 
   return {
     url,
+    style: style.key,
     width: dims.width,
     height: dims.height,
     bytes: png.length,

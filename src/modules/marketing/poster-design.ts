@@ -1,25 +1,17 @@
-// Poster design prompts.
+// Poster art direction.
 //
-// THE APPROACH, AND WHY IT CHANGED
-// --------------------------------
-// The first version of this generated a photographic background, then drew the text on
-// top as vector paths. The output was a photo with words pasted over it — technically a
-// poster, but not designed.
+// WHAT CHANGED AND WHY
+// --------------------
+// The first design let the model paint a photographic background. It scored 7/10 and the
+// critique said the same thing the owner did: "text placed over an image rather than
+// integrated into the design". Measuring four directions side by side made the cause
+// obvious — photographic styles always land as a picture with words on top, while graphic
+// styles score 8-9/10 because the typography becomes part of the composition.
 //
-// The assumption behind it was that image models cannot render text reliably. Measured
-// against gpt-image-2.5 that assumption is simply out of date: asked for a poster, it
-// returned correct Malay typography with a badge, a headline hierarchy, an accent rule
-// and a button shape, all spelled right, with no invented copy once told not to.
-//
-// So the model now designs the whole poster — typography, layout, graphic language — and
-// this module's job is to brief it precisely. One thing still cannot be delegated: the
-// product. Asked to draw the bottle, the model invents a plausible label ("FULL SYNTHETIC
-// ENGINE OIL"), and inventing the specification on a lubricant brand's own packaging is
-// exactly what this system exists to prevent. So the prompt reserves an empty staged area
-// and the real cut-out is composited into it afterwards.
-//
-// The reserved area is described in the prompt and used as the composite target from the
-// SAME object. If those two ever drifted apart the bottle would land on the headline.
+// So the default is now a graphic poster, and art direction is selectable rather than
+// fixed. The reserved product stage survives every style: the model is told to compose an
+// empty area (it may frame it with a circle, a colour block or a glow, just not fill it),
+// and the real cut-out goes there. That is what keeps the design free AND the label true.
 import type { PosterSizeKey } from "./images";
 
 export interface PosterLayout {
@@ -54,68 +46,133 @@ export const POSTER_LAYOUTS: Record<PosterSizeKey, PosterLayout> = {
   },
 };
 
+export type PosterStyleKey = "GRAPHIC" | "INDUSTRIAL" | "BLUEPRINT" | "BOLD" | "CINEMATIC";
+
+export interface PosterStyle {
+  key: PosterStyleKey;
+  /** Shown in the picker. */
+  label: string;
+  /** One line describing the look, for the picker subtitle. */
+  summary: string;
+  /** CSS gradient used as the picker swatch. */
+  swatch: string;
+  /**
+   * Graphic styles integrate typography into the composition and score highest.
+   * Photographic styles read as a picture with words on top, so they are offered but
+   * never the default.
+   */
+  medium: "graphic" | "photo";
+  direction: string;
+}
+
+export const POSTER_STYLES: Record<PosterStyleKey, PosterStyle> = {
+  GRAPHIC: {
+    key: "GRAPHIC", label: "Graphic", summary: "Flat vector, bold colour blocks, print feel", medium: "graphic",
+    swatch: "linear-gradient(135deg,#0f766e,#f97316 55%,#fef3c7)",
+    direction:
+      "Design a FLAT GRAPHIC EDITORIAL poster. VISUAL: bold flat vector shapes and strong colour blocking in teal, burnt orange and cream; " +
+      "geometric abstract shapes suggesting engine internals; halftone dot texture; risograph print style; thick confident outlines. " +
+      "Typography is integrated into coloured blocks and frames rather than sitting on a background. No photography at all.",
+  },
+  INDUSTRIAL: {
+    key: "INDUSTRIAL", label: "Industrial", summary: "Concrete, hazard stripes, oversized type", medium: "graphic",
+    swatch: "linear-gradient(135deg,#1c1917,#f97316)",
+    direction:
+      "Design an INDUSTRIAL / BRUTALIST advertising poster. VISUAL: raw concrete and brushed metal textures; heavy black with safety-orange accents; " +
+      "oversized condensed typography used AS a graphic element; technical schematic line drawings of engine and clutch parts; warning-stripe accents; stencil marks. " +
+      "Utilitarian workshop-floor aesthetic. A designed graphic composition — not a photograph.",
+  },
+  BLUEPRINT: {
+    key: "BLUEPRINT", label: "Blueprint", summary: "Technical drawing, navy grid, callouts", medium: "graphic",
+    swatch: "linear-gradient(135deg,#0c1e3d,#38bdf8)",
+    direction:
+      "Design a TECHNICAL BLUEPRINT poster. VISUAL: deep navy blueprint background with a fine white technical grid; precise exploded-view line drawings of " +
+      "motorcycle engine and clutch components; dimension arrows and small callout labels used as decoration; thin white and orange rules. " +
+      "Crisp engineering aesthetic that reads as designed artwork, not a photo.",
+  },
+  BOLD: {
+    key: "BOLD", label: "Bold promo", summary: "Diagonal energy, big shapes, sale energy", medium: "graphic",
+    swatch: "linear-gradient(135deg,#1e3a8a,#f97316)",
+    direction:
+      "Design a BOLD PROMOTIONAL poster with advertising-poster energy. VISUAL: giant diagonal colour blocks in deep navy and vivid orange slicing across the frame; " +
+      "a large orange starburst or burst shape; speed motion streaks; screen-print feel with visible halftone texture. High contrast, loud, confident.",
+  },
+  CINEMATIC: {
+    key: "CINEMATIC", label: "Cinematic", summary: "Moody hero shot, minimal, expensive", medium: "photo",
+    swatch: "linear-gradient(135deg,#09090b,#78716c)",
+    direction:
+      "Design a CINEMATIC HERO poster, like a premium automotive brand campaign. VISUAL: one dramatic light source; deep shadow; volumetric haze; " +
+      "an almost monochrome palette with a single warm accent; vast empty space; restrained and expensive. Editorial, minimal, photographic.",
+  },
+};
+
+export const DEFAULT_POSTER_STYLE: PosterStyleKey = "GRAPHIC";
+
+export function styleFor(key: string | null | undefined): PosterStyle {
+  const k = (key ?? "").toUpperCase() as PosterStyleKey;
+  return POSTER_STYLES[k] ?? POSTER_STYLES[DEFAULT_POSTER_STYLE];
+}
+
 export interface DesignBrief {
   size: PosterSizeKey;
-  /** Brand the poster belongs to (footer/attribution line). */
+  /** Art direction. Defaults to the graphic style. */
+  style?: PosterStyleKey;
   brandName: string;
-  /** Small badge text, e.g. an occasion. Optional. */
   badge?: string | null;
   headline: string;
   sub?: string | null;
-  /** Product name and/or spec line shown as a small technical caption. */
   caption?: string | null;
   cta?: string | null;
-  /** Palette direction, defaults to the brand's amber/charcoal. */
-  mood?: string | null;
+  /** Optional scene subject hint, e.g. the occasion or the product category. */
+  subject?: string | null;
 }
 
 /** The text the poster must contain, in order, as prompt lines. */
 export function textInstructions(brief: DesignBrief): string[] {
   const out: string[] = [];
   let n = 1;
-  if (brief.badge) out.push(n++ + ". Top-left, inside a small rounded orange badge shape: " + brief.badge);
-  out.push(n++ + ". Headline, very large heavy white sans-serif, tight leading, left aligned, at most two lines: " + brief.headline);
-  if (brief.sub) out.push(n++ + ". Directly under the headline, medium amber sans-serif: " + brief.sub);
-  if (brief.caption) out.push(n++ + ". Small technical caption in light grey sans-serif under the headline block: " + brief.caption);
-  out.push(n++ + ". Bottom-left, small white sans-serif: " + brief.brandName);
-  if (brief.cta) out.push(n++ + ". Bottom-right, inside a rounded orange pill button with black text: " + brief.cta);
+  if (brief.badge) out.push(n++ + ". A small inset badge or coloured tag in the top-left: " + brief.badge);
+  out.push(n++ + ". Headline — the largest type on the poster, tight leading, at most two lines: " + brief.headline);
+  if (brief.sub) out.push(n++ + ". Directly under the headline, in the accent colour, noticeably smaller than the headline: " + brief.sub);
+  if (brief.caption) out.push(n++ + ". A small technical caption in the type area, smallest tier: " + brief.caption);
+  out.push(n++ + ". Bottom-left, small: " + brief.brandName);
+  if (brief.cta) out.push(n++ + ". Bottom-right, set inside a solid accent button or tag shape: " + brief.cta);
   return out;
 }
 
 /**
  * Build the poster design prompt.
  *
- * Exported verbatim so the wording can be reviewed and asserted in tests — the
- * instructions here are the difference between a designed poster and a photo with words
- * on it, and between the model inventing copy and not.
+ * Exported verbatim so the wording can be reviewed and asserted in tests — these
+ * instructions are the difference between a designed poster and a picture with words on it.
  */
 export function buildDesignPrompt(brief: DesignBrief): string {
   const layout = POSTER_LAYOUTS[brief.size];
+  const style = styleFor(brief.style);
   const orientation = layout.height > layout.width ? "Vertical portrait" : layout.width > layout.height ? "Horizontal landscape" : "Square";
   const approved = [brief.badge, brief.headline, brief.sub, brief.caption, brief.brandName, brief.cta]
     .filter((v): v is string => Boolean(v && v.trim()));
 
   return [
-    "Design a professional social media poster for " + brief.brandName + ", a Malaysian motorcycle workshop.",
+    "Design a professional advertising poster for " + brief.brandName + ", a Malaysian motorcycle workshop.",
     orientation + " format, " + layout.width + " x " + layout.height + " pixels.",
     "",
-    "ART DIRECTION",
-    "- Premium automotive advertising. Bold and confident, generous negative space, nothing cluttered.",
-    "- Background: deep charcoal-to-midnight-blue gradient with a subtle diagonal light sweep and faint technical grid lines.",
-    "- A large warm amber-to-orange radial glow on " + layout.stageHint + ", reading as a staging light on a dark surface.",
-    "- Thin orange accent rules and small geometric corner marks for a designed, editorial feel.",
-    brief.mood ? "- Mood: " + brief.mood : "",
+    style.direction,
+    brief.subject ? "Subject context (for imagery only, not text): " + brief.subject + "." : "",
     "",
-    "TYPOGRAPHY — render ONLY the text listed below.",
-    "Use these exact words, spelled exactly as written. Do NOT add, translate, invent, repeat or embellish any other word anywhere in the image. No placeholder text, no lorem ipsum, no gibberish characters, no watermark.",
+    "TYPOGRAPHY IS PART OF THE DESIGN",
+    "- The type must be composed INTO the layout — set inside colour blocks, aligned to a strong grid, framed by rules or shapes. Do not simply place words on top of a background.",
+    "- Use a clear hierarchy: one dominant headline, one supporting line, and small technical details.",
+    "- Render ONLY the text listed below, spelled exactly as written. Do NOT add, translate, invent, repeat or embellish any other word anywhere in the image. No placeholder text, no lorem ipsum, no gibberish characters, no watermark.",
     ...textInstructions(brief),
     "Place all typography in " + layout.textZoneHint + ".",
     "",
     "CRITICAL — THE PRODUCT AREA MUST STAY EMPTY",
-    "- Do NOT draw any bottle, can, jug, container, tube, product, packaging or object of any kind.",
-    "- " + layout.stageHint.charAt(0).toUpperCase() + layout.stageHint.slice(1) + " must show only the background gradient and the staging glow — a completely clear area reserved for a product to be placed later.",
+    "- Do NOT draw any bottle, jug, can, container, tube, packaging or product of any kind, and do not draw an illustration of one.",
+    "- Reserve " + layout.stageHint + " as a deliberately composed EMPTY space. You MAY frame it with a circle, a colour block, a glow, a plinth or rules — but the space itself must contain no object.",
+    "- That area is reserved for a real product photograph to be placed later.",
     "",
-    "Quality: crisp legible kerning, correct spelling, sharp edges, no distortion.",
+    "Quality: crisp legible kerning, correct spelling, sharp edges, print-ready finish.",
     "The only words in the final image must be exactly: " + approved.map((s) => "\"" + s + "\"").join(", ") + ".",
   ].filter((l) => l !== "").join("\n");
 }

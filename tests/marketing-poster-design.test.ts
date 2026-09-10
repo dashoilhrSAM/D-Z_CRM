@@ -4,7 +4,7 @@
 // designed poster and a photo with words on it, and the verification is the only thing
 // standing between a model-written typo and a published poster.
 import { describe, it, expect } from "vitest";
-import { buildDesignPrompt, textInstructions, requiredWords, POSTER_LAYOUTS } from "@/modules/marketing/poster-design";
+import { buildDesignPrompt, textInstructions, requiredWords, POSTER_LAYOUTS, POSTER_STYLES, DEFAULT_POSTER_STYLE, styleFor } from "@/modules/marketing/poster-design";
 import { comparePosterText, normaliseWord, words } from "@/modules/marketing/poster-verify";
 
 const brief = {
@@ -47,7 +47,19 @@ describe("buildDesignPrompt", () => {
   const prompt = buildDesignPrompt(brief);
 
   it("forbids drawing a product, so the real one can be composited", () => {
-    expect(prompt).toMatch(/Do NOT draw any bottle, can, jug, container/i);
+    expect(prompt).toMatch(/Do NOT draw any bottle/i);
+    expect(prompt).toMatch(/do not draw an illustration of one/i);
+  });
+
+  it("allows the reserved area to be framed, but keeps it empty", () => {
+    expect(prompt).toMatch(/deliberately composed EMPTY space/i);
+    expect(prompt).toMatch(/must contain no object/i);
+  });
+
+  it("demands the typography be composed into the layout, not laid over a background", () => {
+    // This is the difference the owner reported between a real poster and words on a photo.
+    expect(prompt).toMatch(/composed INTO the layout/i);
+    expect(prompt).toMatch(/Do not simply place words on top of a background/i);
   });
 
   it("describes the same area the compositor will use", () => {
@@ -66,10 +78,17 @@ describe("buildDesignPrompt", () => {
     expect(prompt).toContain("Hari Malaysia");
   });
 
-  it("asks for design language, not just a photograph", () => {
-    expect(prompt).toMatch(/badge/i);
-    expect(prompt).toMatch(/accent rule/i);
-    expect(prompt).toMatch(/gradient/i);
+  it("includes the chosen art direction", () => {
+    const graphic = buildDesignPrompt({ ...brief, style: "GRAPHIC" });
+    expect(graphic).toContain(POSTER_STYLES.GRAPHIC.direction);
+    const industrial = buildDesignPrompt({ ...brief, style: "INDUSTRIAL" });
+    expect(industrial).toContain(POSTER_STYLES.INDUSTRIAL.direction);
+  });
+
+  it("passes the subject through for imagery only", () => {
+    const p = buildDesignPrompt({ ...brief, subject: "Hari Malaysia road trip" });
+    expect(p).toContain("Hari Malaysia road trip");
+    expect(p).toMatch(/for imagery only, not text/i);
   });
 
   it("states the canvas size and orientation", () => {
@@ -87,13 +106,52 @@ describe("buildDesignPrompt", () => {
   });
 });
 
+describe("POSTER_STYLES", () => {
+  it("defaults to a graphic style, because photographic ones read as a picture with words on it", () => {
+    expect(DEFAULT_POSTER_STYLE).toBe("GRAPHIC");
+    expect(POSTER_STYLES[DEFAULT_POSTER_STYLE].medium).toBe("graphic");
+  });
+
+  it("offers both graphic and photographic directions", () => {
+    const media = new Set(Object.values(POSTER_STYLES).map((s) => s.medium));
+    expect(media.has("graphic")).toBe(true);
+    expect(media.has("photo")).toBe(true);
+  });
+
+  it("gives every style a direction, label, summary and swatch", () => {
+    for (const s of Object.values(POSTER_STYLES)) {
+      expect(s.direction.length).toBeGreaterThan(60);
+      expect(s.label.length).toBeGreaterThan(2);
+      expect(s.summary.length).toBeGreaterThan(10);
+      expect(s.swatch).toMatch(/gradient/);
+    }
+  });
+
+  it("resolves an unknown or absent style to the default rather than failing", () => {
+    expect(styleFor("NOPE").key).toBe(DEFAULT_POSTER_STYLE);
+    expect(styleFor(null).key).toBe(DEFAULT_POSTER_STYLE);
+    expect(styleFor(undefined).key).toBe(DEFAULT_POSTER_STYLE);
+    expect(styleFor("industrial").key).toBe("INDUSTRIAL");
+  });
+});
+
 describe("textInstructions", () => {
   it("numbers the lines in reading order with the badge first", () => {
     const lines = textInstructions(brief);
-    expect(lines[0]).toContain("Top-left");
+    expect(lines[0]).toMatch(/badge/i);
     expect(lines[0]).toContain("Hari Malaysia");
     expect(lines[1]).toContain("Headline");
-    expect(lines[lines.length - 1]).toContain("WhatsApp".replace("WhatsApp", "pill button"));
+    expect(lines[lines.length - 1]).toMatch(/button or tag shape/i);
+  });
+
+  it("names the headline as the largest type", () => {
+    expect(textInstructions(brief)[1]).toMatch(/largest type on the poster/i);
+  });
+
+  it("puts each line in a distinct visual tier", () => {
+    const joined = textInstructions(brief).join("\n");
+    expect(joined).toMatch(/noticeably smaller than the headline/i);
+    expect(joined).toMatch(/smallest tier/i);
   });
 
   it("puts the brand bottom-left and the CTA bottom-right", () => {
