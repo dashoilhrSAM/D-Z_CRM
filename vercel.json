@@ -1,5 +1,5 @@
 {
-  "buildCommand": "prisma generate --schema prisma/schema.pg.prisma && node scripts/check-prod-schema-drift.mjs && next build",
+  "buildCommand": "prisma generate --schema prisma/schema.pg.prisma && node scripts/sync-prod-schema.mjs && next build",
   "crons": [
     { "path": "/api/cron/reminders", "schedule": "0 9 * * *" }
   ]

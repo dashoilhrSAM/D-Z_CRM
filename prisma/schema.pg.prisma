@@ -51,6 +51,11 @@ model Organisation {
   enableMotorcycleQr Boolean @default(true)
   enableRiderProfileQr Boolean @default(true)
   enableWorkshopQr   Boolean  @default(true)
+  // Legacy column that exists ONLY in the production database (never in this schema or
+  // in any migration). It predates the three enable*Qr flags above and is unreferenced
+  // by all code. @ignore keeps Prisma from selecting it AND from wanting to DROP it on
+  // every schema sync. Retire it with a deliberate migration when convenient.
+  qrEnabled      Boolean  @default(true) @ignore
   // MKT-013: when true, any booking during a live promo is discounted automatically,
   // not just bookings that arrived through a campaign link. Marketing controls this.
   promoAutoApply Boolean @default(true)
