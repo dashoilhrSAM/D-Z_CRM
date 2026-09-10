@@ -18,7 +18,7 @@ import { t, tpl } from "@/lib/i18n";
 export interface CustomerOption { id: string; name: string; phone: string | null }
 export interface MotorcycleOption { id: string; customerId: string; brand: string; model: string; plate: string; year: number; type: string; currentMileage: number }
 export interface PackageOption { id: string; name: string; tier: string; priceSen: number; isBestValue?: boolean; description?: string | null }
-export interface MechanicOption { id: string; name: string; branchName?: string | null }
+import { spansBranches, mechanicLabel, type MechanicOption } from "./mechanic-option";
 export interface Rec { kind: string; description: string; reason: string; script: string; priceSen: number; productId?: string; unitCostSen?: number }
 
 export function CreateJobForm({
@@ -60,6 +60,7 @@ export function CreateJobForm({
   const extras = availableServices && availableServices.length > 0 ? availableServices : [...SERVICE_CATALOG];
   const selectedExtras = Object.values(extraServices);
   const totalExtras = selectedExtras.reduce((s, x) => s + x.priceSen, 0);
+  const showBranch = spansBranches(mechanics);
 
   useEffect(() => {
     if (!motorcycleId) {
@@ -222,10 +223,10 @@ export function CreateJobForm({
         <section className="rounded-2xl border bg-card p-5">
           <h3 className="font-semibold mb-3">{t("job-form.heading-mechanic", lang)}</h3>
           <Select value={mechanicId} onValueChange={(v) => setMechanicId(v ?? "none")}>
-            <SelectTrigger className="mt-1.5 max-w-sm"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
+            <SelectTrigger data-testid="mechanic-select" className="mt-1.5 w-full max-w-md"><SelectValue>{(v) => (v === "none" ? t("job-form.assign-later", lang) : mechanics.find((m) => m.id === v)?.name ?? t("job-form.assign-later", lang))}</SelectValue></SelectTrigger>
             <SelectContent>
               <SelectItem value="none">{t("job-form.assign-later", lang)}</SelectItem>
-              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{m.name}{m.branchName ? " · " + m.branchName : ""}</SelectItem>)}
+              {mechanics.map((m) => <SelectItem key={m.id} value={m.id}>{mechanicLabel(m, showBranch)}</SelectItem>)}
             </SelectContent>
           </Select>
         </section>

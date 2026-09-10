@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedStaffWhere } from "@/lib/branch-scope";
+import { resolveNewJobBranchId, loadAssignableStaff } from "@/lib/job-branch";
 
 export const dynamic = "force-dynamic";
 
@@ -14,17 +14,16 @@ export default async function NewJobPage({ searchParams }: { searchParams: Promi
   const lang = await getLang();
   const session = await getSessionUser();
   const isRepair = type === "repair";
-  const [customers, motorcycles, packages, rawMechanics] = await Promise.all([
+  // The mechanic list is scoped to the branch this job will actually be created in, not to
+  // every branch the user can see. Those differ for an org-level user, and the wider list
+  // offered names that createJob then refused. Same function, so they cannot drift again.
+  const branchId = await resolveNewJobBranchId(session);
+  const [customers, motorcycles, packages, mechanics] = await Promise.all([
     db.customer.findMany({ select: { id: true, name: true, phone: true }, orderBy: { name: "asc" } }),
     db.motorcycle.findMany({ select: { id: true, customerId: true, brand: true, model: true, plate: true, year: true, type: true, currentMileage: true } }),
     db.servicePackage.findMany({ where: { active: true }, select: { id: true, name: true, tier: true, priceSen: true, isBestValue: true, description: true }, orderBy: { priceSen: "asc" } }),
-    db.user.findMany({
-      where: scopedStaffWhere(session, ["MECHANIC", "MANAGER"]),
-      select: { id: true, name: true, branch: { select: { name: true } } },
-      orderBy: { name: "asc" },
-    }),
+    loadAssignableStaff(branchId),
   ]);
-  const mechanics = rawMechanics.map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
   const motorcyclesByCustomer = motorcycles.reduce<Record<string, typeof motorcycles>>((acc, m) => {
     (acc[m.customerId] ??= []).push(m);
     return acc;
