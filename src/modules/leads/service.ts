@@ -16,6 +16,8 @@ export interface LeadCreateInput {
   assignedUserId?: string | null;
   nextFollowUpAt?: Date | null;
   tags?: string | null;
+  /** MKT-015: campaign that drove this lead (campaign-link attribution). */
+  campaignId?: string | null;
 }
 
 export const leadsModule = {
@@ -65,6 +67,7 @@ export const leadsModule = {
         assignedUserId: input.assignedUserId ?? null,
         nextFollowUpAt: input.nextFollowUpAt ?? null,
         tags: input.tags ?? null,
+        campaignId: input.campaignId ?? null,
       },
     });
     await db.leadActivity.create({ data: { leadId: lead.id, type: "CREATED", note: "Lead created", userId: input.assignedUserId ?? null } });

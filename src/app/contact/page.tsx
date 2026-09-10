@@ -6,7 +6,7 @@ import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
-export default async function ContactPage({ searchParams }: { searchParams: Promise<{ model?: string }> }) {
+export default async function ContactPage({ searchParams }: { searchParams: Promise<{ model?: string; campaign?: string }> }) {
   const lang = await getLang();
   const sp = await searchParams;
   const org = await db.organisation.findFirst();
@@ -58,7 +58,7 @@ export default async function ContactPage({ searchParams }: { searchParams: Prom
             </ul>
           </div>
         </div>
-        <EnquiryForm defaultModel={sp.model} branches={branches.map((b) => ({ id: b.id, label: b.name + " · " + b.city }))} />
+        <EnquiryForm defaultModel={sp.model} campaignId={sp.campaign} branches={branches.map((b) => ({ id: b.id, label: b.name + " · " + b.city }))} />
       </div>
     </main>
   );

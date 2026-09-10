@@ -12,6 +12,8 @@ async function resolveSource(orgId: string, name: string) {
 /** Website enquiry form (WEB-010/014/015, LEAD-001): creates a CRM lead automatically. */
 export async function submitWebsiteEnquiry(input: {
   name: string; phone: string; email?: string; model?: string; notes?: string; branchId?: string;
+  /** MKT-015: campaign attribution carried from a campaign landing link (?campaign=). */
+  campaignId?: string;
 }): Promise<{ ok: boolean; leadNumber?: string; error?: string }> {
   const org = await db.organisation.findFirst();
   if (!org) return { ok: false, error: "No organisation configured" };
@@ -28,6 +30,7 @@ export async function submitWebsiteEnquiry(input: {
     sourceId,
     motorcycleInterest: input.model || null,
     notes: input.notes || null,
+    campaignId: input.campaignId ?? null,
   });
   return { ok: true, leadNumber: lead.leadNumber };
 }

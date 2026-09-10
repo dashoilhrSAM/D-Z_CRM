@@ -4,6 +4,7 @@ import { inventoryService } from "@/modules/inventory/service";
 import { crmService } from "@/modules/crm/service";
 import { paymentProvider, messagingProvider, notificationProvider } from "@/providers";
 import { messagingModule } from "@/modules/messaging/service";
+import { discountForSubtotal, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
 
 export interface CompletionResult {
@@ -77,6 +78,12 @@ export class CompletionService {
       const invoiceNumber = "DZ-" + year + "-" + String(invCount + 1).padStart(5, "0");
       const subtotal = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
       const cogs = acceptedParts.reduce((s, p) => s + p.unitCostSen * p.quantity, 0);
+      // MKT-017: honour the promotional discount the rider was quoted at booking time.
+      // The booking snapshots the percent, so the discount survives campaign edits or
+      // expiry between booking and completion.
+      const promo = readPromoSnapshot(job.booking?.promoSnapshot);
+      const discountSen = discountForSubtotal(subtotal, promo?.discountPercent);
+      const totalSen = subtotal - discountSen;
       const invoice = await tx.invoice.create({
         data: {
           branchId,
@@ -86,7 +93,8 @@ export class CompletionService {
           status: "ISSUED", // 待 workshop 结清（invoices 页 tick 批量 / split 收款）
           issuedAt: new Date(),
           subtotalSen: subtotal,
-          totalSen: subtotal,
+          discountSen,
+          totalSen,
         },
       });
       for (const i of acceptedItems) {
@@ -102,7 +110,7 @@ export class CompletionService {
         });
       }
       // 应收记录（PAY_LATER PENDING）：由 workshop 在 invoices 页确认结清
-      await tx.payment.create({ data: { invoiceId: invoice.id, amountSen: subtotal, method: "PAY_LATER", status: "PENDING", paidAt: new Date() } });
+      await tx.payment.create({ data: { invoiceId: invoice.id, amountSen: totalSen, method: "PAY_LATER", status: "PENDING", paidAt: new Date() } });
 
       // 3. Update motorcycle snapshot
       const nextMileage = job.mileage + DEFAULT_SERVICE_INTERVAL_KM;

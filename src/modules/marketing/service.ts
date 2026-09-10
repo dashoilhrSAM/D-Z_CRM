@@ -1,11 +1,15 @@
 import type { IMarketingRepository } from "./repository";
 import { PrismaMarketingRepository } from "@/repositories/prisma/marketing.repository";
+import type { AudienceRules } from "./audience";
 
 export interface CreateCampaignInput {
   branchId: string;
   name: string;
   type: "RETURN" | "REMINDER" | "PROMO" | "NEWS";
+  /** Legacy audience code (kept for back-compat and for campaigns without rules). */
   audience?: string;
+  /** MKT-005..012: declarative segment rules; takes precedence over `audience`. */
+  audienceRules?: AudienceRules | null;
   status: "DRAFT" | "SCHEDULED" | "ACTIVE" | "ENDED";
   startDate: Date;
   endDate?: Date | null;
@@ -40,7 +44,7 @@ export class MarketingService {
       this.repo.listScripts(),
     ]);
     return {
-      campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience, discountPercent: c.discountPercent, startDate: c.startDate, endDate: c.endDate, branch: c.branch.city })),
+      campaigns: campaigns.map((c) => ({ id: c.id, name: c.name, type: c.type, status: c.status, audience: c.audience, audienceRules: c.audienceRules, discountPercent: c.discountPercent, startDate: c.startDate, endDate: c.endDate, branch: c.branch.city })),
       assets: assets.map((a) => ({ id: a.id, title: a.title, type: a.type, month: a.month, description: a.description, url: a.url, published: a.published })),
       scripts: scripts.map((s) => ({ id: s.id, title: s.title, platform: s.platform, hook: s.hook, body: s.body, tone: s.tone })),
     };
@@ -52,6 +56,7 @@ export class MarketingService {
       name: input.name,
       type: input.type,
       audience: input.audience ?? null,
+      audienceRules: (input.audienceRules ?? null) as never,
       status: input.status,
       startDate: input.startDate,
       endDate: input.endDate ?? null,

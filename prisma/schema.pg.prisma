@@ -272,6 +272,10 @@ model Booking {
   source        BookingSource @default(RIDER_APP)
   campaignId    String?       // promo attribution: which campaign drove this booking
   campaign      Campaign?     @relation(fields: [campaignId], references: [id])
+  // MKT-013: promo applied at booking time, snapshotted so the quoted price stays
+  // stable even if the campaign is later edited or expires.
+  promoDiscountSen Int        @default(0)
+  promoSnapshot    Json?      // { campaignId, campaignName, discountPercent, originalSen, discountedSen, savedSen }
   jobId         String?       @unique
   job           ServiceJob?   @relation(fields: [jobId], references: [id])
   createdAt     DateTime      @default(now())
@@ -855,13 +859,15 @@ model Campaign {
   branch         Branch         @relation(fields: [branchId], references: [id])
   name           String
   type           CampaignType   @default(RETURN)
-  audience       String?
+  audience       String?        // legacy code: ALL | NEW | 30_DAYS | 60_DAYS | OVERDUE
+  audienceRules  Json?          // MKT-005..012: declarative segment rules (see modules/marketing/audience.ts)
   status         CampaignStatus @default(ACTIVE)
   startDate      DateTime
   endDate        DateTime?
   discountPercent Int?                       // PROMO only: 1-100
   createdAt      DateTime       @default(now())
   bookings       Booking[]
+  leads          Lead[]
 }
 
 model MarketingAsset {
@@ -993,6 +999,9 @@ model Lead {
   lostReason          String?
   convertedCustomerId String?
   convertedCustomer   Customer?  @relation(fields: [convertedCustomerId], references: [id])
+  // MKT-015: which campaign drove this lead (null = organic / unknown)
+  campaignId          String?
+  campaign            Campaign?  @relation(fields: [campaignId], references: [id])
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
   activities          LeadActivity[]

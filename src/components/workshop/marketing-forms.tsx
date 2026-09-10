@@ -11,6 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Sparkles, Upload } from "lucide-react";
 import { createCampaign, createPoster, createScript, updateCampaign } from "@/actions/marketing";
+import { SegmentBuilder } from "@/components/workshop/segment-builder";
+import type { AudienceRules } from "@/modules/marketing/audience";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
 
@@ -37,10 +39,10 @@ function useForm() {
 
 const typeOptions = [["RETURN", "Return"], ["REMINDER", "Reminder"], ["PROMO", "Promo"], ["NEWS", "News"]] as const;
 const statusOptions = [["DRAFT", "Draft"], ["SCHEDULED", "Scheduled"], ["ACTIVE", "Active"], ["ENDED", "Ended"]] as const;
-const audienceOptions = [["ALL", "All customers"], ["30_DAYS", "Active last 30 days"], ["60_DAYS", "Active last 60 days"], ["OVERDUE", "Overdue service"], ["NEW", "New customers"]] as const;
 
 export interface CampaignDraft {
   id: string; name: string; type: string; status: string; audience: string | null;
+  audienceRules?: AudienceRules | null;
   startDate: Date; endDate: Date | null; discountPercent: number | null;
 }
 
@@ -52,14 +54,21 @@ export function CampaignForm({ initial, onDone }: { initial?: CampaignDraft; onD
   const [name, setName] = useState(initial?.name ?? "");
   const [type, setType] = useState(initial?.type ?? "PROMO");
   const [status, setStatus] = useState(initial?.status ?? "DRAFT");
-  const [audience, setAudience] = useState(initial?.audience ?? "ALL");
+  const [rules, setRules] = useState<AudienceRules>((initial?.audienceRules as AudienceRules | null) ?? {});
   const [startDate, setStartDate] = useState(initial ? iso(initial.startDate) : "");
   const [endDate, setEndDate] = useState(initial?.endDate ? iso(initial.endDate) : "");
   const [discount, setDiscount] = useState(initial?.discountPercent != null ? String(initial.discountPercent) : "");
   const isEdit = !!initial;
 
   const submit = () => {
-    const payload = { name, type: type as never, status: status as never, audience, startDate, endDate: endDate || undefined, discountPercent: discount ? Number(discount) : undefined };
+    const hasRules = Object.keys(rules).length > 0;
+    const payload = {
+      name, type: type as never, status: status as never,
+      // rules win; dropping them falls the campaign back to its legacy code (or everyone)
+      audience: hasRules ? undefined : (initial?.audience ?? "ALL"),
+      audienceRules: hasRules ? rules : null,
+      startDate, endDate: endDate || undefined, discountPercent: discount ? Number(discount) : undefined,
+    };
     if (isEdit) {
       run(() => updateCampaign({ id: initial.id, ...payload }), t("ws.mkt.form.campaign-updated", lang));
     } else {
@@ -90,9 +99,8 @@ export function CampaignForm({ initial, onDone }: { initial?: CampaignDraft; onD
                 <SelectContent>{statusOptions.map(([v]) => <SelectItem key={v} value={v}>{t("ws.mkt.status." + v, lang)}</SelectItem>)}</SelectContent></Select>
             </div>
           </div>
-          <div><Label>{t("ws.mkt.form.audience", lang)}</Label>
-            <Select value={audience} onValueChange={(v) => setAudience(v ?? "ALL")}><SelectTrigger className="mt-1.5"><SelectValue /></SelectTrigger>
-              <SelectContent>{audienceOptions.map(([v]) => <SelectItem key={v} value={v}>{t("ws.mkt.audience." + v, lang)}</SelectItem>)}</SelectContent></Select>
+          <div>
+            <SegmentBuilder value={rules} onChange={setRules} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div><Label>{t("ws.mkt.form.start-date", lang)}</Label><Input data-testid="campaign-start" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="mt-1.5" /></div>

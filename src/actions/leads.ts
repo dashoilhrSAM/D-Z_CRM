@@ -34,6 +34,8 @@ export async function createLead(input: {
   assignedUserId?: string;
   nextFollowUpAt?: string;
   tags?: string;
+  /** MKT-015: campaign attribution from a campaign landing link. */
+  campaignId?: string;
 }) {
   const { org, branch } = await defaultOrgBranch();
   const dupes = await leadsModule.findDuplicates(org.id, input.phone, input.email);
@@ -60,6 +62,7 @@ export async function createLead(input: {
     assignedUserId: input.assignedUserId,
     nextFollowUpAt: input.nextFollowUpAt ? new Date(input.nextFollowUpAt) : null,
     tags: input.tags,
+    campaignId: input.campaignId ?? null,
   });
   revalidatePath("/", "layout");
   return { ok: true, id: lead.id, leadNumber: lead.leadNumber, duplicates: dupes.length };

@@ -35,7 +35,7 @@ describe("broadcastCampaign", () => {
     vi.clearAllMocks();
     dbMock.organisation.findFirst.mockResolvedValue({ id: "o1" });
     dbMock.branch.findFirst.mockResolvedValue({ id: "b-testing" });
-    dbMock.campaign.findUnique.mockResolvedValue({ id: "camp1", name: "Raya", audience: "ALL", discountPercent: 10 });
+    dbMock.campaign.findUnique.mockResolvedValue({ id: "camp1", name: "Raya", audience: "ALL", audienceRules: null, branchId: "b-kl", discountPercent: 10 });
     dbMock.customer.findMany.mockResolvedValue([customerA, customerB]);
     dbMock.customer.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
       Promise.resolve(where.id === "c1" ? customerA : customerB));
@@ -79,15 +79,16 @@ describe("broadcastCampaign", () => {
     expect(mockMessageCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ status: "FAILED" }) });
   });
 
-  it("attributes messages to the session branch, not the main branch", async () => {
+  it("attributes messages to the campaign's own branch", async () => {
     dbMock.customerConsent.findUnique.mockResolvedValue(null);
     mockSend.mockResolvedValue({ ok: true, externalId: "wa-1", status: "SENT" });
 
     await broadcastCampaign({ campaignId: "camp1" });
 
-    expect(dbMock.branch.findFirst).toHaveBeenCalledWith({ where: { id: "b-testing", organisationId: "o1" } });
+    // A campaign belongs to a branch; the operator running the broadcast may be viewing
+    // from elsewhere (org-level role, or a different branch), so the campaign wins.
     expect(mockMessageCreate).toHaveBeenCalledWith({
-      data: expect.objectContaining({ branchId: "b-testing", referenceType: "CAMPAIGN", referenceId: "camp1" }),
+      data: expect.objectContaining({ branchId: "b-kl", referenceType: "CAMPAIGN", referenceId: "camp1" }),
     });
   });
 });
