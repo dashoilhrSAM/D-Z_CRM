@@ -2251,6 +2251,12 @@ export const DICT: Dict = {
   "settings-form.toggle-label": { en: "Toggle {name}", zh: "切换 {name}", ms: "Tukar {name}" },
   "settings-form.delete-label": { en: "Delete {name}", zh: "删除 {name}", ms: "Padam {name}" },
   "settings-form.delete-confirm": { en: "Delete service \"{name}\"?", zh: "删除服务“{name}”？", ms: "Padam servis \"{name}\"?" },
+  "settings-form.edit-label": { en: "Edit {name}", zh: "编辑 {name}", ms: "Sunting {name}" },
+  "settings-form.price-gap": {
+    en: "{n} active service(s) have no price. The content engine will not invent one, so it will not quote a price either.",
+    zh: "有 {n} 个启用中的服务没有价格。内容引擎不会编造价格，所以它也不会报价。",
+    ms: "{n} servis aktif tiada harga. Enjin kandungan tidak akan mereka harga, jadi ia tidak akan sebut harga.",
+  },
   "slot.generate": { en: "Generate slots", zh: "生成时段", ms: "Jana Slot" },
   "slot.days-ahead": { en: "Days ahead", zh: "未来天数", ms: "Hari Hadapan" },
   "slot.times": { en: "Times (comma-separated)", zh: "时段（逗号分隔）", ms: "Masa (dipisahkan koma)" },

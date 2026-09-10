@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { updateOrganisation, updateBranch, createBranch, createServiceType, toggleServiceType, deleteServiceType } from "@/actions/settings";
+import { updateOrganisation, updateBranch, createBranch, createServiceType, updateServiceType, toggleServiceType, deleteServiceType } from "@/actions/settings";
 import { formatRM } from "@/lib/money";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
@@ -130,7 +130,36 @@ export function ServiceTypeManager({ serviceTypes }: { serviceTypes: { id: strin
   const router = useRouter();
   const lang = useLang();
   const [nf, setNf] = useState({ name: "", category: "MAINTENANCE", durationMin: "60", price: "" });
+  // Which row is open for editing, and its draft values. A service could previously be
+  // created but never corrected, so a missing price stayed missing.
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ name: "", category: "MAINTENANCE", durationMin: "", price: "" });
   const activeCount = serviceTypes.filter((s) => s.active).length;
+  const priceGap = serviceTypes.filter((s) => s.active && s.priceSen == null).length;
+
+  function startEdit(s: (typeof serviceTypes)[number]) {
+    setEditing(s.id);
+    setDraft({
+      name: s.name,
+      category: s.category ?? "MAINTENANCE",
+      durationMin: s.durationMin != null ? String(s.durationMin) : "",
+      price: s.priceSen != null ? (s.priceSen / 100).toFixed(2) : "",
+    });
+  }
+
+  async function saveEdit(id: string) {
+    await updateServiceType({
+      id,
+      name: draft.name,
+      category: draft.category,
+      durationMin: draft.durationMin ? parseInt(draft.durationMin, 10) : null,
+      // An empty box means "no price", not "keep the old one" — otherwise a wrong price
+      // could never be taken back out.
+      priceSen: draft.price ? Math.round(parseFloat(draft.price) * 100) : null,
+    });
+    setEditing(null);
+    router.refresh();
+  }
   return (
     <div className="rounded-xl border bg-card p-4">
       <div className="flex items-center justify-between mb-3">
@@ -153,10 +182,28 @@ export function ServiceTypeManager({ serviceTypes }: { serviceTypes: { id: strin
         }}>{t("common.add", lang)}</button>
       </div>
 
-      {/* 服务列表：每行 名称/分类/时长/价格/状态 + 开关 + 删除 */}
+      {/* 没有价格的服务，内容引擎就不会报价（它不会编造价格）——把这件事说出来 */}
+      {priceGap > 0 && (
+        <p className="mb-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-[11px] text-amber-800">
+          {tpl("settings-form.price-gap", lang, { n: priceGap })}
+        </p>
+      )}
+
+      {/* 服务列表：每行 名称/分类/时长/价格/状态 + 编辑/开关/删除 */}
       <div className="border rounded-lg divide-y divide-border">
         {serviceTypes.length === 0 && <p className="p-4 text-sm text-muted-foreground">{t("settings-form.no-services", lang)}</p>}
-        {serviceTypes.map((s) => (
+        {serviceTypes.map((s) => editing === s.id ? (
+          <div key={s.id} className="flex flex-wrap items-center gap-2 px-3 py-2 bg-muted/30">
+            <input className={inputCls + " flex-1 min-w-[120px]"} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} />
+            <select className={inputCls + " w-32"} value={draft.category} onChange={(e) => setDraft({ ...draft, category: e.target.value })}>
+              <option value="MAINTENANCE">MAINTENANCE</option><option value="REPAIR">REPAIR</option><option value="DIAGNOSTIC">DIAGNOSTIC</option><option value="DETAILING">DETAILING</option>
+            </select>
+            <input className={inputCls + " w-16"} type="number" placeholder={t("settings-form.min", lang)} value={draft.durationMin} onChange={(e) => setDraft({ ...draft, durationMin: e.target.value })} />
+            <input className={inputCls + " w-24"} type="number" step="0.01" placeholder={t("settings-form.price", lang)} value={draft.price} onChange={(e) => setDraft({ ...draft, price: e.target.value })} />
+            <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" disabled={!draft.name} onClick={() => saveEdit(s.id)}>{t("common.save", lang)}</button>
+            <button className="rounded-md border px-3 py-1.5 text-sm" onClick={() => setEditing(null)}>{t("common.cancel", lang)}</button>
+          </div>
+        ) : (
           <div key={s.id} className={"flex items-center gap-3 px-3 py-2 " + (s.active ? "" : "opacity-55 bg-muted/30")}>
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm truncate">{s.name}</div>
@@ -167,6 +214,13 @@ export function ServiceTypeManager({ serviceTypes }: { serviceTypes: { id: strin
             <span className={"rounded-full px-2 py-0.5 text-[10px] font-semibold " + (s.active ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground")}>
               {t(s.active ? "common.active" : "ws.pkg.inactive", lang)}
             </span>
+            <button
+              className="text-muted-foreground hover:text-foreground text-[11px] font-medium"
+              aria-label={tpl("settings-form.edit-label", lang, { name: s.name })}
+              onClick={() => startEdit(s)}
+            >
+              {t("common.edit", lang)}
+            </button>
             <button
               className={"relative h-5 w-9 rounded-full transition-colors " + (s.active ? "bg-primary" : "bg-muted")}
               aria-label={tpl("settings-form.toggle-label", lang, { name: s.name })}

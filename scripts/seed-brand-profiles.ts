@@ -56,7 +56,11 @@ const PROFILES: Seed[] = [
   },
 ];
 
-async function main() {
+/**
+ * Write the workshop voice profile. Exported so the whole marketing dataset can be
+ * seeded through one entry point in the right order.
+ */
+export async function seedBrandProfiles() {
   const org = await db.organisation.findFirst();
   if (!org) throw new Error("no organisation");
   let created = 0, updated = 0;
@@ -79,8 +83,18 @@ async function main() {
     if (existing) { await db.brandProfile.update({ where: { id: existing.id }, data }); updated++; }
     else { await db.brandProfile.create({ data }); created++; }
   }
-  console.log("brand profiles created: " + created + ", updated: " + updated);
+  return { created, updated, keys: PROFILES.map((p) => p.key) };
+}
+
+async function main() {
+  const res = await seedBrandProfiles();
+  console.log("brand profiles created: " + res.created + ", updated: " + res.updated);
   const all = await db.brandProfile.findMany({ select: { key: true, name: true, primaryLanguage: true } });
   for (const b of all) console.log("  " + b.key.padEnd(14) + b.name + " (" + b.primaryLanguage + ")");
 }
-main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+
+// Only run when invoked directly, so importing the seed cannot have side effects.
+const invokedDirectly = process.argv[1]?.endsWith("seed-brand-profiles.ts") ?? false;
+if (invokedDirectly) {
+  main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+}

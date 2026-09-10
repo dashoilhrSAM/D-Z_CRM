@@ -1,42 +1,19 @@
-// Seed the Malaysian content calendar.
+// Seed the Malaysian content calendar from the command line.
 //
-// Source: national public holiday listings plus Ministry of Education school terms.
-// Idempotent (upsert by key) so it can be re-run after editing the data, and re-run
-// yearly to add the next 12 months. Dates are reference data — shared, not org-scoped.
+// The work itself lives in src/modules/marketing/occasion-seed.ts, because this is not a
+// one-off import: paydays roll forward every month, so the same function is also called by
+// the scheduled refresh. Two copies of "what the calendar should contain" would drift;
+// there is one, and this file is a wrapper around it.
 import { db } from "../src/lib/db";
-import { MY_CALENDAR, paydayOccasions, utcDay } from "../src/modules/marketing/occasions";
+import { occasionRows, seedOccasions, PAYDAY_HORIZON_MONTHS } from "../src/modules/marketing/occasion-seed";
+
+export { occasionRows, seedOccasions, PAYDAY_HORIZON_MONTHS };
 
 async function main() {
-  // 18 months of paydays from the current month, so the planner always has a horizon
-  const now = new Date();
-  const startMonth = now.toISOString().slice(0, 7);
-  const rows = [...MY_CALENDAR, ...paydayOccasions(startMonth, 18)];
+  const res = await seedOccasions();
+  console.log("occasions created: " + res.created + ", updated: " + res.updated + ", total: " + res.total);
 
-  let created = 0, updated = 0;
-  for (const r of rows) {
-    const data = {
-      organisationId: null,
-      key: r.key,
-      name: r.name,
-      nameEn: r.nameEn ?? null,
-      nameZh: r.nameZh ?? null,
-      startDate: utcDay(r.startDate),
-      endDate: r.endDate ? utcDay(r.endDate) : null,
-      type: r.type,
-      relevance: r.relevance,
-      leadDays: r.leadDays,
-      angleHint: r.angleHint,
-      notes: r.notes ?? null,
-      active: true,
-    };
-    const existing = await db.occasion.findUnique({ where: { key: r.key }, select: { id: true } });
-    if (existing) { await db.occasion.update({ where: { key: r.key }, data }); updated++; }
-    else { await db.occasion.create({ data }); created++; }
-  }
-
-  const total = await db.occasion.count();
   const byType = await db.occasion.groupBy({ by: ["type"], _count: true });
-  console.log("occasions created: " + created + ", updated: " + updated + ", total: " + total);
   console.log("by type: " + byType.map((b) => b.type + ":" + b._count).join(", "));
 
   const upcoming = await db.occasion.findMany({
@@ -50,4 +27,5 @@ async function main() {
     console.log("  " + u.startDate.toISOString().slice(0, 10) + "  r" + u.relevance + " lead=" + String(u.leadDays).padStart(2) + "  " + u.name);
   }
 }
+
 main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
