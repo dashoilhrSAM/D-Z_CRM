@@ -6,8 +6,19 @@
 //
 // Everything here is pure: it takes a string and returns path data. No filesystem, no
 // environment, no rendering. That makes the layout testable without producing an image.
-import opentype from "opentype.js";
+import * as opentypeModule from "opentype.js";
+import type { Font } from "opentype.js";
 import { POSTER_FONT_BOLD_B64, POSTER_FONT_BODY_B64 } from "./poster-fonts";
+
+/**
+ * opentype.js ships two builds that disagree about their shape: the CommonJS build has a
+ * default export, the ESM build (which the bundler picks up) exports only named members.
+ * Importing the default works under tsx and fails at build time, so resolve whichever
+ * shape is actually present instead of assuming one.
+ */
+type OpentypeShape = { parse: (buffer: ArrayBuffer) => Font };
+const ot = ((opentypeModule as unknown as { default?: OpentypeShape }).default
+  ?? (opentypeModule as unknown as OpentypeShape));
 
 export type FontWeight = "bold" | "body";
 
@@ -44,16 +55,16 @@ function decode(b64: string): ArrayBuffer {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
 }
 
-let boldFont: opentype.Font | null = null;
-let bodyFont: opentype.Font | null = null;
+let boldFont: Font | null = null;
+let bodyFont: Font | null = null;
 
 /** Parse on first use and cache — parsing a 19KB font per call would be wasteful. */
-export function getFont(weight: FontWeight = "bold"): opentype.Font {
+export function getFont(weight: FontWeight = "bold"): Font {
   if (weight === "body") {
-    if (!bodyFont) bodyFont = opentype.parse(decode(POSTER_FONT_BODY_B64));
+    if (!bodyFont) bodyFont = ot.parse(decode(POSTER_FONT_BODY_B64));
     return bodyFont;
   }
-  if (!boldFont) boldFont = opentype.parse(decode(POSTER_FONT_BOLD_B64));
+  if (!boldFont) boldFont = ot.parse(decode(POSTER_FONT_BOLD_B64));
   return boldFont;
 }
 
@@ -63,7 +74,7 @@ export function esc(s: string): string {
 }
 
 /** Width of a single line, honouring letter spacing. */
-export function measureText(text: string, font: opentype.Font, size: number, letterSpacing = 0): number {
+export function measureText(text: string, font: Font, size: number, letterSpacing = 0): number {
   if (!text) return 0;
   const base = font.getAdvanceWidth(text, size);
   return base + letterSpacing * Math.max(0, text.length - 1);
@@ -73,7 +84,7 @@ export function measureText(text: string, font: opentype.Font, size: number, let
  * Greedy word wrap. Falls back to breaking a single over-long word by character so a
  * long product code can never overflow the poster.
  */
-export function wrapText(text: string, font: opentype.Font, size: number, maxWidth: number, letterSpacing = 0): string[] {
+export function wrapText(text: string, font: Font, size: number, maxWidth: number, letterSpacing = 0): string[] {
   if (maxWidth <= 0) return [text];
   const lines: string[] = [];
   for (const paragraph of text.split("\n")) {

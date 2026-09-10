@@ -185,5 +185,12 @@ export async function expandScript(scriptId: string, opts?: { platforms?: readon
   };
 
   if (!expanded.caption) throw new Error("Expansion produced no caption");
+
+  // Persist so a refresh does not discard work the operator has just reviewed.
+  await db.contentScript.update({
+    where: { id: scriptId },
+    data: { expandedJson: expanded as never, expandedAt: new Date() },
+  });
+
   return { script, expanded };
 }

@@ -1120,6 +1120,15 @@ model ContentScript {
   reasoning       String?
   generatedAt     DateTime?
 
+  // ---------- Expansion + poster (P5/P6) ----------
+  /// The finished content: captions per platform, hashtags, poster lines, publish note.
+  /// Persisted so a refresh does not throw away work the operator has just reviewed.
+  expandedJson    Json?
+  expandedAt      DateTime?
+  /// Rendered poster PNG, served from the storage provider.
+  posterUrl       String?
+  posterRenderedAt DateTime?
+
   @@index([batchId])
   @@index([status])
 }
