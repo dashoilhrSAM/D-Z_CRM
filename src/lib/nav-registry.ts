@@ -94,6 +94,7 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     section: "MARKETING",
     items: [
       { key: "marketing-overview", label: "Marketing Overview", labelKey: "nav.marketing-overview", href: "/workshop/marketing", icon: LayoutDashboard, module: "CAMPAIGNS", access: ["OWNER"] },
+      { key: "content-studio", label: "Content Studio", labelKey: "nav.content-studio", href: "/workshop/marketing/content", icon: Sparkles, module: "CAMPAIGNS", access: ["OWNER"] },
       { key: "calendar", label: "Promotion Calendar", labelKey: "nav.calendar", href: "/workshop/marketing/calendar", icon: Store, module: "CAMPAIGNS", access: ["OWNER"] },
       { key: "posters", label: "Poster Library", labelKey: "nav.posters", href: "/workshop/marketing/posters", icon: Megaphone, module: "CAMPAIGNS", access: ["OWNER"] },
       { key: "scripts", label: "Reels Script Bank", labelKey: "nav.scripts", href: "/workshop/marketing/scripts", icon: MessageSquare, module: "CAMPAIGNS", access: ["OWNER"] },

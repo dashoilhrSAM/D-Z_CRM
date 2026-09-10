@@ -80,10 +80,160 @@ model Organisation {
   attachments   Attachment[]
   auditLogs     AuditLog[]
   integrationConfigs IntegrationConfig[]
+  promoProducts PromoProduct[]
+  brandProfiles BrandProfile[]
+  occasions     Occasion[]
+  trendTopics   TrendTopic[]
   permissions   Permission[]
   roleConfigs   RoleConfig[]
   serviceHistory ServiceHistory[]
 }
+
+
+/// A dated moment worth planning content around.
+///
+/// Not just festivals: for a motorcycle workshop the *rhythm* around a date matters more
+/// than the date itself — the long-distance travel rush before a major holiday, the
+/// monsoon months, the school-break travel peaks, payday. `angleHint` carries that
+/// editorial angle so generation knows what to actually say, not merely that a date exists.
+///
+/// Reference data with an optional organisation override: organisationId null means the
+/// row is shared nationwide calendar data.
+model Occasion {
+  id             String    @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  /// Stable identifier, e.g. MY-2026-RAYA-AIDILFITRI or MY-PAYDAY-2026-09
+  key            String    @unique
+  name           String
+  nameEn         String?
+  nameZh         String?
+  /// Dates are stored at UTC midnight (project convention) so they never shift with timezone.
+  startDate      DateTime
+  endDate        DateTime?
+  /// FESTIVAL | NATIONAL | SCHOOL_HOLIDAY | PAYDAY | MONSOON | INDUSTRY
+  type           String
+  /// 1-5, how much this matters to a motorcycle workshop. 5 = peak demand driver.
+  relevance      Int       @default(3)
+  /// How many days before startDate content should begin (pre-travel service window).
+  leadDays       Int       @default(7)
+  /// The editorial angle: what the workshop should actually say or offer.
+  angleHint      String?
+  notes          String?
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  @@index([startDate])
+  @@index([type])
+}
+
+/// A trending or high-performing piece the workshop can learn STRUCTURE from.
+///
+/// Deliberate constraint: this stores what made a piece work — its hook pattern, format
+/// and shape — never its wording. Copying a viral script is a copyright problem and
+/// produces derivative content; learning that "the hook is a cost-of-inaction question"
+/// is legitimate and reusable.
+model TrendTopic {
+  id             String    @id @default(cuid())
+  organisationId String?
+  organisation   Organisation? @relation(fields: [organisationId], references: [id])
+  /// The day this trend was captured (UTC midnight).
+  asOf           DateTime
+  /// YOUTUBE | TIKTOK | INSTAGRAM | NEWS | MANUAL
+  source         String
+  title          String
+  url            String?
+  author         String?
+  /// Engagement snapshot at capture time.
+  views          Int?
+  likes          Int?
+  comments       Int?
+  durationSec    Int?
+  language       String?
+  /// What the piece is about, in one or two lines.
+  summary        String?
+  /// AI-extracted STRUCTURE — the reusable part.
+  hookPattern    String?
+  format         String?
+  whyItWorks     String?
+  /// Angles this trend suggests for our own content (JSON array).
+  borrowableAngles String?
+  /// 1-5 relevance to a Malaysian motorcycle workshop.
+  relevance      Int       @default(3)
+  /// Stable identity so repeated ingestion does not duplicate.
+  dedupeKey      String    @unique
+  active         Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+
+  @@index([asOf])
+  @@index([source])
+}
+
+// ---------- Marketing content engine ----------
+
+/// Promotion-only product catalogue.
+///
+/// Deliberately SEPARATE from `Product`, which models sellable inventory (cost price,
+/// stock levels, suppliers, purchase orders). These rows are brand assets used to
+/// compose marketing content — they are acquired for promotion, never stocked, never
+/// invoiced, and therefore carry no cost/stock fields. Keeping them apart means adding
+/// a promo product can never affect inventory or finance reporting.
+model PromoProduct {
+  id             String       @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  name           String
+  sku            String       @unique
+  brand          String?      // DASHCIL | DASHOIL | D&Z
+  category       String?      // ENGINE_OIL | CHAIN_LUBE | COOLANT | GEAR_OIL
+  series         String?      // E | H | S | R  (product family)
+  volume         String?      // "1.2L", "400ml"
+  /// Transparent cut-out for compositing onto generated poster backgrounds.
+  imageUrl       String?      // /products/<sku>.png
+  description    String?
+  /// Structured label facts, e.g. { viscosity, api, jaso, badges }
+  specs          Json?
+  /// Marketing angles and selling points (JSON array of strings).
+  sellingPoints  String?
+  /// Short copy the model may reuse verbatim — anything else it must not invent.
+  approvedCopy   String?
+  active         Boolean      @default(true)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+/// Per-brand voice and guardrails for content generation.
+///
+/// Holds the answer to "根据我们的内容": what each brand sounds like, what it may claim
+/// and what it must never say. Generation reads this instead of guessing a tone.
+model BrandProfile {
+  id              String       @id @default(cuid())
+  organisationId  String
+  organisation    Organisation @relation(fields: [organisationId], references: [id])
+  key             String       // DZ_WORKSHOP | DASHCIL | DASHOIL
+  name            String
+  tagline         String?
+  /// Tone-of-voice description handed to the model.
+  voice           String?
+  primaryLanguage String       @default("ms") // ms | en | zh
+  /// JSON array of language codes to produce, e.g. ["ms","en","zh"]
+  languages       String?
+  /// JSON array of audience descriptions.
+  audiences       String?
+  /// JSON array of things the brand always does.
+  dos             String?
+  /// JSON array of hard prohibitions (wrong claims, banned words, competitor jabs).
+  donts           String?
+  /// JSON array of posts the team considers good, used as few-shot style anchors.
+  samplePosts     String?
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@unique([organisationId, key])
+}
+
 
 model Branch {
   id             String       @id @default(cuid())
@@ -904,6 +1054,45 @@ model ContentScript {
   body       String
   tone       String?
   createdAt  DateTime @default(now())
+
+  // ---------- Content engine (P4) ----------
+  // A candidate is simply a ContentScript that has not been chosen yet, so the existing
+  // Script Bank page keeps working unchanged while gaining the candidate workflow.
+  /// MANUAL | CANDIDATE | SELECTED | REJECTED | USED
+  status          String   @default("MANUAL")
+  /// MANUAL | AI
+  source          String   @default("MANUAL")
+  /// Groups the candidates produced by one generation run, so a whole batch can be
+  /// reviewed or discarded together.
+  batchId         String?
+  /// The angle this candidate takes — what makes it different from its siblings.
+  angle           String?
+  cta             String?
+  language        String?
+  /// Which brand voice produced it (BrandProfile.key).
+  brandKey        String?
+  /// What it was written for: an occasion window and/or a trend structure.
+  occasionKey     String?
+  trendKey        String?
+  /// The product toggle: whether this script shows a product, and which one.
+  includeProduct  Boolean  @default(false)
+  productSku      String?
+  /// Model self-assessment and its reason for picking this angle.
+  score           Int?
+  reasoning       String?
+  generatedAt     DateTime?
+
+  // ---------- Expansion + poster (P5/P6) ----------
+  /// The finished content: captions per platform, hashtags, poster lines, publish note.
+  /// Persisted so a refresh does not throw away work the operator has just reviewed.
+  expandedJson    Json?
+  expandedAt      DateTime?
+  /// Rendered poster PNG, served from the storage provider.
+  posterUrl       String?
+  posterRenderedAt DateTime?
+
+  @@index([batchId])
+  @@index([status])
 }
 // ---------- Requirements §30 DATA: missing entities ----------
 
