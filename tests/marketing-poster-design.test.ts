@@ -4,7 +4,7 @@
 // designed poster and a photo with words on it, and the verification is the only thing
 // standing between a model-written typo and a published poster.
 import { describe, it, expect } from "vitest";
-import { buildDesignPrompt, textInstructions, requiredWords, POSTER_LAYOUTS, POSTER_STYLES, DEFAULT_POSTER_STYLE, styleFor } from "@/modules/marketing/poster-design";
+import { buildDesignPrompt, textInstructions, requiredWords, POSTER_LAYOUTS, POSTER_STYLES, DEFAULT_POSTER_STYLE, styleFor, stageRect } from "@/modules/marketing/poster-design";
 import { comparePosterText, normaliseWord, words } from "@/modules/marketing/poster-verify";
 
 const brief = {
@@ -51,9 +51,49 @@ describe("buildDesignPrompt", () => {
     expect(prompt).toMatch(/do not draw an illustration of one/i);
   });
 
-  it("allows the reserved area to be framed, but keeps it empty", () => {
-    expect(prompt).toMatch(/deliberately composed EMPTY space/i);
+  it("reserves a product window and keeps it empty", () => {
+    expect(prompt).toMatch(/RESERVED PRODUCT WINDOW/i);
     expect(prompt).toMatch(/must contain no object/i);
+    expect(prompt).toMatch(/deliberately empty/i);
+  });
+
+  /**
+   * The composited product is a photograph. Surrounded by flat shapes it reads as pasted
+   * on, and the critiques said so twice; telling the model to build a photographic window
+   * is what makes a photograph there look intentional instead of accidental.
+   */
+  it("asks for the window to be photographable, so the photo has somewhere to belong", () => {
+    expect(prompt).toMatch(/seamless studio backdrop/i);
+    expect(prompt).toMatch(/soft shadow a photographed object would cast/i);
+    expect(prompt).toContain(POSTER_STYLES.GRAPHIC.stageLook);
+  });
+
+  it("gives the model the window position in the same percentages the compositor uses", () => {
+    // Two sources of truth here would put the bottle beside the window, not in it.
+    const rect = stageRect(POSTER_LAYOUTS.SQUARE, POSTER_LAYOUTS.SQUARE.width, POSTER_LAYOUTS.SQUARE.height);
+    const pc = (n: number, total: number) => Math.round((n / total) * 100) + "%";
+    expect(prompt).toContain(
+      "left " + pc(rect.left, POSTER_LAYOUTS.SQUARE.width) +
+      ", top " + pc(rect.top, POSTER_LAYOUTS.SQUARE.height) +
+      ", width " + pc(rect.width, POSTER_LAYOUTS.SQUARE.width) +
+      ", height " + pc(rect.height, POSTER_LAYOUTS.SQUARE.height),
+    );
+  });
+
+  /**
+   * The product is a photograph of real packaging, so its colours are fixed. The palette
+   * is the thing that can move — but only if the model is told what it is designing
+   * around. Without this line it picks a palette and the bottle has to fight it.
+   */
+  it("tells the model the product's palette when one will be composited", () => {
+    const withProduct = buildDesignPrompt({ ...brief, productColours: ["navy", "red"] });
+    expect(withProduct).toMatch(/PRODUCT PALETTE/);
+    expect(withProduct).toContain("predominantly navy and red");
+    expect(withProduct).toMatch(/never recolour or repaint the product itself/i);
+  });
+
+  it("omits the palette line entirely when no product is placed", () => {
+    expect(prompt).not.toMatch(/PRODUCT PALETTE/);
   });
 
   it("demands the typography be composed into the layout, not laid over a background", () => {

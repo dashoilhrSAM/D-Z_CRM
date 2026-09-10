@@ -6,9 +6,12 @@
 // POSTER_LAYOUTS entry, so they cannot drift apart.
 import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
-import { composePoster, type ProductPlacement } from "./poster";
+import { composePoster, sampleRegion, type ProductPlacement } from "./poster";
 import { generateFromPrompt, SIZE_MAP, type PosterSizeKey } from "./images";
-import { POSTER_LAYOUTS, buildDesignPrompt, styleFor, type DesignBrief, type PosterStyleKey } from "./poster-design";
+import { POSTER_LAYOUTS, buildDesignPrompt, stageRect, styleFor, type DesignBrief, type PosterStyleKey } from "./poster-design";
+import { matchGrade } from "./poster-grade";
+import { readProductColours } from "./product-colours-read";
+import sharp from "sharp";
 import { verifyPosterText, type VerificationResult } from "./poster-verify";
 import type { ExpandedContent } from "./expand";
 import { readFileSync } from "node:fs";
@@ -34,6 +37,8 @@ export interface RenderResult {
   expectedText: string[];
   /** Read-back check of the rendered poster. */
   verification: VerificationResult;
+  /** How the product was graded to sit on this poster, for diagnosing a bad placement. */
+  grade: string;
   /** True when a second attempt was generated because the first had missing words. */
   retried: boolean;
 }
@@ -50,6 +55,7 @@ export function briefFrom(expanded: ExpandedContent, opts: {
   badge?: string | null;
   style?: PosterStyleKey;
   subject?: string | null;
+  productColours?: string[] | null;
 }): DesignBrief {
   const pt = expanded.posterText;
   // The caption line carries the product identity, which is what a buyer needs to match
@@ -65,6 +71,7 @@ export function briefFrom(expanded: ExpandedContent, opts: {
     caption,
     cta: pt.cta ?? null,
     subject: opts.subject ?? null,
+    productColours: opts.productColours ?? null,
   };
 }
 
@@ -98,34 +105,70 @@ export async function renderScriptPoster(
     if (occ) badge = occ.name;
   }
 
+  const productImageUrl = product?.imageUrl ?? null;
+  const productSku = product?.sku ?? null;
+  const productBuffer = productImageUrl ? loadProductImage(productImageUrl) : null;
+  const usedProduct: string | null = productBuffer ? productSku : null;
+
+  // Read the palette off the real packaging before briefing the model, so it designs a
+  // poster the product belongs in. No model call — this is measured, not guessed.
+  const productColours = productBuffer ? await readProductColours(productBuffer) : null;
+
   const style = styleFor(opts?.style);
-  const brief = briefFrom(expanded, { size, brandName, badge, style: style.key, subject: expanded.posterScene });
+  const brief = briefFrom(expanded, {
+    size,
+    brandName,
+    badge,
+    style: style.key,
+    subject: expanded.posterScene,
+    productColours,
+  });
   const prompt = buildDesignPrompt(brief);
 
   const artwork = await generateFromPrompt(prompt, size);
 
-  // Only the product is composited — the model already placed the typography.
-  const products: ProductPlacement[] = [];
-  let usedProduct: string | null = null;
-  if (product?.imageUrl) {
-    products.push({
-      buffer: loadProductImage(product.imageUrl),
-      sku: product.sku,
-      heightRatio: layout.stage.heightRatio,
-      centerX: layout.stage.centerX,
-      bottomY: layout.stage.bottomY,
-    });
-    usedProduct = product.sku;
-  }
+  let gradeReason = "no product placed";
 
-  const compose = (bg: Buffer) => composePoster({
-    width: dims.width,
-    height: dims.height,
-    background: bg,
-    products,
-    blocks: [],
-    backgroundDarken: 0,
-  });
+  /**
+   * Composite the finished poster from one piece of artwork.
+   *
+   * The stage is sampled from the artwork *after* it is resized to the canvas, because
+   * the grade has to match the pixels that actually end up on screen — sampling the
+   * model's original output would measure a differently framed image.
+   */
+  const compose = async (bg: Buffer) => {
+    const canvas = await sharp(bg)
+      .resize(dims.width, dims.height, { fit: "cover", position: "centre" })
+      .png()
+      .toBuffer();
+
+    // Only the product is composited — the model already placed the typography.
+    const products: ProductPlacement[] = [];
+    if (productBuffer) {
+      const stage = await sampleRegion(canvas, stageRect(layout, dims.width, dims.height));
+      const grade = matchGrade(stage);
+      gradeReason = grade.reason;
+      products.push({
+        buffer: productBuffer,
+        sku: productSku ?? "unknown",
+        heightRatio: layout.stage.heightRatio,
+        centerX: layout.stage.centerX,
+        bottomY: layout.stage.bottomY,
+        brightness: grade.brightness,
+        saturation: grade.saturation,
+        channel: grade.channel,
+      });
+    }
+
+    return composePoster({
+      width: dims.width,
+      height: dims.height,
+      background: canvas,
+      products,
+      blocks: [],
+      backgroundDarken: 0,
+    });
+  };
 
   const expectedText = [brief.headline, brief.sub, brief.caption, brief.brandName, brief.cta, brief.badge]
     .filter((v): v is string => Boolean(v));
@@ -162,6 +205,7 @@ export async function renderScriptPoster(
     prompt,
     expectedText,
     verification,
+    grade: gradeReason,
     retried,
   };
 }

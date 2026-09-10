@@ -11,6 +11,7 @@
 import sharp from "sharp";
 import type { OverlayOptions } from "sharp";
 import { renderTextBlocks, type TextBlock } from "./poster-text";
+import { sampleFromMean, type ColourSample } from "./poster-grade";
 
 export interface ProductPlacement {
   buffer: Buffer;
@@ -34,6 +35,11 @@ export interface ProductPlacement {
   brightness?: number;
   /** Saturation multiplier, 0-2. Default 0.96. */
   saturation?: number;
+  /**
+   * Per-channel multipliers matching the poster's ambient colour cast, from
+   * matchGrade(). Without it a warm poster keeps a cool studio bottle in it.
+   */
+  channel?: [number, number, number];
 }
 
 /**
@@ -105,20 +111,49 @@ export function px(ratio: number, total: number): number {
 export async function fitProduct(
   buffer: Buffer,
   targetHeight: number,
-  grade?: { brightness?: number; saturation?: number },
+  grade?: { brightness?: number; saturation?: number; channel?: [number, number, number] },
 ): Promise<{ buffer: Buffer; width: number; height: number }> {
   const meta = await sharp(buffer).metadata();
   const srcW = meta.width ?? 1;
   const srcH = meta.height ?? 1;
   const height = Math.max(1, Math.round(targetHeight));
   const width = Math.max(1, Math.round((srcW / srcH) * height));
-  const out = await sharp(buffer)
-    .resize({ width, height, fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  let pipeline = sharp(buffer)
+    .resize({ width, height, fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } });
+  // linear() before modulate(): it corrects the colour cast of the light, which is a
+  // property of the scene, so it should not be affected by the brightness we apply after.
+  if (grade?.channel) pipeline = pipeline.linear(grade.channel, [0, 0, 0]);
+  const out = await pipeline
     .modulate({ brightness: grade?.brightness ?? 0.94, saturation: grade?.saturation ?? 0.96 })
     .png()
     .toBuffer();
   return { buffer: out, width, height };
 }
+
+/**
+ * Average colour of a rectangle of the artwork.
+ *
+ * Used to read the poster's ambient light so the product can be graded to match it
+ * instead of being dropped in at studio settings.
+ */
+export async function sampleRegion(
+  buffer: Buffer,
+  rect: { left: number; top: number; width: number; height: number },
+): Promise<ColourSample> {
+  const meta = await sharp(buffer).metadata();
+  const left = Math.max(0, Math.min((meta.width ?? 1) - 1, Math.round(rect.left)));
+  const top = Math.max(0, Math.min((meta.height ?? 1) - 1, Math.round(rect.top)));
+  const width = Math.max(1, Math.min((meta.width ?? 1) - left, Math.round(rect.width)));
+  const height = Math.max(1, Math.min((meta.height ?? 1) - top, Math.round(rect.height)));
+  const stats = await sharp(buffer).extract({ left, top, width, height }).stats();
+  const [r, g, b] = stats.channels.map((c) => c.mean);
+  return sampleFromMean(r ?? 0, g ?? 0, b ?? 0);
+}
+
+// NOTE: an ink outline around the cut-out was built and measured, and rejected. Two
+// independent critiques said it "creates a sharp visual separation ... making it look
+// like a distinct, pasted-on element" — the exact failure it was meant to cure. Product
+// composites are seated with light and shadow, not with a drawn border.
 
 /**
  * A soft contact shadow so the product sits ON the surface instead of floating above it.
@@ -166,7 +201,11 @@ export async function composePoster(spec: PosterSpec): Promise<Buffer> {
   // 3. products, with a shadow beneath each
   for (const p of spec.products ?? []) {
     const targetH = px(p.heightRatio ?? 0.46, height);
-    const fitted = await fitProduct(p.buffer, targetH, { brightness: p.brightness, saturation: p.saturation });
+    const fitted = await fitProduct(p.buffer, targetH, {
+      brightness: p.brightness,
+      saturation: p.saturation,
+      channel: p.channel,
+    });
     const cx = px(p.centerX ?? 0.72, width);
     const bottom = px(p.bottomY ?? 0.82, height);
     const top = Math.max(0, bottom - fitted.height);
