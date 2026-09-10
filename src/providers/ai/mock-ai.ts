@@ -1,4 +1,4 @@
-import type { AiProvider, AiChatMessage } from "../types";
+import { AiError, type AiProvider, type AiChatMessage } from "../types";
 
 /** MockAIProvider — deterministic canned generation (no LLM in prototype). */
 export class MockAIProvider implements AiProvider {
@@ -27,6 +27,19 @@ export class MockAIProvider implements AiProvider {
     }
     if (lastUser.toLowerCase().includes("booking")) return "Mock: 今日预约数据已拉取。请配置 OPENAI_API_KEY 以启用真实 AI 回答。";
     return "Mock: 已分析。请配置 OPENAI_API_KEY 以启用真实 AI 回答。";
+  }
+
+  /**
+   * Deliberately refuses rather than inventing a shape.
+   *
+   * A canned object here would recreate exactly the silent-failure trap the strict
+   * path exists to prevent: callers would persist fabricated scripts believing the
+   * model had produced them.
+   */
+  async chatJson<T>(): Promise<T> {
+    throw new AiError(
+      "MockAIProvider cannot produce structured output. Configure OPENAI_API_KEY to enable the content engine.",
+    );
   }
 }
 
