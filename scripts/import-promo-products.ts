@@ -2,8 +2,8 @@
 //
 // Facts here were read off the actual product labels with a vision model, so the
 // content engine has real specs to work from instead of inventing them. Anything the
-// model could not read confidently is left empty rather than guessed — notably `brand`,
-// because the stylised wordmark reads ambiguously as both DASHCIL and DASHOIL.
+// model could not read confidently is left empty rather than guessed. The brand is the
+// one field that started empty and is now confirmed: the owner answered DASHOIL.
 import { db } from "../src/lib/db";
 import { copyFileSync, existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
@@ -39,24 +39,40 @@ const ROWS: Row[] = [
   { src: "Chain Lube", sku: "BP38", name: "BP38 Motorcycle Chain Lube", category: "CHAIN_LUBE", series: "BP", volume: "400ml", specs: { type: "Aerosol chain lube" }, sellingPoints: ["Reduces friction and loss of power", "Increases chain durability", "Water and rust resistant"] },
 ];
 
-async function main() {
+/** Where the optimised cut-outs live when they have not been committed yet. */
+export const IMAGE_SOURCE = process.env.PROMO_IMAGE_SRC ?? "/tmp/dz-p/out-webp";
+
+/**
+ * Write the promotion-only product catalogue.
+ *
+ * The images are committed under public/products, so this never needs the original
+ * source directory — copying from it is a convenience for a machine that has just
+ * re-optimised the artwork, not a requirement. A missing source is therefore a note,
+ * not a failure: on any deployed environment the file is already served from the repo.
+ */
+export async function seedPromoProducts(opts?: { imageSource?: string }) {
   const org = await db.organisation.findFirst();
   if (!org) throw new Error("no organisation");
   const outDir = path.join(process.cwd(), "public/products");
   mkdirSync(outDir, { recursive: true });
+  const source = opts?.imageSource ?? IMAGE_SOURCE;
 
-  let copied = 0, created = 0, updated = 0;
+  let copied = 0, created = 0, updated = 0, missing = 0;
   for (const [i, r] of ROWS.entries()) {
-    const srcFile = path.join("/tmp/dz-p/out-webp", r.src + ".webp");
+    const srcFile = path.join(source, r.src + ".webp");
     const destName = r.sku + ".webp";
     if (existsSync(srcFile)) { copyFileSync(srcFile, path.join(outDir, destName)); copied++; }
-    else console.warn("  ! missing image for " + r.src);
+    else missing++;
 
     const data = {
       organisationId: org.id,
       name: r.name,
       sku: r.sku,
-      brand: null as string | null,   // ambiguous on the label artwork — left for the owner
+      // Confirmed by the owner. It used to be null here because the stylised wordmark
+      // reads ambiguously as both DASHCIL and DASHOIL under OCR — but writing null on
+      // every run also silently unbranded the whole catalogue, so the confirmed value
+      // lives here now and apply-dashoil-brand.ts only backfills older rows.
+      brand: "DASHOIL" as string | null,
       category: r.category,
       series: r.series ?? null,
       volume: r.volume ?? null,
@@ -70,9 +86,19 @@ async function main() {
     if (existing) { await db.promoProduct.update({ where: { sku: r.sku }, data }); updated++; }
     else { await db.promoProduct.create({ data }); created++; }
   }
-  console.log("images copied: " + copied + "/" + ROWS.length);
-  console.log("products created: " + created + ", updated: " + updated);
-  const total = await db.promoProduct.count();
-  console.log("PromoProduct rows now: " + total);
+  return { created, updated, copied, missing, total: await db.promoProduct.count(), expected: ROWS.length };
 }
-main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+
+async function main() {
+  const res = await seedPromoProducts();
+  console.log("images copied from " + IMAGE_SOURCE + ": " + res.copied + "/" + res.expected +
+    (res.missing > 0 ? " (" + res.missing + " not found there — the committed copies are used)" : ""));
+  console.log("products created: " + res.created + ", updated: " + res.updated);
+  console.log("PromoProduct rows now: " + res.total);
+}
+
+// Only run when invoked directly, so importing the seed cannot have side effects.
+const invokedDirectly = process.argv[1]?.endsWith("import-promo-products.ts") ?? false;
+if (invokedDirectly) {
+  main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+}

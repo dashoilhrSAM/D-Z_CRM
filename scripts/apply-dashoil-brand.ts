@@ -4,13 +4,18 @@
 // stylised wordmark as both DASHCIL and DASHOIL. Now confirmed as DASHOIL.
 import { db } from "../src/lib/db";
 
-async function main() {
+/**
+ * Backfill the confirmed brand on products and write its voice profile.
+ *
+ * Must run AFTER the product import, so the products exist to be branded — which is
+ * exactly the ordering a single entry point exists to guarantee.
+ */
+export async function seedDashoilBrand() {
   const org = await db.organisation.findFirst();
   if (!org) throw new Error("no organisation");
 
   // 1. backfill the brand on every promo product
   const res = await db.promoProduct.updateMany({ where: { brand: null }, data: { brand: "DASHOIL" } });
-  console.log("promo products branded DASHOIL: " + res.count);
 
   // 2. brand voice profile for the lubricant line (distinct from the workshop's)
   const data = {
@@ -60,12 +65,26 @@ async function main() {
     where: { organisationId_key: { organisationId: org.id, key: "DASHOIL" } },
     select: { id: true },
   });
-  if (existing) { await db.brandProfile.update({ where: { id: existing.id }, data }); console.log("DASHOIL profile: updated"); }
-  else { await db.brandProfile.create({ data }); console.log("DASHOIL profile: created"); }
+  let profile: "created" | "updated";
+  if (existing) { await db.brandProfile.update({ where: { id: existing.id }, data }); profile = "updated"; }
+  else { await db.brandProfile.create({ data }); profile = "created"; }
 
+  const unbranded = await db.promoProduct.count({ where: { brand: null } });
+  return { branded: res.count, unbranded, profile };
+}
+
+async function main() {
+  const res = await seedDashoilBrand();
+  console.log("promo products branded DASHOIL: " + res.branded + " (still unbranded: " + res.unbranded + ")");
+  console.log("DASHOIL profile: " + res.profile);
   const brands = await db.promoProduct.groupBy({ by: ["brand"], _count: true });
   console.log("promo product brands:", brands.map((b) => (b.brand ?? "(null)") + ":" + b._count).join(", "));
   const profiles = await db.brandProfile.findMany({ select: { key: true, name: true } });
   console.log("brand profiles:", profiles.map((p) => p.key).join(", "));
 }
-main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+
+// Only run when invoked directly, so importing the seed cannot have side effects.
+const invokedDirectly = process.argv[1]?.endsWith("apply-dashoil-brand.ts") ?? false;
+if (invokedDirectly) {
+  main().then(() => process.exit(0)).catch((e) => { console.error("ERROR", e); process.exit(1); });
+}
