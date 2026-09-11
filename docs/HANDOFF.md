@@ -1,4 +1,4 @@
-# HANDOFF — D&Z Platform（2026-09-10 11:05）
+# HANDOFF — D&Z Platform（2026-09-11 04:39）
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
@@ -8,6 +8,95 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
+**只有 `fix/rider-off-news-leak` 待 owner 合并，其余改动都已进 main。** 该分支（关掉的海报不再漏给骑手 + 促销窗口统一由 isPromoActive 判定 + 改动记录改为一次一个文件 + **4 个既有 e2e 失败已修**）现在到了 `3c85e8c`；`feat/content-studio-save` 已随 PR #19 进 main（可删远端分支）。main = `087337d`。生产健康（/ /login /contact 全 200，schema in sync）。基线全绿：tsc 0 / vitest **417**（32 文件）/ build 0 / **Playwright 全量 46 通过 · 0 失败**。
+
+## 会话信息
+- 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
+- 本会话 ID：session-df92a8c8-e683-4596-ae0e-abfaa782852e（续接会话「继续 D&Z」）
+- 打包时间：2026-09-11 04:39
+- 续接口令：继续 D&Z
+- 续接会话：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（2026-09-11 12:4x，修完 4 个 e2e 失败）
+
+## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
+- **4 个既有 e2e 失败已修（不是业务 bug）**：页内功能导览的气泡卡压在页面内容上（`/rider/book` 的导语气泡正好盖住第一张分行卡），被压住的 click 一直重试到 120s 超时——测试没按用户的方式走（按 Skip），加 `dismissGuide` 后三例通过，master journey 一路绿灯。另删掉一条会腐烂的断言（硬编码 "November 2026"：估算从"今天"起算，写死月份必然过期）。全量 46 通过。
+- **关掉的海报不再漏给骑手（PR 待合）**：News 页本来就对了，漏的是它链接过去的 /rider/promotions（读全部素材、无 published 过滤）——生产 22 个素材中 10 个已关闭却一直露出。顺带把四处各自手写的「促销是否生效」统一为 isPromoActive（其中两处只查 endDate：未开始的促销提前露出、无结束日期的长期促销被整条排除）。
+- **Content Studio 三件事（PR 待合）**：内容其实早已落库，缺的是入口——新增「已生成内容」面板可回访（复用服务端早就存在却从未被前端调用的 GET）、一键导出 .md、标记已发布（接上预留的 status: USED + 新增 usedAt）。
+- **发票就地看明细 + 结账打折（PR #17 / #18，已进 main）**：发票卡片可展开看明细行（数据源是完工快照 InvoiceItem）;收款弹窗可打百分比/金额折扣——**手动折扣与促销 discountSen 分开记**（后者是 marketing 归因字段，混写会让 ROI 失真）。
+- **营销数据上生产 + 服务价目可编辑 + 日历 cron（已进 main）**：`pnpm seed:marketing` 一条命令种日历/产品/品牌；服务价目原本 UI 里根本改不了（只有 create/toggle/delete），已补 updateServiceType；日历每月 1 号 cron 自动滚动。
+- **部署 45 分钟超时根治（PR #14，已进 main）**：根因是构建期 schema 同步连生产库而 execFileSync 默认无超时；改为优先 DIRECT_URL + 每命令硬超时。合并后部署回到 1–2 分钟。
+- **内容引擎 P1–P7 + 海报三轮（PR #13，已进 main）**：候选脚本→人工选→展开→AI 出图全链路；海报艺术方向可选（默认平面 GRAPHIC）；抠图印刷化；文字读回校验。
+- **指派机械师（PR #16，已进 main）**：下拉按工单分行过滤（此前列全部分行，选跨行的必被拒）+ 修裁切（共享 Select primitive 受益）。
+
+## 下一步（按优先级）
+1. **合并 `fix/rider-off-news-leak`**（https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/fix/rider-off-news-leak）——只改 rider 展示、e2e 与文档，无 schema 改动，可干净合并。
+2. **删掉已合进 main 的远端分支 `feat/content-studio-save`**（`git merge-base --is-ancestor` 已验），顺带清掉它对应的 PR。
+3. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
+4. **两个悬而未决的小改动等 owner 表态**：① completion.ts 发给骑手的 WhatsApp 报价用 subtotal、**没减促销折扣**（客户收到的价高于发票）；② 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽，代价是长名字走省略号）。
+5. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
+6. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
+7. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
+8. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步。**另需 owner 在 Vercel 加 `DIRECT_URL`**（Supabase 直连 5432，非池化），让构建期 schema 同步走直连。
+
+## 基线测试（命令 + 期望通过数）
+- `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
+- `pnpm test`：**417 个通过（32 文件）**
+- `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
+- `pnpm exec playwright test --project=desktop-chromium`：**46 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 5 分钟）
+- 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
+- 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
+
+## 服务与恢复
+- workshop :3002：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
+- rider :3003 / e2e :3102：同上换端口与 label（com.dz-platform.rider / .e2e）
+- **改了源码必须 `pnpm build` 后 kickstart**。⚠️ **即使没改代码，只要重建过 .next 也必须 kickstart**——服务在跑期间换掉 .next，旧页面会去加载不存在的 chunk，浏览器报「This page couldn't load」。
+- 生产：https://d-z-crm.vercel.app （push main 自动部署）
+
+## git 状态
+- main = origin/main = **087337d**（PR #19 已合并）
+- 远端分支：`main` · `fix/rider-off-news-leak`（`feat/content-studio-save` 已随 PR #19 进 main，可删）
+- 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 5）
+- 未提交：0（tracked 干净）
+- ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
+
+## 关键决策与约定
+- **工作流**：一切改动走 feature branch → push → **owner 在 GitHub review + merge**；不直接 push main、不自行触发 Vercel 部署。
+- **文档改动规矩（2026-09-11 起）**：逐次改动写 `docs/changes/YYYY-MM-DD-<slug>.md`（`pnpm new:change <名字>`），**不要再往 SETUP §9 台账加行、也不要往本文件顶部加段落**——那两处已冻结，`tests/docs-changes.test.ts` 会拦截。理由：两条分支都往同一处插内容，合并必然冲突（已发生三次）。
+- **分行隔离**：org 级角色（SUPER_ADMIN/OWNER/HEAD_OFFICE_ADMIN）看全部份；其余锁 session.branchId（src/lib/branch-scope.ts）。job 创建/分配按 session/branch 且拒绝跨行 mechanic（`src/lib/job-branch.ts` 是唯一定义）。
+- **消息**：所有 workshop→rider WhatsApp 必须走 messagingModule.sendDirect/sendFromTemplate（真发、记真实 status/externalId），禁止直写 status: SENT；营销必须 isMarketing:true 以走 opt-out 检查。
+- **规则只写一遍**：一条业务规则出现两处实现就会漂移。已收敛的先例：`isPromoActive`（促销是否生效）、`job-branch`（工单归哪个分行）、`isWindowOpen`（内容窗口）、`applyDiscount`（折扣算法）、`orderInvoiceLines`（发票行顺序）。新增同类规则请照此办理。
+- **营收相关开关存 DB，不写源码常量**：先例 `Organisation.promoAutoApply`，UI 开关在促销日历页。
+- **双 schema 同步铁律**：prisma/schema.prisma（sqlite）+ prisma/schema.pg.prisma（PG）必须同步改；改完 `pnpm exec prisma generate`。
+- **业务日期存 UTC 零点；金额存整数 sen。**
+- **发票语义**：`Invoice.discountSen` 是**促销归因**（marketing 的 ROI 读它），柜台手动折扣必须走 `manualDiscount*` 五个字段，不得混写。
+
+## 踩坑与事实
+- **服务是 launchd `next start`，读 ./next**：改源码或重建 .next 后必须 kickstart。
+- **`src/lib/i18n.ts` > 2500 行**：read(默认 limit)+write 会**截断**，必须用 `edit`，改完确认行数没缩。
+- **合并 main 后若带了 schema 变更，必须 `pnpm exec prisma generate`**：否则 tsc 报 Property X does not exist，那是生成的 client 过期，不是代码错。
+- **SETUP_AND_PREPARATION.md 里有 7 张表共用同一个分隔行**：要定位 §9 台账只能用它的表头 `| 日期 | 改动 | 影响 |`。
+- **解决文档冲突不要手抄**：用 `git show <自己的commit>:<path>` 抽原文再插回。
+- **本项目路径含 `&`**：bash 里引用路径必须加引号。`pnpm add` 需 `--store-dir .pnpm-store`。
+- **只有真实 build 能抓到的坑**：opentype.js 双形态、sharp 被客户端组件间接引用（tsc 与 vitest 全绿、build 失败）。涉及原生/双形态依赖必须跑 `pnpm build`。
+- **本地能登录的账号**：`daniel.tan@dz.my`（OWNER，Supabase，密码 Dashoil@!789）；`test.owner@dz.my` 与 `crm_do_owner@gmail.com` 本地登录会 Invalid login credentials。
+- **本地 dev.db 重置后 Customer.authId 丢失** → rider 登录报「No D&Z account linked」（演示/截图用生产环境）。
+- **Vercel CLI token 已失效**（403 invalidToken）：无法再用 API 查部署状态，看 dashboard。
+- Branch/ServicePackage/Inventory 等无 createdAt（defaultSort/select 勿用）。
+
+## 待办（dtodo）
+- 59e04e5e 经销商验证（逾期 2026-08-19，需真人）
+- 92b29072 生产迁移 / provider 换真（逾期 2026-08-19）：WhatsApp 上线 5 步 + Payment/Notification 选型
+
+## 新会话头 10 分钟
+1. **探活**：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login`（另 :3003 / :3102）；挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
+2. **读本文件 + `docs/changes/` 最新几个文件**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
+3. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**417**）
+4. **挑下一步**：优先「下一步 3」那 4 个既有 e2e 失败（疑似真 bug）
+5. **若改了源码**：`pnpm build` 后 kickstart 三端再验证；有新改动用 `pnpm new:change <名字>` 建条目
+
+---
+
+## 历史段落（冻结于 2026-09-11，逐次改动的原始记录）
+
 **🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
 **根因不在 News 页，在它链接过去的那一页** —— News（/rider/service-history）**正确过滤了 published**，
 但它的 View all 指向的 **/rider/promotions 读全部素材、完全没有 published 过滤**。
@@ -37,13 +126,6 @@ vitest **397**（31 文件）、Playwright 2/2。无 schema 改动。
 
 **✅ 合并顺序已解锁**：`fix/prod-schema-drift-guard` 已由 owner 合并进 main（**PR #12 → main = 3ae3bad**），所以 **`feat/marketing-content-engine` 现可干净合并**（共同祖先 0b37413 已在 main 内，无冲突）。该分支内容引擎 **P1-P7 全部完成**（候选脚本→人工选→展开→AI 出图全链路 + 海报艺术方向可选 + 抠图印刷化）。生产当前健康（全 200，drift 0）。基线全绿（tsc 0 / lint 0 error / vitest **335**（25 文件）/ build 0）。品牌已确认 **DASHOIL**。
 
-## 会话信息
-- 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-df92a8c8-e683-4596-ae0e-abfaa782852e（续接会话「继续 D&Z」）
-- 打包时间：2026-09-10 08:44（本会话续接后更新）
-- 续接口令：继续 D&Z
-
-## 完成进度
 - **Workshop→Rider WhatsApp 真发（PR#9，已合并进 main）**：booking 确认 / 服务完成 / 好评致谢 / 海报群发 / automation SEND_MESSAGE 全部从假 `status:"SENT"` 直写改为经 MessagingProvider 真发（messagingModule.sendDirect / sendFromTemplate，记录真实 status+externalId，遵守营销 opt-out MSG-017 与失败记录 MSG-020）；completion 的 WhatsApp 移到事务提交后发送并触发 SERVICE_COMPLETED 自动化；automation 规则 SEND_MESSAGE 加模板选择器。
 - **分行隔离收严（PR#10，已合并进 main）**：① 选 mechanic 下拉用 scopedStaffWhere 按 session.branchId 收窄 + 显示分店名（jobs/new · jobs/[id] · mechanic/jobs/[id] · mechanic 看板）；② createJob 按 session branch 建单（org 级回退主店）+ 跨行 mechanic 抛错，assignMechanic / updateJobDetails 拒绝跨行；③ bookingAction CHECKED_IN / createStaff / createPurchaseOrder / receivePurchaseOrder 改为按 session/creator/booking branch。DB 实测 KL(4)/Testing(2) mechanic 已分开、无跨行分配。
 - **冲突解决**：fix/staff-access(#8) 与本分支同改 workshop.ts → merge origin/main 解决（去掉重复 `session` 声明与重复 `getSessionUser` import）。
@@ -95,63 +177,3 @@ vitest **397**（31 文件）、Playwright 2/2。无 schema 改动。
 - **安全网**：DROP/TRUNCATE **一律拒绝并 exit 1**；db push 自身也拒绝数据丢失；只碰 `DATABASE_URL` 实际使用的库（本地 sqlite 直接跳过，显式检查用 `DRIFT_CHECK_URL`）；库不可达只警告放行；新增列向后兼容，先于新代码生效无风险。
 - **顺手挖出的第二个隐患**：生产库有 schema 里**没有**的列 `Organisation.qrEnabled`（全代码零引用、git 历史从未出现、值仅默认 true，早期手工 DDL 遗留）。只查 schema→DB 单向是发现不了的；若直接接 db push 会**每轮构建都 DROP 生产列**。已用 `@ignore` 非破坏性化解（保留列、不进 client、不参与 diff），日后可专门清理。同时补上生产真正缺失的 `Booking_servicePackageId_fkey`（验零孤儿后应用）。
 - **诊断命令**：`set -a; . ./.env; set +a; DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/check-prod-schema-drift.mjs`
-
-## 下一步（按优先级）
-1. **合并 `fix/build-timeout-schema-sync`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/fix/build-timeout-schema-sync）——**部署超时修复**，合并后生产才可能部署成功。**同时需在 Vercel 加 `DIRECT_URL`**（Supabase 直连 5432，非池化）。
-2. **（原）合并 `feat/marketing-content-engine`**（PR：https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/feat/marketing-content-engine）——前置的 `fix/prod-schema-drift-guard` 已进 main（PR #12），**基已就位、可干净合并**，不会再触发上次那种全站 500。该分支含 10 个 commit（内容引擎 P1-P7 + 海报艺术方向 + 抠图印刷化）。
-2. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂着，可择机真正 DROP（需人工决定）。
-3. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
-4. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步 —— 生产 PG 幂等加 Message.externalId 列 → push main（auto-deploy）→ Vercel 配 WHATSAPP_* env → Meta 配 webhook → 验证回执。
-5. **Payment / Notification provider 选型**（待用户定网关/推送方案）。
-6. **Marketing 后续可选**：consent 口径（PDPA）待用户定夺——目前无 consent 记录时放行，已提供 per-campaign `requireMarketingConsent` 条件；以及把频率上限 7 天做成可配置。
-7. 可选：继续给更多页面加 FeatureTutorial（tutorial-definitions.ts 加 def + data-tut + i18n tut.*）。
-
-## 基线测试（命令 + 期望通过数）
-- `pnpm exec tsc --noEmit`：0 错误
-- `pnpm test`：**285 个通过**（22 文件；含 marketing-content/trends/occasions/poster/poster-design/broadcast/schema-sync 等）
-- `pnpm exec tsc --noEmit`：**注意用 `set -o pipefail`**，否则 `| head` 会掩盖真实退出码（本次就因此漏看了 3 个类型错误）
-- `pnpm build`：通过（本地 sqlite；生产 build 复现用 `pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`）
-- `pnpm exec playwright test e2e/marketing.spec.ts --project=desktop-chromium`：9 通过（会 wipe+seed prisma/e2e.db 并重启 :3102）
-- 端到端实测：`pnpm exec tsx scripts/verify-marketing-promo.ts`（5/5）、`pnpm exec tsx scripts/verify-marketing-invoice.ts`（6/6）
-
-## 服务与恢复
-- workshop demo :3002：`curl localhost:3002` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
-- rider demo :3003：`curl localhost:3003` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.rider`
-- e2e :3102：`curl localhost:3102` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.e2e`
-- **改源码后必须 `pnpm build` 再 kickstart**，否则服务仍跑旧 .next（本次已踩到）。
-- 生产：https://d-z-crm.vercel.app （push main auto-deploy；Vercel 曾因 GitHub App RBAC 停更）
-
-## git 状态
-- 当前分支：**feat/marketing-content-engine**（栈在 fix/prod-schema-drift-guard @ 0b37413 之上，已 push，等 owner review：内容引擎 P1-P7 + 海报艺术方向）
-- **踩坑提醒**：`git add -A scripts/` 会把项目历史遗留脚本（capture-*.ts、gen-*.ts/py、_dims.ts 等 11 个）一起提交，已 amend 撤回；加文件务必逐个列出
-- main = origin/main = **3ae3bad**（PR#12 fix/prod-schema-drift-guard 已合并；本地 main 已 ff 同步）
-- 已合并分支：feat/marketing-system（eb76825/c5a7260/047f61e）、fix/branch-attribution-and-broadcast(8710683) 均已进 main，本地可删
-- 另一分支：fix/branch-attribution-and-broadcast @ 8710683（已 push，其改动已被 feat/marketing-system 包含）
-- 另：`feat/marketing-content-engine` 未含 main 的合并提交 3ae3bad，但共同祖先 0b37413 已在 main 内 → 合并干净；如需本地验证可 `git merge origin/main` 后再跑基线。
-- 未提交：docs/HANDOFF.md（会话文档，随功能一起提交）+ 大量 untracked（docs/setup-templates、docs/templates、screenshots/*、docs/logo-png 等历史产物，**勿 git add -A**）
-- 已合并分支：fix/mechanic-branch-scope(9f0e163) 已进 main，本地分支可删；本轮两分支待 review 后删
-
-## 关键决策与约定
-- 工作流：一切改动走 feature branch → push → **owner 在 GitHub review + merge**；不直接 push main、不自行触发 Vercel 部署。
-- 分行隔离：org 级角色（SUPER_ADMIN/OWNER/HEAD_OFFICE_ADMIN）看全部份；其余锁 session.branchId（src/lib/branch-scope.ts）。选 staff/mechanic 用 scopedStaffWhere；job 创建/分配按 session/branch 且拒绝跨行 mechanic。
-- 消息：所有 workshop→rider WhatsApp 必须走 messagingModule.sendDirect/sendFromTemplate（经 provider 真发、记录真实 status/externalId），禁止直写 `status:"SENT"` 伪送达。
-- 双 schema 同步铁律：prisma/schema.prisma（sqlite）+ prisma/schema.pg.prisma（PG）必须同步改。
-- 业务日期存 UTC 零点；金额存整数 sen。
-
-## 踩坑与事实
-- 服务是 launchd `next start`，读 ./next —— 改源码必须 build + kickstart 才生效。
-- src/lib/i18n.ts > 2000 行：read(默认 limit 2000)+write 会**截断**，必须用 edit。
-- 合并 fix/staff-access 与分行分支时 workshop.ts 冲突：createStaff 重复 `const session` 声明 + 重复 `getSessionUser` import。
-- 本地 dev.db 重置后 Customer.authId 丢失 → rider 登录报 'No D&Z account linked'（教学/演示截图用生产环境）。
-- Branch/ServicePackage/Inventory 等无 createdAt（defaultSort/select 勿用）。
-
-## 待办（dtodo）
-- 59e04e5e 经销商验证（逾期 2026-08-19，需真人）
-- 92b29072 生产迁移 q2 / provider 换真（逾期 2026-08-19）：WhatsApp 上线 5 步 + Payment/Notification 选型
-
-## 新会话头 10 分钟
-1. 探活：`curl localhost:3002` / :3003 / :3102（挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`）
-2. 读 docs/HANDOFF.md + memory（project/daily）+ `dtodo list`
-3. 跑基线：`pnpm exec tsc --noEmit`（0）+ `pnpm test`（53）
-4. 从「下一步」挑：起新分支收严剩余 isMain / 经销商验证(需真人) / WhatsApp 上线
-5. 若改了源码：`pnpm build` 后 kickstart 重启服务再验证
