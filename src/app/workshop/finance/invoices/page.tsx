@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChevronDown } from "lucide-react";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
@@ -9,6 +10,7 @@ import { formatRM } from "@/lib/money";
 import { fmtDate } from "@/lib/format";
 import { PageTransition } from "@/components/shared/page-transition";
 import { InvoicePaymentPanel } from "@/components/workshop/invoice-payment-panel";
+import { orderInvoiceLines } from "@/lib/invoice-lines";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +53,9 @@ export default async function WorkshopInvoicesPage({ searchParams }: { searchPar
       include: {
         job: { include: { customer: { select: { id: true, name: true } }, motorcycle: { select: { brand: true, model: true, plate: true } } } },
         payments: true,
+        // The invoice's own lines, so the counter can read what was billed without
+        // opening the job. See src/lib/invoice-lines.ts for why these and not the job's.
+        items: true,
       },
       orderBy: { issuedAt: "desc" },
     }),
@@ -91,6 +96,7 @@ export default async function WorkshopInvoicesPage({ searchParams }: { searchPar
           {invoices.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">{t("inv.empty", lang)}</p>}
           {invoices.map((inv) => {
             const paidSen = inv.payments.filter((p) => p.status === "PAID" && p.method !== "PAY_LATER").reduce((s, p) => s + p.amountSen, 0);
+            const lines = orderInvoiceLines(inv.items);
             return (
               <div key={inv.id} className="rounded-2xl border bg-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -110,6 +116,45 @@ export default async function WorkshopInvoicesPage({ searchParams }: { searchPar
                     <div className="mt-1 text-xs text-muted-foreground">{t("inv.total", lang)} <span className="font-bold text-foreground tabular-nums">{formatRM(inv.totalSen)}</span></div>
                   </div>
                 </div>
+                {/* Expandable lines, so a counter can check what was billed without
+                    leaving for the job page. Native <details> rather than a client
+                    component: a disclosure needs no JavaScript, and this page is a
+                    Server Component. */}
+                <details className="group mt-3" data-testid="invoice-details">
+                  <summary
+                    data-testid="invoice-details-toggle"
+                    className="inline-flex cursor-pointer list-none items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium hover:bg-muted [&::-webkit-details-marker]:hidden"
+                  >
+                    <ChevronDown className="h-3.5 w-3.5 transition-transform group-open:rotate-180" />
+                    <span className="group-open:hidden">{t("inv.view-details", lang)}</span>
+                    <span className="hidden group-open:inline">{t("inv.hide-details", lang)}</span>
+                    {lines.length > 0 && <span className="text-muted-foreground">· {lines.length}</span>}
+                  </summary>
+
+                  <div className="mt-2 rounded-xl border bg-muted/20">
+                    {lines.length === 0 ? (
+                      <p className="px-3 py-3 text-xs text-muted-foreground">{t("inv.no-lines", lang)}</p>
+                    ) : (
+                      <div className="divide-y divide-border">
+                        {lines.map((l) => (
+                          <div key={l.id} className="flex items-baseline gap-3 px-3 py-2 text-sm">
+                            <span className="min-w-0 flex-1">{l.description}</span>
+                            <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{l.quantity} × {formatRM(l.unitPriceSen)}</span>
+                            <span className="shrink-0 font-medium tabular-nums">{formatRM(l.lineTotalSen)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div className="space-y-1 border-t px-3 py-2 text-xs">
+                      <div className="flex justify-between text-muted-foreground"><span>{t("pdf.subtotal", lang)}</span><span className="tabular-nums">{formatRM(inv.subtotalSen)}</span></div>
+                      {inv.discountSen > 0 && <div className="flex justify-between text-muted-foreground"><span>{t("pdf.discount", lang)}</span><span className="tabular-nums">−{formatRM(inv.discountSen)}</span></div>}
+                      {inv.taxSen > 0 && <div className="flex justify-between text-muted-foreground"><span>{t("pdf.tax", lang)}</span><span className="tabular-nums">{formatRM(inv.taxSen)}</span></div>}
+                      <div className="flex justify-between font-semibold"><span>{t("common.total", lang)}</span><span className="tabular-nums">{formatRM(inv.totalSen)}</span></div>
+                    </div>
+                  </div>
+                </details>
+
                 <div className="mt-3">
                   <InvoicePaymentPanel
                     invoice={{
