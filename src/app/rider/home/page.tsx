@@ -159,7 +159,9 @@ export default async function RiderHomePage() {
       )}
 
       {livePromos.length > 0 && (
-        <Link href="/rider/promotions" className="block rounded-2xl bg-gradient-to-br from-primary to-orange-500 p-5 text-primary-foreground">
+        // A two-line preview, so tapping it opens the News page where the offers (and the rest of
+        // the workshop's news) live. It used to jump straight into the promotions list.
+        <Link data-testid="home-offers" href="/rider/service-history" className="dz-card-link block rounded-2xl bg-gradient-to-br from-primary to-orange-500 p-5 text-primary-foreground">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-sm font-bold">
               <Tag className="h-4 w-4" /> {t("news.offers", lang)}
