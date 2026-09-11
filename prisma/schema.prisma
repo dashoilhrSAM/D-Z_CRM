@@ -1141,6 +1141,9 @@ model ContentScript {
   /// Rendered poster PNG, served from the storage provider.
   posterUrl       String?
   posterRenderedAt DateTime?
+  /// When the operator marked this as posted. status stays the source of truth (USED);
+  /// this only records when, so "posted last week" is answerable without reading audit logs.
+  usedAt          DateTime?
 
   @@index([batchId])
   @@index([status])

@@ -6,8 +6,8 @@
 //   3. pick one  →  4. expand it into captions and poster lines  →  5. render the poster
 //
 // Steps 2-5 are intentionally manual — the operator filters, nothing auto-publishes.
-import { useState } from "react";
-import { Sparkles, Check, Loader2, Image as ImageIcon, Copy, Trash2, Wand2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Sparkles, Check, Loader2, Image as ImageIcon, Copy, Trash2, Wand2, Download, History, PackageCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,11 +17,19 @@ import { cn } from "@/lib/utils";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
 import { POSTER_STYLES, DEFAULT_POSTER_STYLE, type PosterStyleKey } from "@/modules/marketing/poster-design";
+import { buildExportMarkdown, exportFilename } from "@/modules/marketing/content-export";
 
 interface Candidate {
   id: string; angle: string; title: string; hook: string; body: string; cta: string;
   score: number | null; reasoning: string; includeProduct: boolean; productSku: string | null;
 }
+/** A previously finished script, as listed by the history panel. */
+interface SavedItem {
+  id: string; title: string; status: string; platform?: string;
+  generatedAt?: string | null; expandedAt?: string | null; usedAt?: string | null;
+  posterUrl?: string | null; occasionKey?: string | null;
+}
+
 interface Expanded {
   caption: string; hashtags: string[];
   versions: { platform: string; caption: string; note?: string }[];
@@ -51,6 +59,26 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
   const [posterUrl, setPosterUrl] = useState("");
   const [posterCheck, setPosterCheck] = useState<{ ok: boolean; missing: string[]; readError?: string; retried: boolean; transcribed?: string } | null>(null);
   const [copied, setCopied] = useState("");
+  // Everything above lives only in this tab, which is why work that was safely in the database
+  // felt lost. These two make it reachable again.
+  const [saved, setSaved] = useState<SavedItem[]>([]);
+  const [currentTitle, setCurrentTitle] = useState("");
+  const [usedAt, setUsedAt] = useState<string | null>(null);
+
+  const refreshSaved = async () => {
+    try {
+      const res = await fetch("/api/marketing/content", { method: "GET" });
+      const data = await res.json();
+      if (!data.ok) return;
+      // Only finished work: a candidate that was never expanded has nothing to reopen.
+      const finished: SavedItem[] = (data.batches ?? [])
+        .flatMap((b: { scripts: SavedItem[] }) => b.scripts)
+        .filter((s: SavedItem) => Boolean(s.expandedAt));
+      setSaved(finished);
+    } catch { /* the panel is a convenience; failing to load it must not break the studio */ }
+  };
+
+  useEffect(() => { void refreshSaved(); }, []);
 
   async function call(payload: Record<string, unknown>) {
     const res = await fetch("/api/marketing/content", {
@@ -79,6 +107,8 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
 
   const pick = async (id: string) => {
     setBusy("expand"); setError(""); setSelectedId(id); setPosterUrl("");
+    setUsedAt(null);
+    setCurrentTitle(candidates.find((c) => c.id === id)?.title ?? "");
     try {
       await call({ action: "select", id });
       const d = await call({ action: "expand", id, platforms: ["TIKTOK", "INSTAGRAM", "FACEBOOK", "WHATSAPP"] });
@@ -110,6 +140,52 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
 
   const copy = async (text: string, key: string) => {
     try { await navigator.clipboard.writeText(text); setCopied(key); setTimeout(() => setCopied(""), 1600); } catch { /* clipboard blocked */ }
+  };
+
+  /** Reopen something finished. Without this the studio showed an empty screen for work that
+   *  was safely stored, which read as "it was not saved". */
+  const openSaved = async (id: string) => {
+    setBusy("expand"); setError(""); setCandidates([]); setBatchId("");
+    try {
+      const d = await call({ action: "load", id });
+      const s = d.script as SavedItem & { expandedJson: Expanded | null };
+      setSelectedId(s.id);
+      setCurrentTitle(s.title);
+      setExpanded(s.expandedJson ?? null);
+      setPosterUrl(s.posterUrl ?? "");
+      setPosterCheck(null);
+      setUsedAt(s.usedAt ?? null);
+    } catch (e) { setError((e as Error).message); }
+    setBusy("");
+  };
+
+  /** One document with every caption, the hashtags and the poster text in it. */
+  const exportFile = () => {
+    const md = buildExportMarkdown({
+      title: currentTitle || "Untitled content",
+      platform, language, occasionKey: occasionKey || null,
+      generatedAt: null, usedAt,
+      posterUrl: posterUrl || null,
+      expanded,
+    });
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportFilename(currentTitle || "content", usedAt);
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleUsed = async () => {
+    if (!selectedId) return;
+    setBusy("poster");
+    try {
+      const d = await call({ action: "mark-used", id: selectedId, used: !usedAt });
+      setUsedAt(d.usedAt ?? null);
+      await refreshSaved();
+    } catch (e) { setError((e as Error).message); }
+    setBusy("");
   };
 
   const inputCls = "mt-1.5";
@@ -169,6 +245,42 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
         </div>
       </div>
 
+      {/* ---------- 1b. saved content: the way back to finished work ---------- */}
+      <div className="rounded-2xl border bg-card p-4" data-testid="studio-saved">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <History className="h-4 w-4 text-primary" /> {t("ws.mkt.studio.saved-title", lang)}
+          <span className="text-[11px] font-normal text-muted-foreground">· {t("ws.mkt.studio.saved-hint", lang)}</span>
+        </div>
+        {saved.length === 0 ? (
+          <p className="mt-2 text-xs text-muted-foreground">{t("ws.mkt.studio.saved-empty", lang)}</p>
+        ) : (
+          <div className="mt-3 divide-y divide-border rounded-xl border">
+            {saved.map((s) => (
+              <button
+                key={s.id}
+                data-testid={"saved-" + s.id}
+                onClick={() => openSaved(s.id)}
+                disabled={busy !== ""}
+                className="flex w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/50 disabled:opacity-60"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-sm font-medium">{s.title}</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    {s.platform ?? ""}{(s.expandedAt ?? "").slice(0, 10) ? " · " + (s.expandedAt ?? "").slice(0, 10) : ""}
+                    {s.occasionKey ? " · " + s.occasionKey : ""}
+                  </div>
+                </div>
+                {s.posterUrl && <ImageIcon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />}
+                <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                  s.usedAt ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" : "bg-muted text-muted-foreground")}>
+                  {s.usedAt ? t("ws.mkt.studio.posted", lang) : t("ws.mkt.studio.not-posted", lang)}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* ---------- 2. candidates ---------- */}
       {candidates.length > 0 && (
         <div className="rounded-2xl border bg-card p-4">
@@ -208,7 +320,24 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
 
       {expanded && (
         <div className="rounded-2xl border bg-card p-4">
-          <div className="text-sm font-semibold">{t("ws.mkt.studio.expanded", lang)}</div>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm font-semibold">{t("ws.mkt.studio.expanded", lang)}</div>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" data-testid="studio-export" onClick={exportFile}>
+                <Download className="mr-1.5 h-3.5 w-3.5" /> {t("ws.mkt.studio.export", lang)}
+              </Button>
+              <Button
+                size="sm"
+                variant={usedAt ? "outline" : "default"}
+                data-testid="studio-mark-posted"
+                onClick={toggleUsed}
+                disabled={busy !== ""}
+              >
+                <PackageCheck className="mr-1.5 h-3.5 w-3.5" />
+                {usedAt ? t("ws.mkt.studio.posted", lang) : t("ws.mkt.studio.mark-posted", lang)}
+              </Button>
+            </div>
+          </div>
 
           <div className="mt-3 grid gap-3 lg:grid-cols-2">
             {expanded.versions.map((v) => (
