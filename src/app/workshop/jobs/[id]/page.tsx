@@ -254,8 +254,15 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 id: detail.invoice.id,
                 invoiceNumber: detail.invoice.invoiceNumber,
                 status: detail.invoice.status,
+                subtotalSen: detail.invoice.subtotalSen,
+                promoDiscountSen: detail.invoice.discountSen,
+                taxSen: detail.invoice.taxSen,
                 totalSen: detail.invoice.totalSen,
                 paidSen: (detail.invoice.payments ?? []).filter((p) => p.status === "PAID" && p.method !== "PAY_LATER").reduce((s, p) => s + p.amountSen, 0),
+                manualDiscountSen: detail.invoice.manualDiscountSen,
+                manualDiscountKind: detail.invoice.manualDiscountKind,
+                manualDiscountValue: detail.invoice.manualDiscountValue,
+                manualDiscountReason: detail.invoice.manualDiscountReason,
               }}
             />
           )}

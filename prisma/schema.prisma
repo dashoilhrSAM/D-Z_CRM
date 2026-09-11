@@ -887,7 +887,20 @@ model Invoice {
   issuedAt      DateTime      @default(now())
   paidAt        DateTime?
   subtotalSen   Int           @default(0)
+  /**
+   * Promotional discount, snapshotted from the booking at completion. Marketing reads this
+   * as the campaign discount cost, so a checkout discount must NOT be written here.
+   */
   discountSen   Int           @default(0)
+  /**
+   * Manual checkout discount. Kept apart from discountSen so a cashier's goodwill gesture
+   * cannot corrupt campaign ROI. See src/modules/finance/invoice-discount.ts.
+   */
+  manualDiscountSen    Int       @default(0)
+  manualDiscountKind   String?   // "PERCENT" | "AMOUNT"
+  manualDiscountValue  Int?      // what was typed: a percent (10) or an amount in sen
+  manualDiscountReason String?
+  manualDiscountAt     DateTime?
   taxSen        Int           @default(0)
   totalSen      Int           @default(0)
   items         InvoiceItem[]
