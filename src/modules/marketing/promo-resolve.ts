@@ -111,9 +111,73 @@ export function readPromoSnapshot(raw: unknown): PromoSnapshot | null {
   };
 }
 
-/** MKT-017: apply a promo percent to an invoice subtotal (used at completion). */
+/** MKT-017: apply a promo percent to a subtotal (the quote base). */
 export function discountForSubtotal(subtotalSen: number, discountPercent: number | null | undefined): number {
   const pct = clampPercent(typeof discountPercent === "number" ? discountPercent : null);
   if (!pct || subtotalSen <= 0) return 0;
   return Math.min(subtotalSen, Math.round((subtotalSen * pct) / 100));
+}
+
+/**
+ * Re-base a promise onto the lines that are actually being quoted.
+ *
+ * Used when the counter changes what the customer is quoted (swapping the package at check-in):
+ * the *percent* was already promised, so it is not re-decided — a campaign that has since ended
+ * still stands — but the base it applies to follows the new quote.
+ */
+export function rescalePromoSnapshot(snapshot: PromoSnapshot, lines: PricedLine[]): PromoSnapshot {
+  const originalSen = sumLines(lines);
+  const savedSen = discountForSubtotal(originalSen, snapshot.discountPercent);
+  return { ...snapshot, originalSen, discountedSen: originalSen - savedSen, savedSen };
+}
+
+/**
+ * What comes off the bill at completion: **the amount promised, never more than the bill**.
+ *
+ * Deliberately not "percent × invoice subtotal": the percent was promised on the lines that were
+ * quoted, and anything added after that quote (an approved repair, a part fitted later) was never
+ * quoted at a discount. Re-deriving the percentage from the finished bill hands the campaign's
+ * budget to work nobody promised a discount on — and makes the invoice disagree with the quote.
+ */
+export function promoDiscountForBill(snapshot: PromoSnapshot | null | undefined, subtotalSen: number): number {
+  if (!snapshot) return 0;
+  return Math.max(0, Math.min(snapshot.savedSen, Math.max(0, subtotalSen)));
+}
+
+function sumLines(lines: PricedLine[]): number {
+  return lines.reduce((s, l) => s + Math.max(0, l.priceSen), 0);
+}
+
+/**
+ * Make the promo promise at the moment a customer is first quoted real money.
+ *
+ * A booking that arrived with a package is quoted at booking time and already carries a snapshot.
+ * One that did not — the rider skipped the optional package, or the job is a repair — used to end
+ * up with no snapshot at all and therefore no discount, however live the promotion was. The
+ * quotation is where those lines turn into money, so that is where the promise is now made.
+ *
+ * Returns the snapshot now in force, or null when nothing was promised (no booking, or nothing
+ * to discount).
+ */
+export async function promisePromoOnQuote(input: { jobId: string; branchId: string; lines: PricedLine[] }): Promise<PromoSnapshot | null> {
+  if (input.lines.length === 0) return null;
+  const booking = await db.booking.findFirst({
+    where: { jobId: input.jobId },
+    select: { id: true, campaignId: true, promoSnapshot: true },
+  });
+  if (!booking) return null; // a counter walk-in has no booking — nothing was promised to anyone
+
+  const current = readPromoSnapshot(booking.promoSnapshot);
+  if (current) {
+    if (sumLines(input.lines) === current.originalSen) return current; // same quote → the promise stands
+    const next = rescalePromoSnapshot(current, input.lines);
+    await db.booking.update({ where: { id: booking.id }, data: { promoSnapshot: next as never, promoDiscountSen: next.savedSen } });
+    return next;
+  }
+
+  const quote = await resolvePromoForBooking({ branchId: input.branchId, lines: input.lines, campaignId: booking.campaignId });
+  if (!quote) return null;
+  const snapshot = toPromoSnapshot(quote);
+  await db.booking.update({ where: { id: booking.id }, data: { promoSnapshot: snapshot as never, promoDiscountSen: snapshot.savedSen } });
+  return snapshot;
 }

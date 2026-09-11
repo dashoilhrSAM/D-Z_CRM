@@ -752,6 +752,9 @@ export const DICT: Dict = {
   "quotation.approved": { en: "Quotation approved", zh: "报价已确认", ms: "Sebutan disahkan" },
   "quotation.rejected": { en: "Quotation rejected", zh: "报价已拒绝", ms: "Sebutan ditolak" },
   "quotation.pending": { en: "Quotation pending confirmation", zh: "报价待确认", ms: "Sebutan menunggu pengesahan" },
+  // The promotion the customer was promised. Shown on the quotation so the price they approve is
+  // the price they pay — it was previously invisible until the invoice.
+  "quotation.promo": { en: "Promotion", zh: "促销", ms: "Promosi" },
   "quotation.total": { en: "Total", zh: "合计", ms: "Jumlah" },
   "quotation.rev": { en: "Quote #{n}", zh: "第 {n} 版报价", ms: "Sebutan #{n}" },
   "pdf.quotation-title": { en: "Quotation", zh: "报价单", ms: "Sebutan Harga" },

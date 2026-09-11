@@ -4,7 +4,7 @@ import { inventoryService } from "@/modules/inventory/service";
 import { crmService } from "@/modules/crm/service";
 import { paymentProvider, messagingProvider, notificationProvider } from "@/providers";
 import { messagingModule } from "@/modules/messaging/service";
-import { discountForSubtotal, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
+import { promoDiscountForBill, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
 import { completionMessage } from "@/modules/messaging/completion-message";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
 
@@ -41,6 +41,10 @@ export class CompletionService {
         },
       });
       if (!job) throw new Error("Job not found");
+      // The check-in path connects job.booking, but a job opened from a repair booking only sets
+      // Booking.jobId — so look the booking up either way. The promo promise and the campaign's
+      // points bonus both live on it, and missing it silently drops both.
+      const booking = job.booking ?? (await tx.booking.findFirst({ where: { jobId: job.id }, include: { campaign: true } }));
       if (job.status === "COMPLETED") {
         if (!job.invoice) throw new Error("Completed job has no invoice — data error");
         // idempotent: return existing result (no notification for an already-completed job)
@@ -80,11 +84,12 @@ export class CompletionService {
       const invoiceNumber = "DZ-" + year + "-" + String(invCount + 1).padStart(5, "0");
       const subtotal = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
       const cogs = acceptedParts.reduce((s, p) => s + p.unitCostSen * p.quantity, 0);
-      // MKT-017: honour the promotional discount the rider was quoted at booking time.
-      // The booking snapshots the percent, so the discount survives campaign edits or
-      // expiry between booking and completion.
-      const promo = readPromoSnapshot(job.booking?.promoSnapshot);
-      const discountSen = discountForSubtotal(subtotal, promo?.discountPercent);
+      // MKT-017: honour the promotional discount the customer was quoted. The amount was fixed
+      // when the lines were quoted (at booking, or at check-in for a booking without a package),
+      // so the invoice takes exactly that off — never a percentage re-derived from the finished
+      // bill, which would discount work that was added after the quote.
+      const promo = readPromoSnapshot(booking?.promoSnapshot);
+      const discountSen = promoDiscountForBill(promo, subtotal);
       const totalSen = subtotal - discountSen;
       const invoice = await tx.invoice.create({
         data: {
@@ -179,7 +184,7 @@ export class CompletionService {
           serviceItems: JSON.stringify(acceptedItems.filter((i) => i.kind !== "PART").map((i) => ({ description: i.description, quantity: i.quantity, lineTotalSen: i.lineTotalSen }))),
           partsUsed: JSON.stringify(acceptedParts.map((p) => ({ name: p.product.name, quantity: p.quantity, lineTotalSen: p.lineTotalSen }))),
           labour: JSON.stringify(acceptedItems.filter((i) => i.kind === "PART").map((i) => ({ description: i.description, quantity: i.quantity }))),
-          totalSen: subtotal,
+          totalSen, // net of the promo: the same money the invoice charges
           nextServiceMileage: nextMileage,
           nextServiceDate: nextDate,
         },
@@ -191,7 +196,7 @@ export class CompletionService {
       // MKT-014: a campaign can top that up with a bonus for bookings it drove.
       try {
         const pts = Math.max(10, Math.round(subtotal / 100));
-        const bonusPoints = Math.max(0, job.booking?.campaign?.pointsBonus ?? 0);
+        const bonusPoints = Math.max(0, booking?.campaign?.pointsBonus ?? 0);
         const total = pts + bonusPoints;
 
         await tx.loyaltyAccount.upsert({
@@ -208,8 +213,8 @@ export class CompletionService {
             await tx.loyaltyTransaction.create({
               data: {
                 accountId: acct.id, type: "EARN", points: bonusPoints, balanceAfter: acct.pointsBalance,
-                reason: "Campaign bonus — " + (job.booking?.campaign?.name ?? "promotion"),
-                referenceType: "CAMPAIGN", referenceId: job.booking!.campaignId,
+                reason: "Campaign bonus — " + (booking?.campaign?.name ?? "promotion"),
+                referenceType: "CAMPAIGN", referenceId: booking!.campaignId,
               },
             });
           }
@@ -220,14 +225,16 @@ export class CompletionService {
 
       // 6. Mark job completed + booking completed
       await tx.serviceJob.update({ where: { id: job.id }, data: { status: "COMPLETED", completedAt: new Date() } });
-      if (job.booking?.id) {
-        await tx.booking.update({ where: { id: job.booking.id }, data: { status: "COMPLETED" } });
+      if (booking?.id) {
+        await tx.booking.update({ where: { id: booking.id }, data: { status: "COMPLETED" } });
       }
 
-      const grossProfit = subtotal - cogs;
+      // Revenue is what the customer is charged (net of the promo), so it agrees with the invoice
+      // and with the idempotent path above; the promo itself is a marketing cost, on the invoice.
+      const grossProfit = totalSen - cogs;
       return {
         result: {
-          jobId: job.id, jobNumber: job.jobNumber, revenueSen: subtotal, cogsSen: cogs, grossProfitSen: grossProfit,
+          jobId: job.id, jobNumber: job.jobNumber, revenueSen: totalSen, cogsSen: cogs, grossProfitSen: grossProfit,
           invoiceNumber, nextServiceMileage: nextMileage, nextServiceEstDate: nextDate,
         },
         notify,

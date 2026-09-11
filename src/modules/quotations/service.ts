@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { promisePromoOnQuote } from "@/modules/marketing/promo-resolve";
 import type { QuotationStatus } from "@prisma/client";
 
 export interface QuoteLine {
@@ -9,7 +10,7 @@ export interface QuoteLine {
   kind: string;
 }
 
-async function snapJobLines(jobId: string): Promise<{ items: QuoteLine[]; totalSen: number }> {
+async function snapJobLines(jobId: string): Promise<{ items: QuoteLine[]; totalSen: number; branchId: string }> {
   const job = await db.serviceJob.findUnique({
     where: { id: jobId },
     include: {
@@ -23,7 +24,7 @@ async function snapJobLines(jobId: string): Promise<{ items: QuoteLine[]; totalS
     ...job.parts.map((p) => ({ description: p.product?.name ?? "Part", qty: p.quantity, unitPriceSen: p.unitPriceSen, lineTotalSen: p.lineTotalSen, kind: "PART" })),
   ];
   const totalSen = items.reduce((s, i) => s + i.lineTotalSen, 0);
-  return { items, totalSen };
+  return { items, totalSen, branchId: job.branchId };
 }
 
 /** Pre-service quotation: snapshot of the job lines for customer confirmation (approve/reject). */
@@ -31,6 +32,18 @@ export class QuotationService {
   /** Create (check-in) or re-send (counter edit) a quotation — snapshot current lines, set PENDING. */
   async send(jobId: string) {
     const snap = await snapJobLines(jobId);
+    // MKT-013: this is the first moment the lines are real money for a booking that did not
+    // choose a package at booking time, so the promo promise is made here too. A quotation must
+    // never fail because of it.
+    try {
+      await promisePromoOnQuote({
+        jobId,
+        branchId: snap.branchId,
+        lines: snap.items.map((i) => ({ description: i.description, priceSen: i.lineTotalSen })),
+      });
+    } catch (e) {
+      console.error("promo promise failed for job " + jobId + ":", e);
+    }
     const existing = await db.quotation.findUnique({ where: { jobId } });
     return db.quotation.upsert({
       where: { jobId },
