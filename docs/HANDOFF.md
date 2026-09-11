@@ -2,6 +2,11 @@
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
+> **⛔ 逐次改动不要再往本文件加段落（2026-09-11 起）**：改动记录写在 `docs/changes/`，一次改动一个文件
+> （`pnpm new:change <名字>`）。**原因**：两条分支都往本文件顶部插段落，合并必然冲突——已发生两次。
+> 本文件只维护**稳定的**内容（服务恢复、基线、约定、未完成的事）。续接会话时：读本文件，再按文件名倒序读
+> 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
+
 ## 一句话状态
 **🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
 **根因不在 News 页，在它链接过去的那一页** —— News（/rider/service-history）**正确过滤了 published**，
