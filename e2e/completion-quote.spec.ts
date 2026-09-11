@@ -64,8 +64,13 @@ test("the completion message quotes the total the discounted invoice shows", asy
     });
     const invoice = job.invoice!;
     console.log("invoice", JSON.stringify(invoice), "booking promo", job.booking?.promoDiscountSen);
-    expect(job.booking?.promoDiscountSen ?? 0, "the campaign link did not discount the booking").toBeGreaterThan(0);
-    expect(invoice.discountSen).toBe(Math.round((invoice.subtotalSen * 10) / 100));
+    const promised = job.booking?.promoDiscountSen ?? 0;
+    expect(promised, "the campaign link did not discount the booking").toBeGreaterThan(0);
+    // This booking was quoted at booking time (package + campaign link), check-in re-quotes the
+    // same package so the promise stands, and the invoice takes exactly that promised amount —
+    // not a percentage re-derived from the finished bill.
+    expect(invoice.discountSen).toBe(promised);
+    expect(invoice.discountSen).not.toBe(Math.round((invoice.subtotalSen * 10) / 100));
     expect(invoice.totalSen).toBe(invoice.subtotalSen - invoice.discountSen);
     // Every amount in this flow is a whole ringgit, so the formatter renders no decimals —
     // which keeps the string assertions below readable.

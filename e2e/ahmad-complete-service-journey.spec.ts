@@ -1,5 +1,8 @@
 import { test, expect } from "@playwright/test";
+import { PrismaClient } from "@prisma/client";
 import { BASE_URL, setPersona, bookViaRider, confirmAndCheckIn, runMechanicInspection, settle, dismissGuide } from "./helpers";
+
+const db = new PrismaClient({ datasources: { db: { url: "file:./e2e.db" } } });
 
 /**
  * MASTER E2E TEST (§50, §74) — mandatory. If this fails: DO NOT DEPLOY.
@@ -51,7 +54,9 @@ test.describe("master journey", () => {
     await page.getByTestId("complete-service").click();
     await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
 
-    // 7. Rider app updated: invoice RM165 (120 + 25 + 20), next service 34,800 km
+    // 7. Rider app updated: RM165 of work (120 + 25 + 20) less the promotion promised when the
+    //    counter quoted the package at check-in, next service 34,800 km. The seed ships a live
+    //    promotion and auto-apply ON, so this journey exercises the discount end to end.
     await setPersona(ctx, "CUSTOMER");
     await page.goto(BASE_URL + "/rider/invoices");
     await dismissGuide(page);
@@ -59,7 +64,15 @@ test.describe("master journey", () => {
     await expect(page.getByText("Standard Service", { exact: false }).first()).toBeVisible();
     await expect(page.getByText("Chain Adjustment", { exact: false }).first()).toBeVisible();
     await expect(page.getByText("Yamaha Genuine Oil Filter", { exact: false }).first()).toBeVisible();
-    await expect(page.getByText("RM165", { exact: true }).first()).toBeVisible();
+    const invoice = await db.invoice.findFirstOrThrow({
+      where: { jobId },
+      select: { subtotalSen: true, discountSen: true, totalSen: true },
+    });
+    expect(invoice.subtotalSen, "120 + 25 + 20, the work actually billed").toBe(16500);
+    expect(invoice.discountSen, "the promotion is live and the bill was quoted at check-in").toBeGreaterThan(0);
+    expect(invoice.totalSen).toBe(invoice.subtotalSen - invoice.discountSen);
+    expect(invoice.totalSen % 100).toBe(0); // whole ringgit, so the rendered text is exact
+    await expect(page.getByText("RM" + invoice.totalSen / 100, { exact: true }).first()).toBeVisible();
     await expect(page.getByText("ISSUED", { exact: true }).first()).toBeVisible(); // 待 workshop 结清
 
     // 8. Rider home shows the new next-service prediction
