@@ -50,6 +50,20 @@ test("a booking with no package is quoted at check-in and charged the promised d
   expect(snapshot!.savedSen).toBe(Math.round((PACKAGE_SEN * snapshot!.discountPercent) / 100));
   expect(promised.promoDiscountSen).toBe(snapshot!.savedSen);
 
+  // 2b. The rider approves the quotation — so the promotion has to be on it, not only on the
+  //     final invoice. The quotation covers the package alone (RM120 → RM96 after the promise).
+  const jobRow = await db.serviceJob.findUniqueOrThrow({ where: { id: jobId }, select: { jobNumber: true, quotation: { select: { totalSen: true } } } });
+  const quotation = jobRow.quotation!;
+  await setPersona(ctx, "CUSTOMER");
+  await page.goto(BASE_URL + "/rider/service-status");
+  await dismissGuide(page);
+  // Another spec can leave this rider with a second live job, so scope to this job's card.
+  const card = page.locator('[data-testid="quotation-card"][data-job="' + jobRow.jobNumber + '"]');
+  await expect(card).toBeVisible();
+  await expect(card.getByTestId("quotation-promo")).toContainText("RM" + snapshot!.savedSen / 100);
+  await expect(card.getByTestId("quotation-total")).toContainText("RM" + (quotation.totalSen - snapshot!.savedSen) / 100);
+  await expect(card.getByTestId("quotation-total")).not.toContainText("RM" + quotation.totalSen / 100);
+
   // 3. Finish the job the usual way.
   await runMechanicInspection(page, jobId);
   await setPersona(ctx, "CUSTOMER");

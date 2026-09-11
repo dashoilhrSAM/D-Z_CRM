@@ -74,6 +74,12 @@ describe("the wiring", () => {
     expect(src, "the quote is where a package-less booking first sees money").toContain("promisePromoOnQuote");
   });
 
+  it("the rider's quotation shows the same promise the invoice charges", () => {
+    // Same rule on both sides: the price the customer approves is the price they pay.
+    const status = readFileSync(path.join(process.cwd(), "src/modules/rider/status.ts"), "utf8");
+    expect(status).toContain("promoDiscountForBill(snapshot, quotation.totalSen)");
+  });
+
   it("completion charges the promise, not a percentage of the bill", () => {
     const src = readFileSync(path.join(process.cwd(), "src/services/completion.ts"), "utf8");
     expect(src).toContain("promoDiscountForBill(promo, subtotal)");

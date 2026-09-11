@@ -8,7 +8,7 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 干净（PR #20 / #21 已合并，main = `6bd2f44`），两条新分支待 review**：`docs/handoff-post-merge`（HANDOFF 状态刷新，docs-only）与叠在它上面的 `feat/promo-quoted-lines`（**促销折扣改成「报价即承诺」**：没选套餐的单子在 check-in 拿到折扣、且只按报价行打折）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **433**（34 文件）/ build 0 / **Playwright 全量 48 通过 · 0 失败**。
+**main 干净（PR #20 / #21 已合并，main = `6bd2f44`），两条新分支待 review**：`docs/handoff-post-merge`（HANDOFF 状态刷新，docs-only）与叠在它上面的 `feat/promo-quoted-lines`（**促销折扣改成「报价即承诺」**：没选套餐的单子在 check-in 拿到折扣、只按报价行打折、**骑手在批准报价那一刻就看到折扣行与净额**，营收/服务史同步改净额）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 48 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
@@ -18,6 +18,7 @@
 - 续接会话：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（2026-09-11 12:4x，修完 4 个 e2e 失败）
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
+- **报价单显示折扣 + 营收口径改净额（同分支 `feat/promo-quoted-lines`）**：骑手那张报价单新增促销行（`Promotion · <campaign>` −RMxx）与**净额 Total**——客户批准的就是实付，不再「先看全价、最后少付」；折扣金额复用 `promoDiscountForBill`（不给 Quotation 加列，避免第二处真相）。`CompletionResult.revenueSen/grossProfitSen` 与 `ServiceHistory.totalSen` 改记净额，与幂等分支一致。**顺带修掉一个真 bug**：rider status 以前只把「该车最新一条 open booking」配给工单，同一台车两个未完成工单时其余工单配不到自己的 booking（promo 承诺与生命周期步骤一起丢）——改成按 `jobId` 逐条配对（单跑 spec 看不出来，跑全量才现形）。
 - **促销折扣改成「报价即承诺」（分支 `feat/promo-quoted-lines` 待合）**：修掉「促销期内没在预约页选套餐的单子一分钱不打折」（e2e master journey 就是活例），并把折扣基数从「完工总账单」收窄成「报价过的行」——柜台后加的审批项/配件不再被促销打折，发票只减**承诺额**。规则挂在`报价单生成`这一刻（服务单 check-in、维修单柜台发报价单），一个入口覆盖两类；完工只负责兑现。实测：口子单 → 承诺 20%×RM120=RM24 → 发票 discountSen 2400（旧规则会是 2800）× 总账 RM140 → 收 RM116、消息也报 RM116。
 - **完工 WhatsApp 报价改净额（PR #21 已合）**：消息取自发票**总额**（已减促销）而非小计——此前同一事务里发票是对的、发给客户的消息是错的（消息 RM165 / 发票 RM148.50 / 柜台按发票收）。消息文案抽成纯模块 `completion-message.ts` + 6 例单测（含反向验证过的源码守卫）+ 从 campaign 链接进入的端到端 spec。
 - **4 个既有 e2e 失败已修（不是业务 bug）**：页内功能导览的气泡卡压在页面内容上（`/rider/book` 的导语气泡正好盖住第一张分行卡），被压住的 click 一直重试到 120s 超时——测试没按用户的方式走（按 Skip），加 `dismissGuide` 后三例通过，master journey 一路绿灯。另删掉一条会腐烂的断言（硬编码 "November 2026"：估算从"今天"起算，写死月份必然过期）。全量 46 通过。
@@ -32,7 +33,7 @@
 ## 下一步（按优先级）
 1. **清理已合进 main 的分支**（`git merge-base --is-ancestor <b> origin/main` 逐条验后再删）：远端 `feat/content-studio-save` · `fix/rider-off-news-leak` · `fix/completion-quote-nets-promo`，本地同名前三条。
 2. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`，随 PR #20 进 main）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
-3. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**。仍等 owner 表态的三件事：① 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽）；② 骑手中途那张**报价单看不到折扣行**（`Quotation` 无折扣字段，totalSen 是行合计）——客户「先看全价、最后少付」，不亏但口径不齐；③ **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）+ 是否顺手把 `revenueSen/grossProfitSen/ServiceHistory.totalSen` 也改成净额。
+3. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**；~~骑手报价单看不到折扣行~~ 与 ~~revenueSen/ServiceHistory 口径~~ **也已一并做掉**。仍等 owner 表态：① 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽）；② **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）；③ workshop 侧报价单/job 页要不要也显示促销行；④ **忠诚度积分仍按毛额计**（`pts = round(subtotal/100)`，严格按「1 分/RM1 实付」应改 `totalSen`，但那是**减少**客户积分，属业务决定）。
 4. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
 5. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
 6. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
@@ -40,11 +41,11 @@
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
-- `pnpm test`：**433 个通过（34 文件）**
+- `pnpm test`：**434 个通过（34 文件）**
 - `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
 - `pnpm exec playwright test --project=desktop-chromium`：**48 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
 - 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
-- 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子（详见 docs/changes/2026-09-11-promo-quoted-lines.md）
+- 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额，展示与收费都用 `promoDiscountForBill`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「骑手报价单必须用同一函数」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 报价单可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
 
 ## 服务与恢复

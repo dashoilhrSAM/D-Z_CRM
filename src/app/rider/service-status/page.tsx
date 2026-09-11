@@ -121,7 +121,7 @@ export default async function ServiceStatusPage() {
           {r.quotation && (
             <div className="mt-4">
               <QuotationCard
-                quotation={{ id: r.quotation.id, status: r.quotation.status, revision: r.quotation.revision, totalSen: r.quotation.totalSen, items: parseItems(r.quotation.itemsJson) }}
+                quotation={{ id: r.quotation.id, status: r.quotation.status, revision: r.quotation.revision, totalSen: r.quotation.totalSen, items: parseItems(r.quotation.itemsJson), promo: r.quotation.promo, jobNumber: r.job?.jobNumber }}
               />
             </div>
           )}

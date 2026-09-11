@@ -184,7 +184,7 @@ export class CompletionService {
           serviceItems: JSON.stringify(acceptedItems.filter((i) => i.kind !== "PART").map((i) => ({ description: i.description, quantity: i.quantity, lineTotalSen: i.lineTotalSen }))),
           partsUsed: JSON.stringify(acceptedParts.map((p) => ({ name: p.product.name, quantity: p.quantity, lineTotalSen: p.lineTotalSen }))),
           labour: JSON.stringify(acceptedItems.filter((i) => i.kind === "PART").map((i) => ({ description: i.description, quantity: i.quantity }))),
-          totalSen: subtotal,
+          totalSen, // net of the promo: the same money the invoice charges
           nextServiceMileage: nextMileage,
           nextServiceDate: nextDate,
         },
@@ -229,10 +229,12 @@ export class CompletionService {
         await tx.booking.update({ where: { id: booking.id }, data: { status: "COMPLETED" } });
       }
 
-      const grossProfit = subtotal - cogs;
+      // Revenue is what the customer is charged (net of the promo), so it agrees with the invoice
+      // and with the idempotent path above; the promo itself is a marketing cost, on the invoice.
+      const grossProfit = totalSen - cogs;
       return {
         result: {
-          jobId: job.id, jobNumber: job.jobNumber, revenueSen: subtotal, cogsSen: cogs, grossProfitSen: grossProfit,
+          jobId: job.id, jobNumber: job.jobNumber, revenueSen: totalSen, cogsSen: cogs, grossProfitSen: grossProfit,
           invoiceNumber, nextServiceMileage: nextMileage, nextServiceEstDate: nextDate,
         },
         notify,
