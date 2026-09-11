@@ -5,6 +5,7 @@ import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 import { fmtDate } from "@/lib/format";
+import { manualDiscountLabel } from "@/modules/finance/invoice-discount";
 import { QuotationPrintActions } from "@/components/workshop/quotation-print-actions";
 
 export const dynamic = "force-dynamic";
@@ -120,6 +121,14 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
           <div className="w-56 space-y-1.5 text-sm">
             <div className="flex justify-between text-neutral-600"><span>{t("pdf.subtotal", lang)}</span><span className="tabular-nums">{formatRM(invoice.subtotalSen)}</span></div>
             {invoice.discountSen > 0 && <div className="flex justify-between text-neutral-600"><span>{t("pdf.discount", lang)}</span><span className="tabular-nums">−{formatRM(invoice.discountSen)}</span></div>}
+            {/* The checkout discount is a different thing from the promotion, so the customer
+                sees both rather than one merged number they cannot account for. */}
+            {invoice.manualDiscountSen > 0 && (
+              <div className="flex justify-between text-neutral-600">
+                <span>{t("inv.discount-manual", lang)}{manualDiscountLabel(invoice.manualDiscountKind, invoice.manualDiscountValue) ? " (" + manualDiscountLabel(invoice.manualDiscountKind, invoice.manualDiscountValue) + ")" : ""}</span>
+                <span className="tabular-nums">−{formatRM(invoice.manualDiscountSen)}</span>
+              </div>
+            )}
             {invoice.taxSen > 0 && <div className="flex justify-between text-neutral-600"><span>{t("pdf.tax", lang)}</span><span className="tabular-nums">{formatRM(invoice.taxSen)}</span></div>}
             <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-bold"><span>{t("pdf.total", lang)}</span><span className="tabular-nums">{formatRM(invoice.totalSen)}</span></div>
             {!isPaid && <div className="flex justify-between text-sm text-neutral-600"><span>{t("inv.remaining", lang)}</span><span className="tabular-nums">{formatRM(remaining)}</span></div>}

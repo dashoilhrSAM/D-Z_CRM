@@ -156,7 +156,22 @@ export default async function WorkshopInvoicesPage({ searchParams }: { searchPar
                 </details>
 
                 <div className="mt-3">
-                  <InvoicePaymentPanel invoice={{ id: inv.id, invoiceNumber: inv.invoiceNumber, status: inv.status, totalSen: inv.totalSen, paidSen }} />
+                  <InvoicePaymentPanel
+                    invoice={{
+                      id: inv.id,
+                      invoiceNumber: inv.invoiceNumber,
+                      status: inv.status,
+                      subtotalSen: inv.subtotalSen,
+                      promoDiscountSen: inv.discountSen,
+                      taxSen: inv.taxSen,
+                      totalSen: inv.totalSen,
+                      paidSen,
+                      manualDiscountSen: inv.manualDiscountSen,
+                      manualDiscountKind: inv.manualDiscountKind,
+                      manualDiscountValue: inv.manualDiscountValue,
+                      manualDiscountReason: inv.manualDiscountReason,
+                    }}
+                  />
                 </div>
               </div>
             );
