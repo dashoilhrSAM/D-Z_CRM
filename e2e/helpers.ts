@@ -34,6 +34,21 @@ export async function settle(page: Page) {
   await page.waitForTimeout(600);
 }
 
+/**
+ * 关掉页内功能导览（rider / workshop 共用一套运行器）。
+ *
+ * 导览是「首次进入某功能页」弹出的浮层：它的气泡卡是当时唯一可点的东西，
+ * 压在页面内容之上——被压住的元素 click() 永远等不到，直到 120s 测试超时。
+ * 真实用户看到它会按 Skip；测试也必须显式关掉，而不是靠 timeout 硬等。
+ */
+export async function dismissGuide(page: Page) {
+  const tip = page.locator('[role="dialog"][aria-modal="true"]').first();
+  const up = await tip.waitFor({ state: "visible", timeout: 2000 }).then(() => true).catch(() => false);
+  if (!up) return; // 该页没有导览（或本次会话已关过）
+  await tip.getByRole("button").first().click(); // 右上角 X → dismiss()
+  await tip.waitFor({ state: "detached", timeout: 5_000 });
+}
+
 /** Booking dates must be unique per test — pass a distinct days offset. */
 export function isoInDays(days: number): string {
   return new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
@@ -57,6 +72,7 @@ export async function bookViaRider(page: Page, ctx: BrowserContext, days = 2) {
   await setPersona(ctx, "CUSTOMER");
   await page.goto(BASE_URL + "/rider/book");
   await settle(page);
+  await dismissGuide(page); // 导览气泡正压在第一张分行卡上
   // branch locator: pick the main branch first, then the booking form appears
   await page.locator('a[href*="branch="]').first().click();
   await settle(page);
@@ -80,6 +96,7 @@ export function fmtDateISO(iso: string): string {
 export async function confirmAndCheckIn(page: Page, ctx: BrowserContext, mileage = "31800") {
   await setPersona(ctx, "OWNER");
   await page.goto(BASE_URL + "/workshop/bookings");
+  await dismissGuide(page);
   const row = ahmadBookingRow(page, "Check In");
   await expect(row).toBeVisible();
   await row.getByRole("button", { name: "Confirm", exact: true }).click();
@@ -98,6 +115,7 @@ export async function runMechanicInspection(page: Page, jobId: string) {
   await setPersona(page.context() as unknown as BrowserContext, "MECHANIC");
   await settle(page);
   await page.goto(BASE_URL + "/mechanic-app/jobs/" + jobId); // 隔离：mechanic 只能 mechanic app
+  await dismissGuide(page);
   await page.getByTestId("start-checklist").click();
   for (const item of ["Engine-Oil", "Oil-Filter", "Brake"]) {
     await page.getByTestId("result-" + item + "-PASS").click();
