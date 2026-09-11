@@ -3,9 +3,20 @@
 > 本文件由 session-pack 生成，session-resume 可续接。
 
 ## 一句话状态
-**💰 结账可打折（分支 feat/invoice-manual-discount，已 push 待合）**：柜台收款时可选「百分比 / 金额」给整单打折。**核心决策：手动折扣绝不写进 `discountSen`**——那是促销归因字段（completion 写入、marketing 的 performance.ts 读它算 campaign 折扣成本与 ROI），柜台折扣写进去会让促销 ROI 静默失真。新增 5 列（双 schema + 迁移 add_invoice_manual_discount）：manualDiscountSen/Kind/Value/Reason/At；算法唯一收在 `src/modules/finance/invoice-discount.ts`（净额=subtotal−促销−手动、下限 0；百分比以 subtotal 为基准；**记录「实际减免」而非「请求减免」**）。守卫：已结清拒绝（那是退款）、折扣后总额不得低于已收款、分行隔离、每次写 AuditLog；**不设权限门槛是 owner 的决定**。UI 在收款弹窗内三选+数值+原因并实时预览，折扣把账清零则自动结清。**生产 5 列已直连应用**（17 张发票默认 0、站点 200）。e2e 断言数据库：RM1025 → 10% → 减免 RM102.50、总额 RM922.50、促销字段不变、PAID、收款恰为 92250。vitest 391；全量 e2e 36 通过（4 个失败是既有 rider 预约问题）。
+**🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
+**根因不在 News 页，在它链接过去的那一页** —— News（/rider/service-history）**正确过滤了 published**，
+但它的 View all 指向的 **/rider/promotions 读全部素材、完全没有 published 过滤**。
+生产实测 22 个素材中 10 个已关闭、News 显示 12 / Promotions 显示 22 → **10 个关掉的海报一直漏给骑手**。
+**顺带发现同类的促销窗口问题**：四个 rider 页面各自手写一部分「是否生效」，其中 book 与 service-history
+**只查 endDate** → 未开始的促销被提前展示、**无结束日期的长期促销被整条排除**（而 isPromoActive 认为它们是有效的）。
+修法：promotions 加 published:true；四处统一用唯一的 isPromoActive；home 改为取 24 条再过滤
+（原先取 3 条再过滤，若那 3 条都已结束则首页一条优惠都不显示）。
+**反向验证过**：守卫在旧代码上确实失败；e2e 第一版有空跑，已改成自行造数据再断言。
+vitest **397**（31 文件）、Playwright 2/2。无 schema 改动。
 
-**🧾 发票页可就地看明细（分支 feat/invoice-quick-view，已 push 待合）**：每张发票卡片一个 `<details>` 折叠（**零 JS**，页面仍是 Server Component），展开显示「描述 · 数量 × 单价 · 行小计」+ 小计/折扣/税/合计。**数据源是发票自己的 `InvoiceItem`（完工快照）而不是工单实时行**——工单事后被改也不会与已开票金额不一致。**新增 `src/lib/invoice-lines.ts`**：InvoiceItem **无 createdAt**，故在代码里定序 SERVICE → FEE → APPROVAL → PART，同类别稳定排序。实测 e2e 144 张发票全部有折叠控件、展开 3 行且 subtotal=total=16500；截图 app-screenshots/invoice-details-open.png。**生产有 1 张发票没有任何明细行**，已处理为「No line items on this invoice.」。新增 tests/invoice-lines.test.ts 8 例 + e2e/invoice-details.spec.ts 2 例。
+**💰 结账可打折（已合进 main，PR #18）**：柜台收款时可选「百分比 / 金额」给整单打折。**核心决策：手动折扣绝不写进 `discountSen`**——那是促销归因字段（completion 写入、marketing 的 performance.ts 读它算 campaign 折扣成本与 ROI），柜台折扣写进去会让促销 ROI 静默失真。新增 5 列（双 schema + 迁移 add_invoice_manual_discount）：manualDiscountSen/Kind/Value/Reason/At；算法唯一收在 `src/modules/finance/invoice-discount.ts`（净额=subtotal−促销−手动、下限 0；百分比以 subtotal 为基准；**记录「实际减免」而非「请求减免」**）。守卫：已结清拒绝（那是退款）、折扣后总额不得低于已收款、分行隔离、每次写 AuditLog；**不设权限门槛是 owner 的决定**。UI 在收款弹窗内三选+数值+原因并实时预览，折扣把账清零则自动结清。**生产 5 列已直连应用**（17 张发票默认 0、站点 200）。e2e 断言数据库：RM1025 → 10% → 减免 RM102.50、总额 RM922.50、促销字段不变、PAID、收款恰为 92250。vitest 391；全量 e2e 36 通过（4 个失败是既有 rider 预约问题）。
+
+**🧾 发票页可就地看明细（已合进 main，PR #17）**：每张发票卡片一个 `<details>` 折叠（**零 JS**，页面仍是 Server Component），展开显示「描述 · 数量 × 单价 · 行小计」+ 小计/折扣/税/合计。**数据源是发票自己的 `InvoiceItem`（完工快照）而不是工单实时行**——工单事后被改也不会与已开票金额不一致。**新增 `src/lib/invoice-lines.ts`**：InvoiceItem **无 createdAt**，故在代码里定序 SERVICE → FEE → APPROVAL → PART，同类别稳定排序。实测 e2e 144 张发票全部有折叠控件、展开 3 行且 subtotal=total=16500；截图 app-screenshots/invoice-details-open.png。**生产有 1 张发票没有任何明细行**，已处理为「No line items on this invoice.」。新增 tests/invoice-lines.test.ts 8 例 + e2e/invoice-details.spec.ts 2 例。
 
 **🔧 指派机械师修复（已合并进 main = fb63fb4，PR #16）**：owner 报「机械师下拉被挡 + 没按分行过滤」。**根因**：同一条规则写了两遍——`createJob` 按【登录者分行】（org 级→主店）建单并拒绝跨行机械师，下拉却按 `scopedStaffWhere(session)` 列【登录者能看到的全部分行】；生产实测 2 分行 13 人，owner 看到 13 个、其中 4 个选了必被拒。已抽成唯一定义 `src/lib/job-branch.ts`（`resolveNewJobBranchId` / `staffWhereForBranch` / `loadAssignableStaff`），`createJob`、`jobs/new`（工单将归属分行）、`jobs/[id]`（**工单已有 branchId**，与 assignMechanic 校验同源）共用。**下拉裁切根因**：`SelectContent` 宽度跟着触发器（而触发器 `w-fit`，只有当前选中项那么宽）+ `ItemText` 是 `shrink-0 whitespace-nowrap` + popup `overflow-x-hidden` ＝ **无省略号的硬裁**；已改 `min-w-0 truncate`（**共享 primitive，全站 Select 受益**）+ 触发器稳定宽度 + 单分行时不显示「· 分行名」。顺带把重复三遍的 `MechanicOption` 合并为 `components/workshop/mechanic-option.ts`。**验证**：e2e seed 只有 1 分行复现不了，测试**自建第二个分行+机械师**，并**反向实测**（去掉过滤后测试确实报 "offered a mechanic from E2E Other Branch"）。**⚠️ 发现 4 个既有失败**：`ahmad-complete-service-journey` 与 `booking-and-approval-flows` 的 3 个用例在 rider 选分行处 120s 超时——**已在干净 origin/main 上复现同样失败，与本分支无关**，但疑似真实问题（rider 预约链路），建议下一个 bug 从这里查。
 
