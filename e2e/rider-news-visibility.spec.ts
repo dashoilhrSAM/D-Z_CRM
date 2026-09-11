@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { PrismaClient } from "@prisma/client";
-import { BASE_URL, setPersona, settle } from "./helpers";
+import { BASE_URL, setPersona, settle, dismissGuide } from "./helpers";
 
 /**
  * The reported bug, from the rider's side: a poster the workshop switched off was still
@@ -32,6 +32,20 @@ test("a poster switched off in the workshop is not offered to riders", async ({ 
   await expect(page.getByText(offTitle)).toHaveCount(0);
 
   await db.marketingAsset.deleteMany({ where: { title: { in: [onTitle, offTitle] } } });
+});
+
+test("the home page's special offers card opens the News page", async ({ page, context }) => {
+  await setPersona(context, "CUSTOMER");
+  await page.goto(BASE_URL + "/rider/home");
+  await settle(page);
+  await dismissGuide(page); // the walkthrough tip sits over the top of the page
+
+  // The card is a preview of the offers; tapping it opens the News page (not the promotions list).
+  const offers = page.getByTestId("home-offers");
+  await expect(offers).toBeVisible();
+  await expect(offers).toHaveAttribute("href", "/rider/service-history");
+  await offers.click();
+  await expect(page).toHaveURL(/\/rider\/service-history$/);
 });
 
 test("the News feed and the promotions page agree on what is visible", async ({ page, context }) => {

@@ -8,7 +8,7 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**全部已合并，仓库已清爽：本地只有 `main` + 一个未合并实验分支，远端只有 `main`。** PR #22（`feat/promo-quoted-lines`：**促销折扣改成「报价即承诺」** + 骑手报价单显示折扣行与净额 + 营收/服务史改净额 + 顺带修掉 rider status 的工单/booking 配对 bug）已进 main；main = origin/main = `041b542`（已 pull）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 48 通过 · 0 失败**。
+**main 干净（PR #22 已合并，main = `041b542`），两条新分支待 review**：`docs/handoff-after-promo-merge`（HANDOFF 刷新，docs-only）与叠在它上面的 `fix/rider-home-offers-to-news`（**骑手首页「特别优惠」卡片改为直接进 News 页**）。远端只有 `main`。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
@@ -18,6 +18,9 @@
 - 续接会话：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（2026-09-11 12:4x，修完 4 个 e2e 失败）
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
+- **骑手首页优惠卡片改落 News 页（分支 `fix/rider-home-offers-to-news` 待合）**：首页「Special offers」那张两行预览卡，
+  链接从 `/rider/promotions` 改成 `/rider/service-history`（News 页），并加 `data-testid="home-offers"`；新增一条会**真的点一次**
+  再断言 URL 的 e2e 守卫。
 - **报价单显示折扣 + 营收口径改净额（PR #22 已合）**：骑手那张报价单新增促销行（`Promotion · <campaign>` −RMxx）与**净额 Total**——客户批准的就是实付，不再「先看全价、最后少付」；折扣金额复用 `promoDiscountForBill`（不给 Quotation 加列，避免第二处真相）。`CompletionResult.revenueSen/grossProfitSen` 与 `ServiceHistory.totalSen` 改记净额，与幂等分支一致。**顺带修掉一个真 bug**：rider status 以前只把「该车最新一条 open booking」配给工单，同一台车两个未完成工单时其余工单配不到自己的 booking（promo 承诺与生命周期步骤一起丢）——改成按 `jobId` 逐条配对（单跑 spec 看不出来，跑全量才现形）。
 - **促销折扣改成「报价即承诺」（PR #22 已合）**：修掉「促销期内没在预约页选套餐的单子一分钱不打折」（e2e master journey 就是活例），并把折扣基数从「完工总账单」收窄成「报价过的行」——柜台后加的审批项/配件不再被促销打折，发票只减**承诺额**。规则挂在`报价单生成`这一刻（服务单 check-in、维修单柜台发报价单），一个入口覆盖两类；完工只负责兑现。实测：口子单 → 承诺 20%×RM120=RM24 → 发票 discountSen 2400（旧规则会是 2800）× 总账 RM140 → 收 RM116、消息也报 RM116。
 - **完工 WhatsApp 报价改净额（PR #21 已合）**：消息取自发票**总额**（已减促销）而非小计——此前同一事务里发票是对的、发给客户的消息是错的（消息 RM165 / 发票 RM148.50 / 柜台按发票收）。消息文案抽成纯模块 `completion-message.ts` + 6 例单测（含反向验证过的源码守卫）+ 从 campaign 链接进入的端到端 spec。
@@ -43,7 +46,7 @@
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
 - `pnpm test`：**434 个通过（34 文件）**
 - `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
-- `pnpm exec playwright test --project=desktop-chromium`：**48 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
+- `pnpm exec playwright test --project=desktop-chromium`：**49 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
 - 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
 - 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额，展示与收费都用 `promoDiscountForBill`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「骑手报价单必须用同一函数」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 报价单可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
@@ -56,7 +59,7 @@
 
 ## git 状态
 - main = origin/main = **041b542**（PR #22 已合并；本地已 pull 到最新）
-- 远端分支：只有 `main`（5 条已合分支已清理）
+- 远端分支：`main` · `docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news`（本条与 docs 分支待合）
 - 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 4）
 - 未提交：0（tracked 干净）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
