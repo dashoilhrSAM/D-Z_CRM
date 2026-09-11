@@ -12,6 +12,7 @@
     "db:reset": "prisma migrate reset --force",
     "db:seed": "prisma db seed",
     "seed:marketing": "tsx scripts/seed-marketing-data.ts",
+    "new:change": "node scripts/new-change.mjs",
     "db:studio": "prisma studio",
     "test": "vitest run",
     "test:watch": "vitest",

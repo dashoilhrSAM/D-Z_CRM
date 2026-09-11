@@ -18,7 +18,10 @@ export default async function RiderPromotionsPage() {
   const lang = await getLang();
   const [campaigns, assets] = await Promise.all([
     db.campaign.findMany({ where: { status: "ACTIVE" }, orderBy: { startDate: "desc" } }),
-    db.marketingAsset.findMany({ orderBy: { month: "desc" } }),
+    // The workshop controls each poster with an on/off-News toggle, so this has to honour it.
+    // It did not: this page listed every asset while the News feed filtered, which is how
+    // switched-off posters kept reaching riders through the "view all" link.
+    db.marketingAsset.findMany({ where: { published: true }, orderBy: { month: "desc" } }),
   ]);
   const livePromos = campaigns.filter((c) => isPromoActive(c as never));
   const groups = (["POSTER", "REEL", "STORY"] as const)

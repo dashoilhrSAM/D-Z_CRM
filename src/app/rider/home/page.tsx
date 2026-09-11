@@ -37,7 +37,10 @@ export default async function RiderHomePage() {
         })
       : Promise.resolve(null),
     db.notification.count({ where: { customerId: customer.id, readAt: null } }),
-    db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE" }, orderBy: { startDate: "desc" }, take: 3 }),
+    // Wider than the two shown, because the shared rule below decides what is live: taking the
+    // newest few and filtering afterwards left the home with no offers whenever those few had
+    // already ended, even though live ones existed further down the list.
+    db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE" }, orderBy: { startDate: "desc" }, take: 24 }),
   ]);
   const livePromos = campaigns.filter((c) => isPromoActive(c as never));
 

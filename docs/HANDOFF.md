@@ -2,7 +2,23 @@
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
+> **⛔ 逐次改动不要再往本文件加段落（2026-09-11 起）**：改动记录写在 `docs/changes/`，一次改动一个文件
+> （`pnpm new:change <名字>`）。**原因**：两条分支都往本文件顶部插段落，合并必然冲突——已发生两次。
+> 本文件只维护**稳定的**内容（服务恢复、基线、约定、未完成的事）。续接会话时：读本文件，再按文件名倒序读
+> 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
+
 ## 一句话状态
+**🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
+**根因不在 News 页，在它链接过去的那一页** —— News（/rider/service-history）**正确过滤了 published**，
+但它的 View all 指向的 **/rider/promotions 读全部素材、完全没有 published 过滤**。
+生产实测 22 个素材中 10 个已关闭、News 显示 12 / Promotions 显示 22 → **10 个关掉的海报一直漏给骑手**。
+**顺带发现同类的促销窗口问题**：四个 rider 页面各自手写一部分「是否生效」，其中 book 与 service-history
+**只查 endDate** → 未开始的促销被提前展示、**无结束日期的长期促销被整条排除**（而 isPromoActive 认为它们是有效的）。
+修法：promotions 加 published:true；四处统一用唯一的 isPromoActive；home 改为取 24 条再过滤
+（原先取 3 条再过滤，若那 3 条都已结束则首页一条优惠都不显示）。
+**反向验证过**：守卫在旧代码上确实失败；e2e 第一版有空跑，已改成自行造数据再断言。
+vitest **397**（31 文件）、Playwright 2/2。无 schema 改动。
+
 **📦 Content Studio 内容可回访/导出/标记已发布（分支 feat/content-studio-save，已 push 待合）**：owner 问「如何 save content」。**查清后发现内容早已落库**（expandedJson + posterUrl），真正问题是**回不去**——Studio 只把当前一次跑的结果放在内存，刷新后界面无入口。三缺口一并补：① **回访** — Studio 新增「已生成内容」面板，调用**服务端早就存在、注释写着 for the studio's history panel、却从未被前端调用的 GET**，点一条即还原（新增 `load` action）；只列 `expandedAt` 非空的，半成品候选不列（否则面板会变成第二个更差的 Script Bank）。② **导出** — 纯模块 `src/modules/marketing/content-export.ts`，一个按钮导出 4 平台 caption（各自带平台标题）+ hashtags + 海报文案 + 海报链接 + 发布提示为单个 .md（**客户端 Blob，零新依赖**）。③ **已发布** — 新增 `mark-used` action + **ContentScript.usedAt**（双 schema + 迁移 add_content_script_used_at）；此前 `status: USED` 预留却全代码零写入。实测：下载 .md 内容正确、标记后数据库 status=USED 且 usedAt 写实、列表即时变 Posted。**生产 usedAt 列已直连应用**。新增 tests/content-export.test.ts 12 例 + e2e 2 例；vitest **403**（30 文件）、build 0。
 
 **💰 结账可打折（已合进 main，PR #18）**：柜台收款时可选「百分比 / 金额」给整单打折。**核心决策：手动折扣绝不写进 `discountSen`**——那是促销归因字段（completion 写入、marketing 的 performance.ts 读它算 campaign 折扣成本与 ROI），柜台折扣写进去会让促销 ROI 静默失真。新增 5 列（双 schema + 迁移 add_invoice_manual_discount）：manualDiscountSen/Kind/Value/Reason/At；算法唯一收在 `src/modules/finance/invoice-discount.ts`（净额=subtotal−促销−手动、下限 0；百分比以 subtotal 为基准；**记录「实际减免」而非「请求减免」**）。守卫：已结清拒绝（那是退款）、折扣后总额不得低于已收款、分行隔离、每次写 AuditLog；**不设权限门槛是 owner 的决定**。UI 在收款弹窗内三选+数值+原因并实时预览，折扣把账清零则自动结清。**生产 5 列已直连应用**（17 张发票默认 0、站点 200）。e2e 断言数据库：RM1025 → 10% → 减免 RM102.50、总额 RM922.50、促销字段不变、PAID、收款恰为 92250。vitest 391；全量 e2e 36 通过（4 个失败是既有 rider 预约问题）。

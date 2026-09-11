@@ -6,6 +6,7 @@ import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 import { assetUrl } from "@/lib/asset-url";
+import { isPromoActive } from "@/modules/marketing/promo";
 import { PosterCarousel } from "@/components/rider/poster-carousel";
 
 export const dynamic = "force-dynamic";
@@ -14,7 +15,10 @@ export default async function NewsPage() {
   const lang = await getLang();
   await getRiderCustomer();
   const [offers, posters, products] = await Promise.all([
-    db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE", endDate: { gte: new Date() } }, orderBy: { startDate: "desc" }, take: 5 }),
+    // Same shared rule as everywhere else on the rider side. A hand-written "endDate >= now"
+    // both offered campaigns whose window had not opened and hid the open-ended ones.
+    db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE" }, orderBy: { startDate: "desc" }, take: 24 })
+      .then((rows) => rows.filter((c) => isPromoActive(c as never)).slice(0, 5)),
     db.marketingAsset.findMany({ where: { published: true }, orderBy: { createdAt: "desc" }, take: 4 }).then((as) => as.map((a) => ({ ...a, url: assetUrl(a.url) }))),
     db.product.findMany({ where: { imageUrl: { not: null } }, orderBy: { createdAt: "desc" }, take: 6, select: { id: true, name: true, brand: true, category: true, sellPriceSen: true, imageUrl: true } }).then((ps) => ps.map((p) => ({ ...p, imageUrl: assetUrl(p.imageUrl) }))),
   ]);

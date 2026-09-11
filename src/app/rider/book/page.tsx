@@ -24,7 +24,11 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
   if (!customer) return null;
 
   const branches = await db.branch.findMany({ where: { organisationId: customer.organisationId } });
-  const promos = await db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE", endDate: { gte: new Date() } }, orderBy: { startDate: "desc" }, take: 3 });
+  // The window is decided by the shared rule, not by a hand-written where clause. The old one
+  // had two faults: it never checked startDate, so a campaign that had not begun yet was
+  // offered, and "endDate >= now" silently dropped open-ended campaigns that have no end date.
+  const promoCandidates = await db.campaign.findMany({ where: { type: "PROMO", status: "ACTIVE" }, orderBy: { startDate: "desc" }, take: 24 });
+  const promos = promoCandidates.filter((c) => isPromoActive(c as never)).slice(0, 3);
   const bikes = customer.motorcycles.map((m) => ({ id: m.id, brand: m.brand, model: m.model, plate: m.plate, type: m.type }));
   const packages = await db.servicePackage.findMany({ where: { active: true }, select: { id: true, name: true, tier: true, priceSen: true, isBestValue: true, description: true }, orderBy: { priceSen: "asc" } });
 
