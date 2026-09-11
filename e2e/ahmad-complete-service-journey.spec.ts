@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, setPersona, bookViaRider, confirmAndCheckIn, runMechanicInspection, settle } from "./helpers";
+import { BASE_URL, setPersona, bookViaRider, confirmAndCheckIn, runMechanicInspection, settle, dismissGuide } from "./helpers";
 
 /**
  * MASTER E2E TEST (§50, §74) — mandatory. If this fails: DO NOT DEPLOY.
@@ -33,6 +33,7 @@ test.describe("master journey", () => {
     // 5. Rider approves the RM20 chain adjustment
     await setPersona(ctx, "CUSTOMER");
     await page.goto(BASE_URL + "/rider/approvals");
+    await dismissGuide(page);
     await expect(page.getByTestId("approval-card")).toBeVisible();
     await expect(page.getByText(/CHAIN ADJUSTMENT/i).first()).toBeVisible();
     await expect(page.getByText("RM20", { exact: true })).toBeVisible();
@@ -45,6 +46,7 @@ test.describe("master journey", () => {
     await setPersona(ctx, "MECHANIC");
     await settle(page);
     await page.goto(BASE_URL + "/mechanic-app/jobs/" + jobId); // 隔离：mechanic 只能 mechanic app
+    await dismissGuide(page);
     await expect(page.getByText("CUSTOMER APPROVED").first()).toBeVisible();
     await page.getByTestId("complete-service").click();
     await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
@@ -52,6 +54,7 @@ test.describe("master journey", () => {
     // 7. Rider app updated: invoice RM165 (120 + 25 + 20), next service 34,800 km
     await setPersona(ctx, "CUSTOMER");
     await page.goto(BASE_URL + "/rider/invoices");
+    await dismissGuide(page);
     await expect(page.getByText("DZ-2026-", { exact: false }).first()).toBeVisible();
     await expect(page.getByText("Standard Service", { exact: false }).first()).toBeVisible();
     await expect(page.getByText("Chain Adjustment", { exact: false }).first()).toBeVisible();
@@ -61,12 +64,19 @@ test.describe("master journey", () => {
 
     // 8. Rider home shows the new next-service prediction
     await page.goto(BASE_URL + "/rider/home");
+    await dismissGuide(page);
     await expect(page.getByText("34,800 km", { exact: false }).first()).toBeVisible();
-    await expect(page.getByText("November 2026", { exact: false }).first()).toBeVisible();
+    // The estimate is last-service-date + 3,000 km ÷ 1,000 km/month, and the last service is the
+    // one this journey just completed — i.e. it is measured from *today*, so a hardcoded month
+    // rots: it read "November 2026" when the suite was written off an 18 Aug last service
+    // (tests/prediction.test.ts) and the same journey yields December today. Assert the shape the
+    // page promises; the arithmetic itself is pinned by the unit test.
+    await expect(page.getByText(/Estimated\s+\w+\s+\d{4}/).first()).toBeVisible();
 
     // 9. Bike passport (My Bike) shows the verified service at 31,800 km
     //    (service history lives inside each motorcycle's passport since the redesign)
     await page.goto(BASE_URL + "/rider/motorcycles");
+    await dismissGuide(page);
     const passport = page.locator('a[href*="/rider/motorcycles/"]').first();
     await passport.click();
     await expect(page.getByText("STANDARD SERVICE", { exact: false }).first()).toBeVisible();

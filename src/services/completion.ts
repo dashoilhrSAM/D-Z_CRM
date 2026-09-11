@@ -5,6 +5,7 @@ import { crmService } from "@/modules/crm/service";
 import { paymentProvider, messagingProvider, notificationProvider } from "@/providers";
 import { messagingModule } from "@/modules/messaging/service";
 import { discountForSubtotal, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
+import { completionMessage } from "@/modules/messaging/completion-message";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
 
 export interface CompletionResult {
@@ -150,7 +151,9 @@ export class CompletionService {
         customerId: job.customerId,
         orgId: job.customer.organisationId,
         branchId: job.branchId,
-        body: "Hi " + job.customer.name.split(" ")[0] + ", motosikal awak dah siap! Total " + "RM" + (subtotal / 100).toLocaleString() + ". Terima kasih — D&Z Smart Workshop.",
+        // What the customer owes — the invoice total, not the subtotal: the promo discount
+        // above is already on the bill, and the rider's invoice page shows the same number.
+        body: completionMessage({ customerName: job.customer.name, totalSen, discountSen }),
         jobId: job.id,
         jobNumber: job.jobNumber,
       };
