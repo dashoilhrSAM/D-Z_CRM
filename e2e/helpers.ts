@@ -67,16 +67,30 @@ export function ahmadBookingRow(page: Page, action: "Check In" | "Confirm" | "Ca
     .last();
 }
 
-/** Rider books a Standard Service a few days out. Returns the display date. */
-export async function bookViaRider(page: Page, ctx: BrowserContext, days = 2) {
+/**
+ * Rider books a Standard Service a few days out. Returns the display date.
+ *
+ * - `query` carries the campaign link the rider followed (e.g. "?campaign=<id>"): the branch
+ *   cards forward it to the booking form, which is how a booking ends up with a promo snapshot.
+ * - `packageName` picks a package in the form. It matters for money: a booking resolves its
+ *   promotional discount from its own priced lines, so a booking without a package gets none.
+ */
+export async function bookViaRider(
+  page: Page,
+  ctx: BrowserContext,
+  opts: { days?: number; query?: string; packageName?: string } = {},
+) {
   await setPersona(ctx, "CUSTOMER");
-  await page.goto(BASE_URL + "/rider/book");
+  await page.goto(BASE_URL + "/rider/book" + (opts.query ?? ""));
   await settle(page);
   await dismissGuide(page); // 导览气泡正压在第一张分行卡上
   // branch locator: pick the main branch first, then the booking form appears
   await page.locator('a[href*="branch="]').first().click();
   await settle(page);
-  const date = isoInDays(days);
+  if (opts.packageName) {
+    await page.locator('[data-tut="rider-book-package"] button').filter({ hasText: opts.packageName }).first().click();
+  }
+  const date = isoInDays(opts.days ?? 2);
   await page.fill('input[type="date"]', date);
   await page.waitForTimeout(400);
   // 选第一个可用时段（真实 slots 或 estimated；book-submit 需 timeSlot）
