@@ -8,7 +8,7 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**两条分支待 owner 合并，第二条叠在第一条上**：`fix/rider-off-news-leak`（关掉的海报不再漏给骑手 + 促销窗口统一由 isPromoActive 判定 + 改动记录一次一个文件 + **4 个既有 e2e 失败已修** + HANDOFF 刷新）与它的下游 `fix/completion-quote-nets-promo`（**完工 WhatsApp 报价改用发票总额**，不再报未减促销的小计）。`feat/content-studio-save` 已随 PR #19 进 main（可删远端分支）。main = `087337d`。生产健康（/ /login /contact 全 200，schema in sync）。基线全绿：tsc 0 / vitest **423**（33 文件）/ build 0 / **Playwright 全量 47 通过 · 0 失败**。
+**全部已合并，main 干净、无待合分支。** PR #20（`fix/rider-off-news-leak`：关掉的海报不再漏给骑手 + 促销窗口统一由 isPromoActive 判定 + 改动记录一次一个文件 + **4 个既有 e2e 失败已修**）与 PR #21（`fix/completion-quote-nets-promo`：**完工 WhatsApp 报价改用发票总额**，不再报未减促销的小计）都已进 main；main = origin/main = `6bd2f44`（已在本地 pull，11 个 commit fast-forward）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **423**（33 文件）/ build 0 / **Playwright 全量 47 通过 · 0 失败**。**下一步的日常待办只剩「等 owner 表态的两件事」+ 逾期的两条上线项。**
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
@@ -18,10 +18,10 @@
 - 续接会话：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（2026-09-11 12:4x，修完 4 个 e2e 失败）
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
-- **完工 WhatsApp 报价改净额（PR 待合）**：消息取自发票**总额**（已减促销）而非小计——此前同一事务里发票是对的、发给客户的消息是错的（消息 RM165 / 发票 RM148.50 / 柜台按发票收）。消息文案抽成纯模块 `completion-message.ts` + 6 例单测（含反向验证过的源码守卫）+ 从 campaign 链接进入的端到端 spec。
+- **完工 WhatsApp 报价改净额（PR #21 已合）**：消息取自发票**总额**（已减促销）而非小计——此前同一事务里发票是对的、发给客户的消息是错的（消息 RM165 / 发票 RM148.50 / 柜台按发票收）。消息文案抽成纯模块 `completion-message.ts` + 6 例单测（含反向验证过的源码守卫）+ 从 campaign 链接进入的端到端 spec。
 - **4 个既有 e2e 失败已修（不是业务 bug）**：页内功能导览的气泡卡压在页面内容上（`/rider/book` 的导语气泡正好盖住第一张分行卡），被压住的 click 一直重试到 120s 超时——测试没按用户的方式走（按 Skip），加 `dismissGuide` 后三例通过，master journey 一路绿灯。另删掉一条会腐烂的断言（硬编码 "November 2026"：估算从"今天"起算，写死月份必然过期）。全量 46 通过。
-- **关掉的海报不再漏给骑手（PR 待合）**：News 页本来就对了，漏的是它链接过去的 /rider/promotions（读全部素材、无 published 过滤）——生产 22 个素材中 10 个已关闭却一直露出。顺带把四处各自手写的「促销是否生效」统一为 isPromoActive（其中两处只查 endDate：未开始的促销提前露出、无结束日期的长期促销被整条排除）。
-- **Content Studio 三件事（PR 待合）**：内容其实早已落库，缺的是入口——新增「已生成内容」面板可回访（复用服务端早就存在却从未被前端调用的 GET）、一键导出 .md、标记已发布（接上预留的 status: USED + 新增 usedAt）。
+- **关掉的海报不再漏给骑手（PR #20 已合）**：News 页本来就对了，漏的是它链接过去的 /rider/promotions（读全部素材、无 published 过滤）——生产 22 个素材中 10 个已关闭却一直露出。顺带把四处各自手写的「促销是否生效」统一为 isPromoActive（其中两处只查 endDate：未开始的促销提前露出、无结束日期的长期促销被整条排除）。
+- **Content Studio 三件事（PR #19 已合）**：内容其实早已落库，缺的是入口——新增「已生成内容」面板可回访（复用服务端早就存在却从未被前端调用的 GET）、一键导出 .md、标记已发布（接上预留的 status: USED + 新增 usedAt）。
 - **发票就地看明细 + 结账打折（PR #17 / #18，已进 main）**：发票卡片可展开看明细行（数据源是完工快照 InvoiceItem）;收款弹窗可打百分比/金额折扣——**手动折扣与促销 discountSen 分开记**（后者是 marketing 归因字段，混写会让 ROI 失真）。
 - **营销数据上生产 + 服务价目可编辑 + 日历 cron（已进 main）**：`pnpm seed:marketing` 一条命令种日历/产品/品牌；服务价目原本 UI 里根本改不了（只有 create/toggle/delete），已补 updateServiceType；日历每月 1 号 cron 自动滚动。
 - **部署 45 分钟超时根治（PR #14，已进 main）**：根因是构建期 schema 同步连生产库而 execFileSync 默认无超时；改为优先 DIRECT_URL + 每命令硬超时。合并后部署回到 1–2 分钟。
@@ -29,15 +29,13 @@
 - **指派机械师（PR #16，已进 main）**：下拉按工单分行过滤（此前列全部分行，选跨行的必被拒）+ 修裁切（共享 Select primitive 受益）。
 
 ## 下一步（按优先级）
-1. **合并 `fix/rider-off-news-leak`**（https://github.com/dashoilhrSAM/D-Z_CRM/pull/new/fix/rider-off-news-leak）——只改 rider 展示、e2e 与文档，无 schema 改动，可干净合并。
-1b. **合并 `fix/completion-quote-nets-promo`**（叠在上面那条分支之上；合并顺序：先 `fix/rider-off-news-leak` 再它）——完工消息报价改净额，无 schema 改动。
-2. **删掉已合进 main 的远端分支 `feat/content-studio-save`**（`git merge-base --is-ancestor` 已验），顺带清掉它对应的 PR。
-3. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
-4. **等 owner 表态的两件事**：① 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽，代价是长名字走省略号）；② **促销折扣只挂在「预约时选中的套餐/加项」上**——`resolvePromoForBooking()` 在`lines.length === 0` 时返回 null，而预约页套餐是可选的（默认 none，柜台 check-in 才选），所以**没在预约页选套餐的单子在促销期内不打折**（e2e master journey 就是：20% 促销生效、RM165 的单折扣 0，且 `promoAutoApply` 为 true）。要不要改成「按最终实际账单解析」，属营收行为决定。
-5. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
-6. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
-7. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
-8. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步。**另需 owner 在 Vercel 加 `DIRECT_URL`**（Supabase 直连 5432，非池化），让构建期 schema 同步走直连。
+1. **清理已合进 main 的分支**（`git merge-base --is-ancestor <b> origin/main` 逐条验后再删）：远端 `feat/content-studio-save` · `fix/rider-off-news-leak` · `fix/completion-quote-nets-promo`，本地同名前三条。
+2. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`，随 PR #20 进 main）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
+3. **等 owner 表态的两件事**：① 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽，代价是长名字走省略号）；② **促销折扣只挂在「预约时选中的套餐/加项」上**——`resolvePromoForBooking()` 在`lines.length === 0` 时返回 null，而预约页套餐是可选的（默认 none，柜台 check-in 才选），所以**没在预约页选套餐的单子在促销期内不打折**（e2e master journey 就是：20% 促销生效、RM165 的单折扣 0，且 `promoAutoApply` 为 true）。要不要改成「按最终实际账单解析」，属营收行为决定。
+4. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
+5. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
+6. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
+7. **WhatsApp 真机上线（dtodo 92b29072）**：SETUP §5.3.1 五步。**另需 owner 在 Vercel 加 `DIRECT_URL`**（Supabase 直连 5432，非池化），让构建期 schema 同步走直连。
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
@@ -55,8 +53,8 @@
 - 生产：https://d-z-crm.vercel.app （push main 自动部署）
 
 ## git 状态
-- main = origin/main = **087337d**（PR #19 已合并）
-- 远端分支：`main` · `fix/rider-off-news-leak`（`feat/content-studio-save` 已随 PR #19 进 main，可删）
+- main = origin/main = **6bd2f44**（PR #20、#21 已合并；本地已 pull）
+- 远端分支：`main` · `feat/content-studio-save` · `fix/rider-off-news-leak` · `fix/completion-quote-nets-promo`（后三条都已合进 main，可删）
 - 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 5）
 - 未提交：0（tracked 干净）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
