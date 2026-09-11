@@ -89,6 +89,38 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: true, ...result });
       }
 
+      // Reopening something finished. The studio keeps only the current run in memory, so
+      // without this the work was saved but unreachable — the operator saw an empty screen
+      // and concluded it had not been saved at all.
+      case "load": {
+        const id = String(body.id ?? "");
+        if (!id) return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
+        const script = await db.contentScript.findUnique({
+          where: { id },
+          select: {
+            id: true, title: true, angle: true, hook: true, body: true, cta: true, platform: true,
+            language: true, brandKey: true, occasionKey: true, includeProduct: true, productSku: true,
+            status: true, generatedAt: true, usedAt: true, expandedJson: true, posterUrl: true, posterRenderedAt: true,
+          },
+        });
+        if (!script) return NextResponse.json({ ok: false, error: "Script not found" }, { status: 404 });
+        return NextResponse.json({ ok: true, script });
+      }
+
+      // Marking content as posted. The status was designed for this but never set, so posted
+      // and unposted work sat mixed together in the bank.
+      case "mark-used": {
+        const id = String(body.id ?? "");
+        if (!id) return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
+        const used = body.used !== false;
+        const script = await db.contentScript.update({
+          where: { id },
+          data: { status: used ? "USED" : "SELECTED", usedAt: used ? new Date() : null },
+          select: { id: true, status: true, usedAt: true },
+        });
+        return NextResponse.json({ ok: true, ...script });
+      }
+
       default:
         return NextResponse.json({ ok: false, error: "Unknown action: " + action }, { status: 400 });
     }
@@ -111,7 +143,7 @@ export async function GET() {
     select: {
       id: true, batchId: true, title: true, angle: true, hook: true, status: true,
       score: true, includeProduct: true, productSku: true, generatedAt: true,
-      posterUrl: true, expandedAt: true, occasionKey: true,
+      posterUrl: true, expandedAt: true, occasionKey: true, usedAt: true,
     },
   });
 
