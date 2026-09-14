@@ -96,11 +96,22 @@ export class InventoryService {
     return db.$transaction(async (tx: DbLike) => this.deductStockTx(branchId, productId, qty, reason, referenceId, tx));
   }
 
+  /**
+   * 扣库存：**一条条件更新完成「检查 + 扣减」**，不再先读后写。
+   *
+   * 旧写法是 getInventory → 比较 current < qty → upsert 绝对赋值 current - qty。
+   * 这在 PG（READ COMMITTED）下是标准的丢失更新：两个并发开票都读到 5、都写 4，
+   * 实扣 2 只记 1，库存账实不符并一路传导到 COGS 与采购建议。
+   * 注意它**在本地 sqlite 上复现不出来**（Prisma 的交互事务把并发串行化了）——
+   * 所以这个 bug 恰恰是"本地测试永远抓不到、上生产才慢慢对不上账"的那一类。
+   */
   private async deductStockTx(branchId: string, productId: string, qty: number, reason: string, referenceId: string | undefined, tx: DbLike) {
-    const inv = await this.repo.getInventory(branchId, productId, tx);
-    const current = inv?.quantity ?? 0;
-    if (current < qty) throw new Error("Insufficient stock for product " + (inv?.product.name ?? productId) + " (have " + current + ", need " + qty + ")");
-    await this.repo.upsertInventory(branchId, productId, current - qty, tx);
+    const res = await this.repo.deductInventory(branchId, productId, qty, tx);
+    if (res.count === 0) {
+      // 只有失败时才多读一次，只为把错误信息说清楚。
+      const inv = await this.repo.getInventory(branchId, productId, tx);
+      throw new Error("Insufficient stock for product " + (inv?.product.name ?? productId) + " (have " + (inv?.quantity ?? 0) + ", need " + qty + ")");
+    }
     await this.repo.createMovement({ branchId, productId, quantity: -qty, reason, referenceType: "SERVICE_JOB", referenceId }, tx);
   }
 
@@ -109,10 +120,9 @@ export class InventoryService {
     return db.$transaction(async (tx: DbLike) => this.addStockTx(branchId, productId, qty, reason, referenceId, tx));
   }
 
+  /** 入库同样改增量语义：并发入库不再互相覆盖。 */
   private async addStockTx(branchId: string, productId: string, qty: number, reason: string, referenceId: string | undefined, tx: DbLike) {
-    const inv = await this.repo.getInventory(branchId, productId, tx);
-    const current = inv?.quantity ?? 0;
-    await this.repo.upsertInventory(branchId, productId, current + qty, tx);
+    await this.repo.addInventory(branchId, productId, qty, tx);
     await this.repo.createMovement({ branchId, productId, quantity: qty, reason, referenceType: "PURCHASE_ORDER", referenceId }, tx);
   }
 
@@ -122,9 +132,8 @@ export class InventoryService {
     if (fromBranchId === toBranchId) throw new Error("Source and target branches are the same");
     return db.$transaction(async (tx: DbLike) => {
       await this.deductStockTx(fromBranchId, productId, qty, "Transfer out to branch " + toBranchId.slice(-4), undefined, tx);
-      const inv = await this.repo.getInventory(toBranchId, productId, tx);
-      const current = inv?.quantity ?? 0;
-      await this.repo.upsertInventory(toBranchId, productId, current + qty, tx);
+      // 调入方同样用增量，避免与其它入库并发时互相覆盖。
+      await this.repo.addInventory(toBranchId, productId, qty, tx);
       await this.repo.createMovement({ branchId: toBranchId, productId, quantity: qty, reason: "Transfer in from branch " + fromBranchId.slice(-4), referenceType: "TRANSFER", referenceId: fromBranchId }, tx);
       return { ok: true };
     });
