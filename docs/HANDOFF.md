@@ -8,17 +8,17 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 干净（PR #23 已合并，main = `1997eda`），一条新分支待 review**：`feat/workshop-shows-promo-promise`（**柜台侧也显示促销承诺**——工单报价面板与打印报价单新增促销行 + 净额 Total，此前只有骑手看得到折扣）。远端只剩 `main` 与这条分支（两条旧分支已删）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
+**main 干净（PR #24 已合并，main = origin/main = `625e9da`），无待合分支**——`feat/workshop-shows-promo-promise`（**柜台侧也显示促销承诺**：工单报价面板与打印报价单新增促销行 + 净额 Total）已进 main，生产已自动部署（/login 200）。所有已合分支（本地 + 远端）都已清理，远端只剩 `main`。基线全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：确认 PR #23 已合 → 同步 main + 清理两条已合分支 → 基线复验（tsc/vitest/e2e 全绿）→ **柜台侧促销承诺**）
+- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：确认 PR #23 已合 → 同步 main + 清理两条已合分支 → 基线复验（tsc/vitest/e2e 全绿）→ **柜台侧促销承诺（PR #24）** → PR #24 合并后再拉 main + 清理分支）
 - 上一会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」：e2e 失败修复 / 完工消息净额 / 促销「报价即承诺」/ 首页优惠卡改落 News 页）
 - 上一次打包：2026-09-14 09:54（session-pack，docs-only 提交 `b4dcbb4`）
 - 续接口令：继续 D&Z
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
-- **柜台侧也显示促销承诺（分支 `feat/workshop-shows-promo-promise` 待合）**：促销「报价即承诺」此前**只有骑手看得到**——
+- **柜台侧也显示促销承诺（PR #24 已合）**：促销「报价即承诺」此前**只有骑手看得到**——
   柜台看的工单报价面板与打印出来的报价单都只显示原价，同一张单两个数字。新增 `promisedPromoFor(snapshot, quoteTotalSen)`
   作为「快照 + 报价额 → 承诺额」的**唯一定义**（骑手 status 改为调用它），工单页报价面板与 `/quotation/[id]`
   打印页新增促销行 + 净额 Total（客户签字的是实付）。守卫：单测逐个断言三个界面必须用同一函数、不得自己再算，
@@ -64,9 +64,10 @@
 - 生产：https://d-z-crm.vercel.app （push main 自动部署）
 
 ## git 状态
-- main = origin/main = **1997eda**（PR #23 已合并；本地 main 另含一条未推送的 docs 提交 `fe2f0d7`，已随本分支带上）
-- 远端分支：`main` · `feat/workshop-shows-promo-promise`（待合）
-- 本地分支：`main` · `feat/workshop-shows-promo-promise`（当前所在）· `feat/workshop-module-setup`（未合并，见下一步 4）
+- main = origin/main = **625e9da**（PR #24 已合并；本地 main 另含一条**未推送**的 docs 提交，见下行）
+- 远端分支：只有 `main`（`docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news` · `feat/workshop-shows-promo-promise` 均已合进 main 并删除）
+- 本地分支：`main`（当前所在）· `feat/workshop-module-setup`（未合并，见下一步 4）
+- ⚠️ 本节的 HANDOFF 刷新是一条**本地 main 上的未推送 docs 提交**（沿用 `fe2f0d7` 的先例：不 push main，随下一条 feature 分支一起送审）
 - 未提交：0（tracked 干净；工作区只有 docs/ACCEPTANCE_REPORT.html 等历史未跟踪产物）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
 
@@ -101,9 +102,9 @@
 ## 新会话头 10 分钟
 1. **探活**：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login`（另 :3003 / :3102）；挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个文件**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **查 git**：`git fetch --prune` 看 owner 合了没有（待合的是 `docs/handoff-after-promo-merge` 与 `fix/rider-home-offers-to-news`，后者叠在前者上）；合了就 `git checkout main && git pull --ff-only` 并把已合分支清掉
-4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**434**，34 文件）；要动源码再加 `pnpm build`
-5. **挑下一步**：优先「下一步 3」里那 4 个等 owner 表态的口径问题（其中「柜台散客单要不要吃促销」影响营收）；改完源码记得 `pnpm build` + kickstart 三端，新改动写 `pnpm new:change <名字>`
+3. **查 git**：`git fetch --prune`——**当前没有待合分支**（上一次推送的 `feat/workshop-shows-promo-promise` 已随 PR #24 进 main）；有分支待合就先看 owner 合没合，合了就 `git checkout main && git pull --ff-only`，逐条 `git merge-base --is-ancestor` 验过后删掉本地 + 远端已合分支
+4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**439**，34 文件）；要动源码再加 `pnpm build`
+5. **挑下一步**：优先「下一步 3」里还剩的两个等 owner 表态的口径问题（**柜台散客单要不要吃促销**影响营收、**忠诚度积分是否改按实付计**）；改完源码记得 `pnpm build` + kickstart 三端，新改动写 `pnpm new:change <名字>`
 
 ---
 
