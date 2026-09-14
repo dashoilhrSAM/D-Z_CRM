@@ -8,14 +8,14 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 干净（PR #22 已合并，main = `041b542`），两条新分支待 review**：`docs/handoff-after-promo-merge`（HANDOFF 刷新，docs-only）与叠在它上面的 `fix/rider-home-offers-to-news`（**骑手首页「特别优惠」卡片改为直接进 News 页**）。远端只有 `main`。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
+**main 干净（PR #22 已合并，main = `041b542`），两条新分支待 review**：`docs/handoff-after-promo-merge`（HANDOFF 刷新，docs-only）与叠在它上面的 `fix/rider-home-offers-to-news`（**骑手首页「特别优惠」卡片改为直接进 News 页**）。远端有 `main` + 这两条待合分支。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-df92a8c8-e683-4596-ae0e-abfaa782852e（续接会话「继续 D&Z」）
-- 打包时间：2026-09-11 04:39
+- 本会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」；本轮做了：4 个 e2e 失败修复 → 完工消息改净额 → 促销「报价即承诺」+ 报价单显示折扣 → 同步 main 与分支清理 → 首页优惠卡片改落 News 页）
+- 上一次打包：2026-09-11 04:39（session-df92a8c8-e683-4596-ae0e-abfaa782852e）
+- 本次打包：2026-09-11 16:0x（session-pack）
 - 续接口令：继续 D&Z
-- 续接会话：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（2026-09-11 12:4x，修完 4 个 e2e 失败）
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
 - **骑手首页优惠卡片改落 News 页（分支 `fix/rider-home-offers-to-news` 待合）**：首页「Special offers」那张两行预览卡，
@@ -60,8 +60,8 @@
 ## git 状态
 - main = origin/main = **041b542**（PR #22 已合并；本地已 pull 到最新）
 - 远端分支：`main` · `docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news`（本条与 docs 分支待合）
-- 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 4）
-- 未提交：0（tracked 干净）
+- 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 4）· `docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news`（当前所在，含上面那条 docs 提交）
+- 未提交：0（tracked 干净；工作区只有 docs/ACCEPTANCE_REPORT.html 等历史未跟踪产物）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
 
 ## 关键决策与约定
@@ -95,9 +95,9 @@
 ## 新会话头 10 分钟
 1. **探活**：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login`（另 :3003 / :3102）；挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个文件**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**417**）
-4. **挑下一步**：优先「下一步 3」那 4 个既有 e2e 失败（疑似真 bug）
-5. **若改了源码**：`pnpm build` 后 kickstart 三端再验证；有新改动用 `pnpm new:change <名字>` 建条目
+3. **查 git**：`git fetch --prune` 看 owner 合了没有（待合的是 `docs/handoff-after-promo-merge` 与 `fix/rider-home-offers-to-news`，后者叠在前者上）；合了就 `git checkout main && git pull --ff-only` 并把已合分支清掉
+4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**434**，34 文件）；要动源码再加 `pnpm build`
+5. **挑下一步**：优先「下一步 3」里那 4 个等 owner 表态的口径问题（其中「柜台散客单要不要吃促销」影响营收）；改完源码记得 `pnpm build` + kickstart 三端，新改动写 `pnpm new:change <名字>`
 
 ---
 
