@@ -69,7 +69,11 @@ export class BookingService {
     });
     const promoSnapshot = promoQuote ? toPromoSnapshot(promoQuote) : null;
 
-    const created = await this.repo.create({
+    // 原子占位：检查与占用是同一条语句（上方那次读只是快速失败，不承担判定）。
+    const claimedSlotId = await this.claimSeat(input.branchId, input.date, input.timeSlot);
+    let created;
+    try {
+      created = await this.repo.create({
       branch: { connect: { id: input.branchId } },
       customer: { connect: { id: input.customerId } },
       motorcycle: { connect: { id: input.motorcycleId } },
@@ -83,11 +87,13 @@ export class BookingService {
       source: input.source,
       // An auto-applied promo also records which campaign produced the discount.
       campaign: (promoSnapshot?.campaignId ?? input.campaignId) ? { connect: { id: (promoSnapshot?.campaignId ?? input.campaignId)! } } : undefined,
-      promoDiscountSen: promoSnapshot?.savedSen ?? 0,
-      promoSnapshot: promoSnapshot ? (promoSnapshot as never) : undefined,
-    });
-    if (slot) {
-      await db.appointmentSlot.update({ where: { id: slot.id }, data: { bookedCount: { increment: 1 } } });
+        promoDiscountSen: promoSnapshot?.savedSen ?? 0,
+        promoSnapshot: promoSnapshot ? (promoSnapshot as never) : undefined,
+      });
+    } catch (e) {
+      // 建单失败必须把占到的位置放回去，否则一次失败会永久吃掉一个名额。
+      if (claimedSlotId) await this.releaseSeatById(claimedSlotId);
+      throw e;
     }
     const org = await db.organisation.findFirst();
     if (org) {
@@ -103,12 +109,65 @@ export class BookingService {
     return created;
   }
 
+  /**
+   * 原子抢一个时段名额。返回 slotId = 已占用；null = 该时段没有配置 slot（不限容量）。
+   * 抢不到（并发下别人先占满）抛 SLOT_FULL。
+   *
+   * 为什么要合成一条 SQL：旧写法是「先 findUnique 读 bookedCount 判断够不够 → 之后才 increment」，
+   * 中间隔着建单、促销解析、审计等多个 await。实测（scripts/perf/repro-races.ts，容量 3）：
+   * **10 个并发预约全部通过检查、10 单全落在容量 3 的时段上**。条件更新 + 受影响行数判定才是原子的。
+   */
+  private async claimSeat(branchId: string, date: Date, timeSlot: string): Promise<string | null> {
+    const slot = await db.appointmentSlot.findUnique({
+      where: { branchId_date_startTime: { branchId, date, startTime: timeSlot } },
+      select: { id: true, isHoliday: true, maxBookings: true },
+    });
+    if (!slot || slot.isHoliday) return null;
+    const claimed = await db.appointmentSlot.updateMany({
+      where: { id: slot.id, isHoliday: false, bookedCount: { lt: slot.maxBookings } },
+      data: { bookedCount: { increment: 1 } },
+    });
+    if (claimed.count === 0) throw new Error("SLOT_FULL");
+    return slot.id;
+  }
+
+  /** 释放一个名额（按 slot id，用于补偿已知占位）。bookedCount > 0 的守卫防止重复释放把计数打成负数。 */
+  private async releaseSeatById(slotId: string): Promise<void> {
+    await db.appointmentSlot.updateMany({ where: { id: slotId, bookedCount: { gt: 0 } }, data: { bookedCount: { decrement: 1 } } });
+  }
+
+  /** 按（分行 + 日期 + 时段）释放名额：取消 / 改期换时段时用。 */
+  private async releaseSeat(branchId: string, date: Date, timeSlot: string): Promise<void> {
+    const slot = await db.appointmentSlot.findUnique({
+      where: { branchId_date_startTime: { branchId, date, startTime: timeSlot } },
+      select: { id: true },
+    });
+    if (slot) await this.releaseSeatById(slot.id);
+  }
+
   /** Workshop booking actions (§20): confirm / reschedule / cancel / check in / no show. */
   async transition(id: string, status: BookingStatusInput, extra?: { date?: Date; timeSlot?: string }) {
+    const before = await db.booking.findUnique({
+      where: { id },
+      select: { id: true, branchId: true, date: true, timeSlot: true, status: true },
+    });
+    if (!before) throw new Error("Booking not found");
+    const newDate = extra?.date ?? before.date;
+    const newTimeSlot = extra?.timeSlot ?? before.timeSlot;
+    const movesSlot = status === "RESCHEDULED" && (newDate.getTime() !== before.date.getTime() || newTimeSlot !== before.timeSlot);
+    // 先抢新位置（抢不到就整笔拒绝，不留"改了一半"的状态），改单成功后再释放旧位置。
+    const claimedSlotId = movesSlot ? await this.claimSeat(before.branchId, newDate, newTimeSlot) : null;
+
     const data: Record<string, unknown> = { status };
     if (extra?.date) data.date = extra.date;
     if (extra?.timeSlot) data.timeSlot = extra.timeSlot;
-    const updated = await this.repo.update(id, data as never);
+    let updated;
+    try {
+      updated = await this.repo.update(id, data as never);
+    } catch (e) {
+      if (claimedSlotId) await this.releaseSeatById(claimedSlotId);
+      throw e;
+    }
     // BOOK-011..019: confirmation message on CONFIRMED (recorded in Message history)
     if (status === "CONFIRMED") {
       try {
@@ -145,6 +204,12 @@ export class BookingService {
       await db.auditLog.create({
         data: { organisationId: org.id, branchId: null, action: "BOOKING_STATUS_" + status, entity: "BOOKING", entityId: id, after: JSON.stringify({ status }) },
       });
+    }
+    // 释放旧名额：取消 / 爽约，或改期换了时段。
+    // 只在状态真的发生变化时释放 —— 否则重复取消会把 bookedCount 减到低于真实占用
+    // （这就是"名额只增不减"的另一半：booking 走了，位置还占着，时段被永久占满）。
+    if (before.status !== status && (status === "CANCELLED" || status === "NO_SHOW" || movesSlot)) {
+      await this.releaseSeat(before.branchId, before.date, before.timeSlot);
     }
     return updated;
   }

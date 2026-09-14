@@ -22,6 +22,24 @@ export class PrismaInventoryRepository implements IInventoryRepository {
       update: { quantity },
     });
   }
+  /** 增量增减：交给数据库做加法，应用层不再读改写。upsert 的 update 用 increment。 */
+  addInventory(branchId: string, productId: string, delta: number, client?: DbLike) {
+    return this.c(client).inventory.upsert({
+      where: { branchId_productId: { branchId, productId } },
+      create: { branchId, productId, quantity: delta },
+      update: { quantity: { increment: delta } },
+    });
+  }
+  /**
+   * 条件原子扣减：把「够不够扣」和「扣」合成同一条 SQL。
+   * 受影响行数 0 = 库存不足（或没有该行），调用方据此报错——不需要先读一次。
+   */
+  deductInventory(branchId: string, productId: string, qty: number, client?: DbLike) {
+    return this.c(client).inventory.updateMany({
+      where: { branchId, productId, quantity: { gte: qty } },
+      data: { quantity: { decrement: qty } },
+    });
+  }
   createMovement(data: Prisma.StockMovementUncheckedCreateInput, client?: DbLike) { return this.c(client).stockMovement.create({ data }); }
   listSuppliers(client?: DbLike) { return this.c(client).supplier.findMany({ include: { products: true }, orderBy: { name: "asc" } }); }
   listPOs(branchId?: string | null, client?: DbLike) {
