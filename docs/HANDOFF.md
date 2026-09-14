@@ -8,17 +8,23 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 干净（PR #22 已合并，main = `041b542`），两条新分支待 review**：`docs/handoff-after-promo-merge`（HANDOFF 刷新，docs-only）与叠在它上面的 `fix/rider-home-offers-to-news`（**骑手首页「特别优惠」卡片改为直接进 News 页**）。远端有 `main` + 这两条待合分支。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **434**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
+**main 干净（PR #23 已合并，main = `1997eda`），一条新分支待 review**：`feat/workshop-shows-promo-promise`（**柜台侧也显示促销承诺**——工单报价面板与打印报价单新增促销行 + 净额 Total，此前只有骑手看得到折扣）。远端只剩 `main` 与这条分支（两条旧分支已删）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」；本轮做了：4 个 e2e 失败修复 → 完工消息改净额 → 促销「报价即承诺」+ 报价单显示折扣 → 同步 main 与分支清理 → 首页优惠卡片改落 News 页）
-- 上一次打包：2026-09-11 04:39（session-df92a8c8-e683-4596-ae0e-abfaa782852e）
-- 本次打包：2026-09-11 16:0x（session-pack）
+- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：确认 PR #23 已合 → 同步 main + 清理两条已合分支 → 基线复验（tsc/vitest/e2e 全绿）→ **柜台侧促销承诺**）
+- 上一会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」：e2e 失败修复 / 完工消息净额 / 促销「报价即承诺」/ 首页优惠卡改落 News 页）
+- 上一次打包：2026-09-14 09:54（session-pack，docs-only 提交 `b4dcbb4`）
 - 续接口令：继续 D&Z
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
-- **骑手首页优惠卡片改落 News 页（分支 `fix/rider-home-offers-to-news` 待合）**：首页「Special offers」那张两行预览卡，
+- **柜台侧也显示促销承诺（分支 `feat/workshop-shows-promo-promise` 待合）**：促销「报价即承诺」此前**只有骑手看得到**——
+  柜台看的工单报价面板与打印出来的报价单都只显示原价，同一张单两个数字。新增 `promisedPromoFor(snapshot, quoteTotalSen)`
+  作为「快照 + 报价额 → 承诺额」的**唯一定义**（骑手 status 改为调用它），工单页报价面板与 `/quotation/[id]`
+  打印页新增促销行 + 净额 Total（客户签字的是实付）。守卫：单测逐个断言三个界面必须用同一函数、不得自己再算，
+  并断言该函数只有一份定义（**已反向验证**：旧代码上三处命中数都是 0）；e2e `promo-at-checkin` 新增 2c/2d 两段
+  真断言柜台面板与打印页的数字。
+- **骑手首页优惠卡片改落 News 页（PR #23 已合）**：首页「Special offers」那张两行预览卡，
   链接从 `/rider/promotions` 改成 `/rider/service-history`（News 页），并加 `data-testid="home-offers"`；新增一条会**真的点一次**
   再断言 URL 的 e2e 守卫。
 - **报价单显示折扣 + 营收口径改净额（PR #22 已合）**：骑手那张报价单新增促销行（`Promotion · <campaign>` −RMxx）与**净额 Total**——客户批准的就是实付，不再「先看全价、最后少付」；折扣金额复用 `promoDiscountForBill`（不给 Quotation 加列，避免第二处真相）。`CompletionResult.revenueSen/grossProfitSen` 与 `ServiceHistory.totalSen` 改记净额，与幂等分支一致。**顺带修掉一个真 bug**：rider status 以前只把「该车最新一条 open booking」配给工单，同一台车两个未完成工单时其余工单配不到自己的 booking（promo 承诺与生命周期步骤一起丢）——改成按 `jobId` 逐条配对（单跑 spec 看不出来，跑全量才现形）。
@@ -36,7 +42,7 @@
 ## 下一步（按优先级）
 1. ~~清理已合进 main 的分支~~ **已清理（2026-09-11）**：删前逐条 `git merge-base --is-ancestor` 验过，本地 + 远端各 5 条（`docs/handoff-post-merge` · `feat/content-studio-save` · `feat/promo-quoted-lines` · `fix/completion-quote-nets-promo` · `fix/rider-off-news-leak`）；现在远端只剩 `main`。
 2. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`，随 PR #20 进 main）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
-3. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**；~~骑手报价单看不到折扣行~~ 与 ~~revenueSen/ServiceHistory 口径~~ **也已一并做掉**。仍等 owner 表态：① 编辑工单弹窗里下拉浮层宽 22px（要不要改等宽）；② **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）；③ workshop 侧报价单/job 页要不要也显示促销行；④ **忠诚度积分仍按毛额计**（`pts = round(subtotal/100)`，严格按「1 分/RM1 实付」应改 `totalSen`，但那是**减少**客户积分，属业务决定）。
+3. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**；~~骑手报价单看不到折扣行~~ 与 ~~revenueSen/ServiceHistory 口径~~ **也已一并做掉**。① ~~编辑工单弹窗里下拉浮层宽 22px~~ **已实测，建议不改**：浮层实测 256px、触发器 237px（差 19px），加宽来自刻意写的 `min-w-64`——机械师选项带分店名很长，改成等宽会把名字截断（该 primitive 的注释已说明「下拉靠 popup 的 min-width 保持可读」）。③ ~~workshop 侧报价单/job 页也显示促销行~~ **已做（见完成进度首条）**。仍等 owner 表态：② **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）；④ **忠诚度积分仍按毛额计**（`pts = round(subtotal/100)`，严格按「1 分/RM1 实付」应改 `totalSen`，但那是**减少**客户积分，属业务决定）。
 4. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
 5. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
 6. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
@@ -44,11 +50,11 @@
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
-- `pnpm test`：**434 个通过（34 文件）**
+- `pnpm test`：**439 个通过（34 文件）**
 - `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
 - `pnpm exec playwright test --project=desktop-chromium`：**49 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
 - 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
-- 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额，展示与收费都用 `promoDiscountForBill`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「骑手报价单必须用同一函数」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 报价单可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
+- 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额；金额算法在 `promoDiscountForBill`，各界面取数统一走 `promisedPromoFor`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「三个报价界面（骑手卡/工单面板/打印报价单）必须用同一函数、不得自己再算」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 三个界面的可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
 
 ## 服务与恢复
@@ -58,9 +64,9 @@
 - 生产：https://d-z-crm.vercel.app （push main 自动部署）
 
 ## git 状态
-- main = origin/main = **041b542**（PR #22 已合并；本地已 pull 到最新）
-- 远端分支：`main` · `docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news`（本条与 docs 分支待合）
-- 本地分支：`main` · `feat/workshop-module-setup`（未合并，见下一步 4）· `docs/handoff-after-promo-merge` · `fix/rider-home-offers-to-news`（当前所在，含上面那条 docs 提交）
+- main = origin/main = **1997eda**（PR #23 已合并；本地 main 另含一条未推送的 docs 提交 `fe2f0d7`，已随本分支带上）
+- 远端分支：`main` · `feat/workshop-shows-promo-promise`（待合）
+- 本地分支：`main` · `feat/workshop-shows-promo-promise`（当前所在）· `feat/workshop-module-setup`（未合并，见下一步 4）
 - 未提交：0（tracked 干净；工作区只有 docs/ACCEPTANCE_REPORT.html 等历史未跟踪产物）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
 
