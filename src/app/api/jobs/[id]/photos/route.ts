@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
-import { getSessionUser } from "@/lib/session-user";
+import { requireStaff } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -11,8 +11,10 @@ const ANGLES: JobPhotoAngle[] = ["FRONT", "BACK", "LEFT", "RIGHT", "METER"];
 /** Pre-service SOP photo upload (SOP-001): mechanic captures 5 condition photos before starting a job. */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const { id } = await ctx.params;
-  const session = await getSessionUser();
-  if (session.kind !== "staff" || !session.user) return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  // 统一到 requireStaff()：这个路由本来就校验得对，改成同一入口是为了让
+  // 「每个非公开 API 都用同一个门禁」成为可 grep、可断言的不变量（见 tests/api-auth.test.ts）。
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
 
   const form = await req.formData();
   const file = form.get("file") as File | null;
@@ -24,7 +26,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
   const job = await db.serviceJob.findUnique({ where: { id }, select: { id: true, mechanicId: true, status: true } });
   if (!job) return NextResponse.json({ ok: false, error: "Job not found" }, { status: 404 });
-  if (job.mechanicId !== session.user.id) return NextResponse.json({ ok: false, error: "Not your job" }, { status: 403 });
+  if (job.mechanicId !== auth.session.user!.id) return NextResponse.json({ ok: false, error: "Not your job" }, { status: 403 });
   if (job.status !== "WAITING") return NextResponse.json({ ok: false, error: "Only before service starts" }, { status: 400 });
 
   const angle = angleRaw as JobPhotoAngle;
@@ -34,8 +36,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const url = await storageProvider.put(key, bytes, file.type);
   await db.serviceJobPhoto.upsert({
     where: { jobId_angle: { jobId: id, angle } },
-    create: { jobId: id, angle, photoUrl: url, capturedById: session.user.id },
-    update: { photoUrl: url, capturedById: session.user.id, capturedAt: new Date() },
+    create: { jobId: id, angle, photoUrl: url, capturedById: auth.session.user!.id },
+    update: { photoUrl: url, capturedById: auth.session.user!.id, capturedAt: new Date() },
   });
   return NextResponse.json({ ok: true, url });
 }

@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireStaff } from "@/lib/api-auth";
 
 /** CSV export (EXPORT-001..008): customers / leads / products / bookings. */
 export async function GET(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const type = req.nextUrl.searchParams.get("type") ?? "customers";
   const org = await db.organisation.findFirst();
   if (!org) return NextResponse.json({ error: "no org" }, { status: 500 });

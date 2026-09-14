@@ -21,6 +21,22 @@ function isRiderPrivate(pathname: string): boolean {
   return RIDER_PRIVATE.some((p) => pathname === p || pathname.startsWith(p + "/"));
 }
 
+/**
+ * 不需要登录会话的 API —— 名单必须显式、必须短，每一项都要说明它靠什么鉴权。
+ *
+ * 2026-09-14 审计实测：matcher 不含 /api 时，`curl /api/export?type=customers`
+ * 不带任何 Cookie 就能拿到全组织客户 CSV（姓名/电话/邮箱），商品导出还带成本价。
+ * 所以 API 层的默认改成**拒绝**，公开的在这里逐个列出来。
+ */
+const API_PUBLIC = [
+  "/api/webhooks", // Meta 回调：靠 x-hub-signature-256 校验（见 webhooks/whatsapp/route.ts）
+  "/api/storage",  // 资源托管：产品图/海报的 <img src>，公开页也会引用
+  "/api/cron",     // Vercel Cron：靠 CRON_SECRET Bearer，且**缺密钥即拒绝**（fail-closed）
+];
+function isApiPublic(pathname: string): boolean {
+  return API_PUBLIC.some((p) => matchesPrefix(pathname, p));
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isWorkshop = pathname.startsWith("/workshop");
@@ -31,6 +47,25 @@ export async function middleware(req: NextRequest) {
 
   // 1. Supabase Auth session. getUser() also refreshes tokens.
   const { response, user } = await updateSession(req);
+
+  // 2. API 层门禁（纵深防御的第一道；第二道在 src/lib/api-auth.ts，逐路由 requireStaff()）。
+  if (pathname.startsWith("/api")) {
+    if (isApiPublic(pathname)) {
+      response.headers.set("x-pathname", pathname);
+      return response;
+    }
+    if (!user) {
+      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+    }
+    // 骑手（CUSTOMER）不直接调 API：他们的数据走页面与 Server Action。
+    // 这里读的是 JWT claims，够不上"权威"（角色改动要重新登录才生效），
+    // 所以真正的判定仍在路由里的 requireStaff()——这一层只是让匿名请求连门都进不来。
+    if (((user.user_metadata?.role as string) ?? "") === "CUSTOMER") {
+      return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+    }
+    response.headers.set("x-pathname", pathname);
+    return response;
+  }
   if (user) {
     // —— 路由隔离矩阵（角色级；layout 层用 DB 权威数据兜底）——
     // JWT claims 由登录时 injectBizClaims 写入 user_metadata（orgId/branchId/role/userId/customerId）
@@ -107,5 +142,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/workshop/:path*", "/rider/:path*", "/mechanic-app/:path*"],
+  // ⚠️ /api/:path* 必须在这里：少了它，所有 API 路由都绕过 middleware（2026-09-14 审计实测）。
+  matcher: ["/workshop/:path*", "/rider/:path*", "/mechanic-app/:path*", "/api/:path*"],
 };

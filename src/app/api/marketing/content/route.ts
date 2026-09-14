@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSessionUser } from "@/lib/session-user";
+import { requireStaff } from "@/lib/api-auth";
 import { generateScriptCandidates, selectCandidate, discardBatch } from "@/modules/marketing/content";
 import { expandScript } from "@/modules/marketing/expand";
 import { renderScriptPoster } from "@/modules/marketing/render-poster";
@@ -13,16 +13,16 @@ import { db } from "@/lib/db";
  * makes the ceiling explicit instead of letting a request be cut off halfway with the
  * operator left guessing whether anything happened.
  *
- * Every branch requires a signed-in user: these endpoints spend real money.
+ * Every branch requires a signed-in **staff** user: these endpoints spend real money.
+ * (原来是 session.authenticated —— 只要求"已登录"，而骑手注册是开放的，等于把花钱的端点
+ *  向任何注册用户敞开；已统一到 requireStaff()。)
  */
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
-  const session = await getSessionUser();
-  if (!session.authenticated) {
-    return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
-  }
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
 
   let body: Record<string, unknown>;
   try {
@@ -133,8 +133,9 @@ export async function POST(req: NextRequest) {
 
 /** The recent batches, for the studio's history panel. */
 export async function GET() {
-  const session = await getSessionUser();
-  if (!session.authenticated) return NextResponse.json({ ok: false, error: "Not signed in" }, { status: 401 });
+  // 无参数的 GET，所以上面那轮批量插入（匹配带参签名）没覆盖到——留在这里显式补上。
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
 
   const rows = await db.contentScript.findMany({
     where: { source: "AI" },

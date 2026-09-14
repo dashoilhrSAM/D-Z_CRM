@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { generatePoster } from "@/modules/marketing/poster-gen";
+import { requireStaff } from "@/lib/api-auth";
 
 /** AI poster generation: requirements → branded SVG poster → storage + library. */
 export async function POST(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const body = await req.json();
   const title = String(body.title ?? "").trim();
   if (!title) return NextResponse.json({ ok: false, error: "title is required" }, { status: 400 });

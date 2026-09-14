@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
+import { requireStaff } from "@/lib/api-auth";
 
 /** 产品图上传：storageProvider.put（生产 Supabase dz-assets / 本地 ./storage），返回可用的 url 供 imageUrl 使用。 */
 export async function POST(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const org = await db.organisation.findFirst();
   if (!org) return NextResponse.json({ ok: false, error: "No organisation" });
   const form = await req.formData();
