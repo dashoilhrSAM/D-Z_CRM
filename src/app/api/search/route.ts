@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireStaff } from "@/lib/api-auth";
 
 /** Global search endpoint (§18): customers, motorcycles, jobs, products. */
 export async function GET(req: NextRequest) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const q = (req.nextUrl.searchParams.get("q") ?? "").trim().toLowerCase();
   if (!q) return NextResponse.json({ hits: [] });
   const hits: { type: string; label: string; sub: string; href: string }[] = [];

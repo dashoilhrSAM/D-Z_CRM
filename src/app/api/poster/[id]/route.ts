@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { generatePoster } from "@/modules/marketing/poster-gen";
+import { requireStaff } from "@/lib/api-auth";
 
 /** Delete a poster asset. */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const { id } = await ctx.params;
   await db.marketingAsset.delete({ where: { id } });
   return NextResponse.json({ ok: true });
@@ -11,6 +15,9 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 
 /** Regenerate an existing poster with new requirements (edit → regenerate). */
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const auth = await requireStaff();
+  if ("response" in auth) return auth.response;
+
   const { id } = await ctx.params;
   const asset = await db.marketingAsset.findUnique({ where: { id } });
   if (!asset) return NextResponse.json({ ok: false, error: "Poster not found" }, { status: 404 });

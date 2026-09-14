@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { seedOccasions, openWindowCount } from "@/modules/marketing/occasion-seed";
 import { db } from "@/lib/db";
+import { requireCronSecret } from "@/lib/api-auth";
 
 /**
  * Vercel Cron 入口：每月把马来西亚内容日历向前滚动。
@@ -21,13 +22,9 @@ import { db } from "@/lib/db";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== "Bearer " + secret) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  // fail-closed：密钥没配就是 503，不是"跳过校验照常执行"。
+  const denied = requireCronSecret(req);
+  if (denied) return denied;
   try {
     const now = new Date();
     const res = await seedOccasions(now);

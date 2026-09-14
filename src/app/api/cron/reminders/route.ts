@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendDueReminders } from "@/actions/reminders";
+import { requireCronSecret } from "@/lib/api-auth";
 
 /**
  * Vercel Cron 入口：每日发送到期/逾期服务提醒（§生产功能启用）。
@@ -9,13 +10,10 @@ import { sendDueReminders } from "@/actions/reminders";
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== "Bearer " + secret) {
-      return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  // fail-closed：密钥没配就是 503，不是"跳过校验照常群发"。
+  // 这是会给真实客户发 WhatsApp 的入口，旧的 `if (secret)` 写法在密钥缺失时等于公开端点。
+  const denied = requireCronSecret(req);
+  if (denied) return denied;
   try {
     const result = await sendDueReminders();
     return NextResponse.json(result);
