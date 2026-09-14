@@ -64,6 +64,20 @@ test("a booking with no package is quoted at check-in and charged the promised d
   await expect(card.getByTestId("quotation-total")).toContainText("RM" + (quotation.totalSen - snapshot!.savedSen) / 100);
   await expect(card.getByTestId("quotation-total")).not.toContainText("RM" + quotation.totalSen / 100);
 
+  // 2c. The counter sees the same promise. The staff screen used to quote the full price for a
+  //     job the customer had already been told was discounted — two numbers for one job.
+  await setPersona(ctx, "OWNER");
+  await page.goto(BASE_URL + "/workshop/jobs/" + jobId);
+  await dismissGuide(page);
+  await expect(page.getByTestId("ws-quotation-promo")).toContainText("RM" + snapshot!.savedSen / 100);
+  await expect(page.getByTestId("ws-quotation-total")).toContainText("RM" + (quotation.totalSen - snapshot!.savedSen) / 100);
+  await expect(page.getByTestId("ws-quotation-total")).not.toContainText("RM" + quotation.totalSen / 100);
+
+  // 2d. And so does the printed quotation the customer signs.
+  await page.goto(BASE_URL + "/quotation/" + jobId);
+  await expect(page.getByTestId("print-quotation-promo")).toContainText("RM" + snapshot!.savedSen / 100);
+  await expect(page.getByTestId("print-quotation-total")).toContainText("RM" + (quotation.totalSen - snapshot!.savedSen) / 100);
+
   // 3. Finish the job the usual way.
   await runMechanicInspection(page, jobId);
   await setPersona(ctx, "CUSTOMER");

@@ -8,6 +8,7 @@ import { formatRM } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/format";
 import { QuotationPrintActions } from "@/components/workshop/quotation-print-actions";
 import type { QuoteLine } from "@/modules/quotations/service";
+import { promisedPromoFor } from "@/modules/marketing/promo-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,10 @@ export default async function QuotationPrintPage({ params }: { params: Promise<{
   const partsSen = lines.filter((l) => l.kind === "PART").reduce((s, l) => s + l.lineTotalSen, 0);
   const labourSen = lines.filter((l) => l.kind !== "PART").reduce((s, l) => s + l.lineTotalSen, 0);
   const total = q?.totalSen ?? lines.reduce((s, l) => s + l.lineTotalSen, 0);
+  // The paper the customer signs has to carry the promotion they were promised — the same
+  // promise the rider card shows and the invoice will honour.
+  const promo = promisedPromoFor(detail.booking?.promoSnapshot, total);
+  const payableSen = Math.max(0, total - (promo?.discountSen ?? 0));
   const isRepair = detail.type === "REPAIR";
   const docNo = q ? "QUO-" + detail.jobNumber + "-" + q.revision : "QUO-" + detail.jobNumber;
   const statusLabel = q ? t(STATUS_KEY[q.status] ?? "pdf.pending", lang) : t("pdf.pending", lang);
@@ -115,7 +120,13 @@ export default async function QuotationPrintPage({ params }: { params: Promise<{
           <div className="w-56 space-y-1.5 text-sm">
             {partsSen > 0 && <div className="flex justify-between text-neutral-600"><span>{t("pdf.parts-sub", lang)}</span><span className="tabular-nums">{formatRM(partsSen)}</span></div>}
             {labourSen > 0 && <div className="flex justify-between text-neutral-600"><span>{t("pdf.labour-sub", lang)}</span><span className="tabular-nums">{formatRM(labourSen)}</span></div>}
-            <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-bold"><span>{t("pdf.total", lang)}</span><span className="tabular-nums">{formatRM(total)}</span></div>
+            {promo && (
+              <div data-testid="print-quotation-promo" className="flex justify-between text-emerald-700">
+                <span>{t("quotation.promo", lang)} · {promo.name}</span>
+                <span className="tabular-nums">−{formatRM(promo.discountSen)}</span>
+              </div>
+            )}
+            <div className="flex justify-between border-t border-neutral-200 pt-2 text-base font-bold"><span>{t("pdf.total", lang)}</span><span data-testid="print-quotation-total" className="tabular-nums">{formatRM(payableSen)}</span></div>
           </div>
         </div>
 

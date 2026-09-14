@@ -21,6 +21,7 @@ import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { getSessionUser } from "@/lib/session-user";
 import { loadAssignableStaff } from "@/lib/job-branch";
+import { promisedPromoFor } from "@/modules/marketing/promo-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -244,7 +245,12 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           {/* quotation (customer confirmation before start) */}
           <QuotationPanel
             jobId={detail.id}
-            quotation={detail.quotation ? { status: detail.quotation.status, revision: detail.quotation.revision, totalSen: detail.quotation.totalSen } : null}
+            quotation={detail.quotation ? {
+              status: detail.quotation.status,
+              revision: detail.quotation.revision,
+              totalSen: detail.quotation.totalSen,
+              promo: promisedPromoFor(detail.booking?.promoSnapshot, detail.quotation.totalSen),
+            } : null}
           />
 
           {/* invoice + payment (completed job; customer pays here) */}
