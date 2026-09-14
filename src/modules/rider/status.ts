@@ -1,6 +1,6 @@
 // Rider service status — full booking+job lifecycle timeline per motorcycle.
 import { db } from "@/lib/db";
-import { promoDiscountForBill, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
+import { promisedPromoFor } from "@/modules/marketing/promo-resolve";
 
 export type LifecycleStep =
   | "book_requested" | "book_confirmed" | "checked_in" | "in_service"
@@ -105,9 +105,7 @@ export async function getRiderStatus(customerId: string): Promise<BikeStatus[]> 
       // The quotation is the customer's second look at money (the first is the booking summary);
       // the promise itself lives on the booking, so show it here rather than letting the rider
       // approve a full price and only discover the discount on the invoice.
-      const snapshot = readPromoSnapshot(booking?.promoSnapshot);
-      const promisedSen = quotation ? promoDiscountForBill(snapshot, quotation.totalSen) : 0;
-      const promo = snapshot && promisedSen > 0 ? { name: snapshot.campaignName, discountSen: promisedSen } : null;
+      const promo = quotation ? promisedPromoFor(booking?.promoSnapshot, quotation.totalSen) : null;
       const { stepIndex, outcome } = resolveStep(booking?.status ?? null, job?.status ?? null);
       // quotation awaiting → show the quotation badge/card (pre-service step)
       const sub = quotation?.status === "PENDING" ? { kind: "quotation" as const } : subStatusOf(job?.status ?? null, pendingApprovals);

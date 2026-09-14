@@ -11,13 +11,23 @@ import { formatRM } from "@/lib/money";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 
-export interface JobQuotationDto { status: string; revision: number; totalSen: number }
+export interface JobQuotationDto {
+  status: string; revision: number; totalSen: number;
+  /**
+   * The promotion promised on these lines. The counter sees the same promise the rider
+   * approved — without it the staff screen quotes full price for a job the customer was
+   * already told is discounted.
+   */
+  promo?: { name: string; discountSen: number } | null;
+}
 
 /** Workshop job detail: quotation status + send / re-send button (customer confirms before start). */
 export function QuotationPanel({ jobId, quotation }: { jobId: string; quotation: JobQuotationDto | null }) {
   const router = useRouter();
   const lang = useLang();
   const [pending, start] = useTransition();
+  const promo = quotation?.promo ?? null;
+  const payableSen = quotation ? Math.max(0, quotation.totalSen - (promo?.discountSen ?? 0)) : 0;
 
   const send = () =>
     start(async () => {
@@ -40,6 +50,18 @@ export function QuotationPanel({ jobId, quotation }: { jobId: string; quotation:
             {quotation.status === "APPROVED" ? t("ws.job.quotation-approved", lang) : quotation.status === "REJECTED" ? t("ws.job.quotation-rejected", lang) : t("ws.job.quotation-pending", lang)}
           </div>
           <div className="mt-1 text-xs text-muted-foreground">{tpl("quotation.rev", lang, { n: quotation.revision })} · {formatRM(quotation.totalSen)}</div>
+          {promo && (
+            <>
+              <div data-testid="ws-quotation-promo" className="mt-1.5 flex justify-between gap-3 text-xs text-emerald-700 dark:text-emerald-300">
+                <span>{t("quotation.promo", lang)} · {promo.name}</span>
+                <span className="tabular-nums">−{formatRM(promo.discountSen)}</span>
+              </div>
+              <div className="mt-1 flex justify-between gap-3 text-sm font-semibold">
+                <span>{t("quotation.total", lang)}</span>
+                <span data-testid="ws-quotation-total" className="tabular-nums">{formatRM(payableSen)}</span>
+              </div>
+            </>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={send} disabled={pending}>
               {quotation.status === "REJECTED" ? t("ws.job.quotation-resend", lang) : t("ws.job.quotation-send", lang)}

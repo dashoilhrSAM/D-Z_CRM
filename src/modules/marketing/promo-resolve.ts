@@ -144,6 +144,20 @@ export function promoDiscountForBill(snapshot: PromoSnapshot | null | undefined,
   return Math.max(0, Math.min(snapshot.savedSen, Math.max(0, subtotalSen)));
 }
 
+/**
+ * The promotion a customer was promised, re-based onto the lines now being quoted.
+ *
+ * One definition for every surface that shows a quote — the rider's card, the workshop's
+ * quotation panel, and the printed quotation handed across the counter. Three hand-written
+ * copies of "snapshot + quote total → discount" is precisely how the rider and the counter
+ * end up quoting different money for the same job.
+ */
+export function promisedPromoFor(rawSnapshot: unknown, quoteTotalSen: number): { name: string; discountSen: number } | null {
+  const snapshot = readPromoSnapshot(rawSnapshot);
+  const discountSen = promoDiscountForBill(snapshot, quoteTotalSen);
+  return snapshot && discountSen > 0 ? { name: snapshot.campaignName, discountSen } : null;
+}
+
 function sumLines(lines: PricedLine[]): number {
   return lines.reduce((s, l) => s + Math.max(0, l.priceSen), 0);
 }

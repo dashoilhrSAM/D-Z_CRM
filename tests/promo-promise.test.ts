@@ -7,7 +7,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { promoDiscountForBill, rescalePromoSnapshot, type PromoSnapshot } from "@/modules/marketing/promo-resolve";
+import { promoDiscountForBill, promisedPromoFor, rescalePromoSnapshot, type PromoSnapshot } from "@/modules/marketing/promo-resolve";
 
 const snapshot = (over: Partial<PromoSnapshot> = {}): PromoSnapshot => ({
   campaignId: "c1",
@@ -44,6 +44,29 @@ describe("promoDiscountForBill", () => {
   });
 });
 
+describe("promisedPromoFor", () => {
+  it("names the campaign and the amount that comes off the quote", () => {
+    expect(promisedPromoFor(snapshot(), 12000)).toEqual({ name: "Hari Merdeka Promo", discountSen: 2400 });
+  });
+
+  it("is null when nothing was promised — no empty promotion row on the quote", () => {
+    expect(promisedPromoFor(null, 12000)).toBeNull();
+    expect(promisedPromoFor(undefined, 12000)).toBeNull();
+    expect(promisedPromoFor({}, 12000)).toBeNull();
+  });
+
+  it("is null rather than a RM0.00 row when the promise rounds to nothing", () => {
+    expect(promisedPromoFor(snapshot({ savedSen: 0 }), 12000)).toBeNull();
+    expect(promisedPromoFor(snapshot(), 0)).toBeNull();
+  });
+
+  it("never exceeds the quote it is shown on", () => {
+    // A quote that shrank (the counter swapped to a cheaper package) must not display a
+    // discount larger than the money being asked for.
+    expect(promisedPromoFor(snapshot({ savedSen: 5000 }), 1000)).toEqual({ name: "Hari Merdeka Promo", discountSen: 1000 });
+  });
+});
+
 describe("rescalePromoSnapshot", () => {
   it("keeps the promised percent and campaign, and follows the new quote", () => {
     expect(rescalePromoSnapshot(snapshot(), [{ description: "Basic Service", priceSen: 8000 }])).toEqual({
@@ -74,10 +97,26 @@ describe("the wiring", () => {
     expect(src, "the quote is where a package-less booking first sees money").toContain("promisePromoOnQuote");
   });
 
-  it("the rider's quotation shows the same promise the invoice charges", () => {
-    // Same rule on both sides: the price the customer approves is the price they pay.
-    const status = readFileSync(path.join(process.cwd(), "src/modules/rider/status.ts"), "utf8");
-    expect(status).toContain("promoDiscountForBill(snapshot, quotation.totalSen)");
+  it("every surface that shows a quote shows the same promise", () => {
+    // Same rule on every side: the price the customer approves is the price they pay, and the
+    // counter reads the same number. The workshop side used to quote the full price for a job
+    // the customer had already been told was discounted.
+    const surfaces = [
+      "src/modules/rider/status.ts", // the rider's quotation card
+      "src/app/workshop/jobs/[id]/page.tsx", // the counter's quotation panel
+      "src/app/quotation/[id]/page.tsx", // the printed quotation the customer signs
+    ];
+    for (const file of surfaces) {
+      const src = readFileSync(path.join(process.cwd(), file), "utf8");
+      expect(src, file + " must show the promised promotion").toContain("promisedPromoFor(");
+      // Hand-rolling "snapshot + quote total → discount" is how two surfaces drift apart.
+      expect(src, file + " must not re-derive the promise itself").not.toContain("promoDiscountForBill");
+    }
+  });
+
+  it("that promise is computed in exactly one place", () => {
+    const helper = readFileSync(path.join(process.cwd(), "src/modules/marketing/promo-resolve.ts"), "utf8");
+    expect(helper.split("export function promisedPromoFor").length - 1).toBe(1);
   });
 
   it("completion charges the promise, not a percentage of the bill", () => {
