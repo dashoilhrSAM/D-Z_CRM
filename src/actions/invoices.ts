@@ -7,28 +7,67 @@ import { scopedBranchId } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
 import { applyDiscount, parseDiscount, type DiscountRequest } from "@/modules/finance/invoice-discount";
 
+/**
+ * 收钱类操作的门禁：**身份 + 分行**，外加审计。
+ *
+ * 刻意**不加** FINANCE:edit 权限门槛 —— 因为 setInvoiceDiscount 上方那条注释记录着 owner 的决定：
+ * "Anyone who can take a payment can do this — the owner's decision — so the control is the
+ * audit trail rather than a permission."。这次只补真正缺失的东西，不动"谁可以收钱"这个业务决定。
+ *
+ * 此前缺的正是身份与分行：这批函数**一行会话检查都没有**，任何已登录员工都能把任意分店的发票
+ * 改成 PAID、或插入任意金额的收款（同一文件的 setInvoiceDiscount 却校验得对——同一个文件里
+ * 一半有一半没有，正是"逐处手写授权"的典型症状）。
+ * 若日后要收紧成"只有财务能收钱"：在矩阵里给角色开 FINANCE 权限后，这里加一行 can(...) 即可。
+ */
+async function requireMoneyWrite() {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user) return { error: "Not signed in as staff." as const };
+  return { session, scope: scopedBranchId(session) };
+}
+
 /** 批量结清发票：ISSUED → PAID，应收 payment → PAID。 */
 export async function settleInvoices(ids: string[]) {
   const list = ids.filter(Boolean);
   if (list.length === 0) return { ok: false as const, error: "No invoices selected" };
-  for (const id of list) {
-    const inv = await db.invoice.findUnique({ where: { id }, select: { id: true, status: true } });
-    if (!inv || inv.status === "PAID") continue;
+  const authz = await requireMoneyWrite();
+  if ("error" in authz) return { ok: false as const, error: authz.error };
+
+  const rows = await db.invoice.findMany({
+    where: { id: { in: list } },
+    select: { id: true, status: true, branchId: true },
+  });
+  // Strict branch isolation — the same rule the invoice list uses.
+  if (authz.scope && rows.some((r) => r.branchId !== authz.scope)) {
+    return { ok: false as const, error: "Some invoices belong to another branch." };
+  }
+
+  let settled = 0;
+  for (const inv of rows) {
+    if (inv.status === "PAID") continue;
     await db.$transaction([
       // 结清应收（含 PAY_LATER/PENDING），保留原 method（PAY_LATER 不计入「已收」口径，避免重复计收）
-      db.payment.updateMany({ where: { invoiceId: id, status: "PENDING" }, data: { status: "PAID" } }),
-      db.invoice.update({ where: { id }, data: { status: "PAID", paidAt: new Date() } }),
+      db.payment.updateMany({ where: { invoiceId: inv.id, status: "PENDING" }, data: { status: "PAID" } }),
+      db.invoice.update({ where: { id: inv.id }, data: { status: "PAID", paidAt: new Date() } }),
     ]);
+    settled++;
+    await audit({
+      organisationId: authz.session.orgId, branchId: inv.branchId, userId: authz.session.user!.id,
+      action: "INVOICE_SETTLED", entity: "Invoice", entityId: inv.id, after: { status: "PAID" },
+    });
   }
   revalidatePath("/workshop/finance/invoices");
   revalidatePath("/rider/invoices");
-  return { ok: true as const, settled: list.length };
+  // 返回**实际结清数**（旧版返回请求数，把"本来就已经 PAID"的也算进去了）
+  return { ok: true as const, settled };
 }
 
 /** Split payment：为发票添加一笔收款（部分/全额）；累计满额自动 PAID。 */
 export async function addInvoicePayment(invoiceId: string, amountSen: number, method: string) {
-  const inv = await db.invoice.findUnique({ where: { id: invoiceId }, select: { id: true, status: true, totalSen: true } });
+  const authz = await requireMoneyWrite();
+  if ("error" in authz) return { ok: false as const, error: authz.error };
+  const inv = await db.invoice.findUnique({ where: { id: invoiceId }, select: { id: true, status: true, totalSen: true, branchId: true } });
   if (!inv || inv.status === "PAID") return { ok: false as const, error: "Invoice not found or already paid" };
+  if (authz.scope && inv.branchId !== authz.scope) return { ok: false as const, error: "This invoice belongs to another branch." };
   if (amountSen <= 0) return { ok: false as const, error: "Invalid amount" };
 
   // 录入真实收款（PAID）

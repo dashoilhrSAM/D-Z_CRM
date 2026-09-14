@@ -11,6 +11,8 @@ import { quotationService } from "@/modules/quotations/service";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { audit } from "@/lib/auth/audit";
+import { can, type PermissionAction } from "@/lib/auth/permissions";
+import { canManageTarget, canAssignRole, canToggleActive, canResetPassword, VALID_ROLES, type StaffActor, type StaffTarget } from "@/lib/auth/staff-policy";
 import { scopedBranchId } from "@/lib/branch-scope";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { createClient } from "@supabase/supabase-js";
@@ -326,11 +328,51 @@ export async function addAiRecommendation(input: {
   return { ok: true, id: (r as { id: string }).id };
 }
 
-const STAFF_MANAGER_ROLES = ["SUPER_ADMIN", "OWNER", "HEAD_OFFICE_ADMIN", "MANAGER", "MECHANIC"];
+/**
+ * 员工管理的门禁：走**既有的权限矩阵**（src/lib/auth/permissions.ts 的 USERS 模块），不再手写角色清单。
+ *
+ * 旧写法是 `STAFF_MANAGER_ROLES = [..., "MECHANIC"]` —— 与权限矩阵同一件事的第二处定义，
+ * 而矩阵里 MECHANIC 根本没有 USERS 权限（defaultAllowed 返回 false）。两者不一致的后果：
+ * 机修也过得了这道门，门后又直接 `data.role = input.role` 落库、没有白名单、没有目标分行校验。
+ * 现在改角色/停用/重置密码都问矩阵——而矩阵是可以在 Developer 设置里改的（DB Permission 行优先），
+ * 于是"谁能管员工"重新变成业务可配置的事，而不是散在源码里的一个数组。
+ */
+async function requireStaffManager(action: Extract<PermissionAction, "create" | "edit" | "delete">) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user) throw new Error("No permission to manage staff");
+  const allowed = await can(
+    { id: session.user.id, role: session.role as never, organisationId: session.orgId },
+    "USERS",
+    action,
+  );
+  if (!allowed) throw new Error("No permission to manage staff");
+  return session;
+}
+
+const actorOf = (session: Awaited<ReturnType<typeof getSessionUser>>): StaffActor => ({
+  userId: session.user!.id,
+  role: session.role,
+  branchId: session.branchId,
+});
+
+/** 取目标账号的 role/branchId —— 判定"能不能动这个人"必须看这两列，不能只看 id 存在。 */
+async function loadStaffTarget(userId: string): Promise<StaffTarget & { active: boolean; authId: string | null; name: string }> {
+  const t = await db.user.findUnique({
+    where: { id: userId },
+    select: { id: true, role: true, branchId: true, active: true, authId: true, name: true },
+  });
+  if (!t) throw new Error("Staff not found");
+  return t;
+}
+
+function assertVerdict(v: { ok: true } | { ok: false; reason: string }) {
+  if (!v.ok) throw new Error(v.reason);
+}
 
 export async function createStaff(input: { name: string; role: string; phone?: string; email?: string; password?: string }) {
-  const session = await getSessionUser();
-  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to manage staff");
+  const session = await requireStaffManager("create");
+  // 新建也要过"角色高度"这关：分行级不能凭空造出一个 org 级账号（那等于立刻多一个 OWNER）。
+  assertVerdict(canAssignRole(actorOf(session), null, input.role));
   const org = await db.organisation.findFirst();
   // 分行归属：优先创建者所在分行（branch 级 manager/mechanic 建到本分行）；org 级无分支回退主店
   const branch = (session.branchId ? await db.branch.findUnique({ where: { id: session.branchId } }) : null)
@@ -358,7 +400,7 @@ export async function createStaff(input: { name: string; role: string; phone?: s
       organisationId: org!.id,
       branchId: branch?.id,
       name: input.name.trim(),
-      role: input.role as never,
+      role: input.role as never, // 已由 canAssignRole 校验：合法角色，且不高于调用者能授予的高度
       phone: input.phone || null,
       email: input.email || null,
       active: true,
@@ -370,38 +412,63 @@ export async function createStaff(input: { name: string; role: string; phone?: s
 }
 
 export async function toggleStaffActive(userId: string) {
-  const u = await db.user.findUnique({ where: { id: userId }, select: { active: true } });
-  await db.user.update({ where: { id: userId }, data: { active: !u?.active } });
+  // 这个函数此前**一行会话检查都没有**：任何在职员工都能停用任意账号（包括 OWNER）。
+  const session = await requireStaffManager("edit");
+  const target = await loadStaffTarget(userId);
+  assertVerdict(canToggleActive(actorOf(session), target));
+  await db.user.update({ where: { id: userId }, data: { active: !target.active } });
+  await audit({
+    organisationId: session.orgId, branchId: target.branchId, userId: session.user!.id,
+    action: "STAFF_ACTIVE_TOGGLE", entity: "User", entityId: userId,
+    before: { active: target.active }, after: { active: !target.active },
+  });
   revalidatePath("/", "layout");
-  return { ok: true, active: !u?.active };
+  return { ok: true, active: !target.active };
 }
 export async function updateStaff(userId: string, input: { name?: string; role?: string; phone?: string; email?: string; active?: boolean }) {
-  const session = await getSessionUser();
-  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to edit staff");
-  const u = await db.user.findUnique({ where: { id: userId }, select: { id: true } });
-  if (!u) throw new Error("Staff not found");
+  const session = await requireStaffManager("edit");
+  const target = await loadStaffTarget(userId);
+  const actor = actorOf(session);
+  // 分行级只能改本店的人，且碰不到总部账号。
+  assertVerdict(canManageTarget(actor, target));
+  // 角色变更单独过一道"高度"判定（不能改自己、分行级造不出 org 级）。
+  if (input.role !== undefined) assertVerdict(canAssignRole(actor, target, input.role));
+  if (input.active !== undefined) assertVerdict(canToggleActive(actor, target));
+
   const data: Record<string, unknown> = {};
   if (input.name !== undefined) data.name = input.name.trim();
-  if (input.role !== undefined) data.role = input.role as never;
+  if (input.role !== undefined) data.role = input.role as never; // 已由 canAssignRole 校验
   if (input.phone !== undefined) data.phone = input.phone || null;
   if (input.email !== undefined) data.email = input.email || null;
   if (input.active !== undefined) data.active = input.active;
   await db.user.update({ where: { id: userId }, data });
+  await audit({
+    organisationId: session.orgId, branchId: target.branchId, userId: session.user!.id,
+    action: "STAFF_UPDATE", entity: "User", entityId: userId,
+    before: { name: target.name, role: target.role, branchId: target.branchId, active: target.active },
+    after: { name: data.name ?? target.name, role: data.role ?? target.role, active: data.active ?? target.active },
+  });
   revalidatePath("/", "layout");
   return { ok: true };
 }
 
 /** 重置某员工登录密码（用 Supabase admin，仅支持有 authId 的账号）。密码只能重置，不能明文查看（存的是哈希）。 */
 export async function resetStaffPassword(userId: string, password: string) {
-  const session = await getSessionUser();
-  if (session.kind !== "staff" || !session.user || !STAFF_MANAGER_ROLES.includes(session.role)) throw new Error("No permission to reset password");
+  const session = await requireStaffManager("edit");
   if (password.length < 6) throw new Error("Password must be at least 6 characters");
-  const u = await db.user.findUnique({ where: { id: userId }, select: { id: true, authId: true } });
-  if (!u) throw new Error("Staff not found");
+  const target = await loadStaffTarget(userId);
+  // 重置别人的密码 = 用别人的身份登录：分行级不能碰总部账号。
+  assertVerdict(canResetPassword(actorOf(session), target));
+  const u = { id: target.id, authId: target.authId };
   if (!u.authId) throw new Error("This staff has no login account yet");
   const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } });
   const { error } = await supabase.auth.admin.updateUserById(u.authId, { password });
   if (error) throw new Error("Failed to reset password: " + error.message);
+  await audit({
+    organisationId: session.orgId, branchId: target.branchId, userId: session.user!.id,
+    action: "STAFF_PASSWORD_RESET", entity: "User", entityId: userId,
+    after: { resetBy: session.user!.id, targetRole: target.role },
+  });
   revalidatePath("/", "layout");
   return { ok: true };
 }
