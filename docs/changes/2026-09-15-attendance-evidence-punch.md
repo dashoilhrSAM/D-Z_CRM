@@ -75,7 +75,34 @@ owner 给的真实地址：**B-10-7, 3 Two Square, 2, Jalan 19/1, Seksyen 19, 46
 （分支未合并）。合并部署后构建期 schema 同步会补上列，届时在 `/workshop/settings` 里填一次即可
 （`set-branch-geofence.ts` 走的是本地 sqlite client，连不上 PG，已在脚本头部写明）。
 
+### 主店地址改成真实地址（同日，owner 确认「改」）
+
+真实地址：`B-10-7, 3 Two Square, 2, Jalan 19/1, Seksyen 19, 46300 Petaling Jaya, Selangor`，城市 `Petaling Jaya`。
+改了**三处**，只改数据库行是不够的：
+
+1. **种子** `src/lib/seed-core.ts`：主店地址原来是**随机拼出来的**占位数据
+   （`No. <随机数>, Jalan <城市> Utama`，所以本地和线上各是 No. 12 / No. 62）。
+   现在用常量 `MAIN_BRANCH_ADDRESS`，城市改 Petaling Jaya —— 否则下次重建库又变回假的。
+2. **本地演示库**（dev.db，:3002 用）：已更新。
+3. **生产库**（PostgREST PATCH 主店那一行 `cmt0vj3440002i86ahwluaslw`）：已更新并通过 `return=representation` 读回确认。
+
+顺带发现并修掉两处「地址在说谎」的地方：
+
+- `src/app/workshop/inventory/stock/page.tsx` 的副标题把分行名**写死成 Kuala Lumpur**
+  （页面本来就查了 `branch`）——门店在 PJ，这句话会一直显示错的，改成 `branch?.city`。
+- `src/lib/constants.ts` 的 `ORG_NAME` 与 `BRANCHES` **零引用**（唯一同名命中是权限矩阵里的模块名），
+  而 `BRANCHES` 宣称有三家店在 Kuala Lumpur / Shah Alam / Johor Bahru —— 与真实情况不符，删掉。
+  真的分行只在 DB 的 `Branch` 表 + 种子里。
+
+验证：tsc 0；vitest 496；build 通过；e2e 全量 51 通过（新种子地址生效），
+改完页面后再跑受影响的 smoke + 考勤 21 通过。
+
+（记录一次环境抖动：其中一轮 e2e 的 global-setup 在 seed 步骤失败，报 `main.Organisation does not exist` ——
+那是 migrate 与 seed 之间数据库文件被重新创建的竞态，手工按 global-setup 的步骤重跑两次都成功，
+紧接着重跑 spec 也全绿。**不是**本次改动引起，但再遇到时先按这个顺序手工复现，再怀疑代码。）
+
 ## 影响
+
 - 打卡不再只是一行时间：每次打卡都有照片、位置、距离和结论，且**结论会如实告诉本人**
   （越界/低精度/无定位/照片重复 → 提示"待主管确认"）。
 - 「谁在店里」有了可核对的依据：面板上每一笔都能点开看照片（走鉴权路由，本人与管理者可见）。
