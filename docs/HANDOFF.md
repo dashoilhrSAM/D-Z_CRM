@@ -1,4 +1,4 @@
-# HANDOFF — D&Z Platform（2026-09-15 10:29）
+# HANDOFF — D&Z Platform（2026-09-15，最新刷新见 git log）
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
@@ -8,17 +8,27 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 上有三条「已推送待 owner review」的修复分支，另有本地压测分支**：全项目只读审计（4 路扫描 + 自验）找到一组真实缺口，已按批次做成可独立 review 的三个分支——`fix/api-auth-gate`（API 层补门禁，16/20 路由此前零校验）、`fix/write-path-authorization`（写路径授权：员工提权 / 发票 / 薪资）、`fix/concurrency-atomicity`（时段容量 + 库存原子化）。三支互不依赖、可分别合；**合之前 main 的行为仍与审计结果一致（缺口仍在）**。压测工具链（`scripts/perf/*`、`scripts/k6/branch.js`、`docs/PERF_*`）在本地分支 `perf/kl-branch-stress-test`，**owner 明确要求不推送**。main 基线实测全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
+**审计三批修复已全部合并进 main（PR #25 `fix/api-auth-gate` / #26 `fix/write-path-authorization` / #27 `fix/concurrency-atomicity`，origin/main = c731d61），三条远端分支已验过后删除；本轮新开一条待审分支 `fix/job-number-sequence`（工单号序列：字符串当数字用 + 并发抢号，commit 4cbad91）**。压测工具链（`scripts/perf/*`、`scripts/k6/branch.js`、`docs/PERF_*`）在本地分支 `perf/kl-branch-stress-test`，**owner 明确要求不推送**。main 基线实测全绿：tsc 0 / vitest **470**（37 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**（本分支 486 + 全套 e2e 49 全过）。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：PR #23/#24 同步与合并 → **KL 分店压测（D1–D2）** → **全项目只读扫描（4 路并行）** → **三批安全与一致性修复并分别推送待审** → 本次 session-pack）
+- 本会话 ID：session-c5af9e3c-d22c-49a6-8fde-3c246dbfe102（「继续 D&Z」；本轮做了：三支审计修复 **已合并**验证 + 分支清理 → 基线复跑（470）→ **批次 3b 工单号序列修复** `fix/job-number-sequence` 推送待审 → HANDOFF 刷新）
+- 上一会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」：PR #23/#24 合并 → KL 分店压测 D1–D2 → 全项目只读扫描（4 路并行）→ 三批安全与一致性修复并分别推送待审）
 - 上一会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」：e2e 失败修复 / 完工消息净额 / 促销「报价即承诺」/ 首页优惠卡改落 News 页）
 - 上一次打包：2026-09-14 09:54（session-pack，docs-only 提交 `b4dcbb4`）
 - 本次打包：2026-09-15 10:29（session-pack）
 - 续接口令：继续 D&Z
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
+- **工单号是一段序列，不是一次字符串排序（分支 `fix/job-number-sequence` 待审，commit 4cbad91）**：
+  工单号此前有**两份**各自 max+1 的实现（job repository 与 booking check-in），两份都把 jobNumber 当
+  **字符串**排序取「最大号」。两个后果都在隔离 perf.db 上确定性复现（`repro-races.ts --scenario D`）：
+  ① 字符串序里 DZ9999 > DZ10000，所以四位数用尽后每次建单都发已存在的号、撞 `jobNumber @unique`，
+  **永久卡死且不自愈**；② 混进别的格式（压测数据 PERF900299）时 `replace(/\D/g,"")` 会把前缀剥掉，
+  算出 DZ900300 这种凭空跳号（改前实测 nextJobNumber() 就返回 DZ900300）。改法：新增
+  `src/lib/job-number.ts` 作为**唯一定义**（严格只认 DZ<数字>、按数值取最大），两条建单路径都改调它，
+  并各自包上 `retryOnJobNumberConflict`（编号是序列、没有条件更新可写，所以由唯一约束当裁判）。
+  反向验证：把三个源文件 stash 回 origin/main，`tests/job-number.test.ts` 的 3 条源码守卫全部失败。
 - **并发一致性：时段容量 + 库存原子化（分支 `fix/concurrency-atomicity` 待审，commit 0a5aeb7）**：
   先复现再修。复现脚本 `scripts/perf/repro-races.ts`（跑隔离 perf.db）改前实测：容量 3 的时段上
   **10 个并发预约全部成功（超卖 7 单）**、取消后 bookedCount 仍是 1（名额永久占用）；
@@ -71,10 +81,9 @@
 - **指派机械师（PR #16，已进 main）**：下拉按工单分行过滤（此前列全部分行，选跨行的必被拒）+ 修裁切（共享 Select primitive 受益）。
 
 ## 下一步（按优先级）
-1. **三支待审修复要把关（最优先）**：`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity`，互不依赖可分别合。
-   合完逐条 `git merge-base --is-ancestor <branch> main` 验过再删本地 + 远端分支（删前先验是既定纪律）。
-   **注意：这三支没合之前，main 上那些缺口仍然存在**（审计结论与当前 main 行为一致）。
-2. **批次 3b：工单号并发**（`jobs.repository.ts` 与 `bookings/service.ts` 各一份 max+1 副本）——收敛成一处 + 撞唯一约束时重试整笔建单，或上 DB 序列。
+1. **`fix/job-number-sequence` 待 owner review（最优先）**：工单号序列（见完成进度首条）。合并后按老规矩
+   先 `git merge-base --is-ancestor <branch> main` 验过再删分支。
+2. ~~三支审计修复~~ **已全部合并（PR #25/#26/#27）**；~~批次 3b 工单号并发~~ **已做（本分支）**。
 3. **批次 4：rider actions 的归属校验（IDOR）**：`src/actions/rider.ts` 的 `updateProfile`/`markNotificationsRead`/`submitReview`/`respondQuotation` 信任客户端传入的 customerId/quotationId；正确范式 `getRiderCustomer()` + 按 customerId 收窄（`rider-profile.ts` 已做对）。攻击链：开放注册骑手 → 从 `/api/search` 拿任意客户 id → 改他人资料/代他人批单。
 4. **批次 5：dashboard 聚合下推**——实测 6.0x 增长的大头：`stockStatus()` 被 `criticalStockCount`/`deadStockValue` **各调一次**（同一份全量商品跑两遍）、`listProducts` 每个商品带 200 条流水、复购率把全量客户的全部工单拉进内存。三处小改，收益最大。
 5. **批次 6：前端三件**——zxing 469KB 静态进 54/89 路由首屏（一行 dynamic import）、错误边界 0 个（`error.tsx` 全缺）、假 loading（固定 500/800ms 遮罩 + 26 页无 `loading.tsx`）。
@@ -87,13 +96,13 @@
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
-- `pnpm test`：**main 上 439 个通过（34 文件）**；三个待审分支各自更高：`fix/api-auth-gate` 449（+10 API 门禁守卫）· `fix/write-path-authorization` 464（+15 策略测试）· `fix/concurrency-atomicity` 445（+6 并发形态守卫）。每条守卫都做过**反向验证**（在 origin/main 上必须失败）
+- `pnpm test`：**main 上 470 个通过（37 文件）**；待审分支 `fix/job-number-sequence` 486（38 文件，+16 工单号守卫）。每条守卫都做过**反向验证**（在 origin/main 上必须失败）
 - `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
 - `pnpm exec playwright test --project=desktop-chromium`：**49 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
 - 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
 - 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额；金额算法在 `promoDiscountForBill`，各界面取数统一走 `promisedPromoFor`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「三个报价界面（骑手卡/工单面板/打印报价单）必须用同一函数、不得自己再算」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 三个界面的可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
-- 并发复现（动并发相关代码时跑）：`DATABASE_URL="file:./perf.db" pnpm exec tsx scripts/perf/repro-races.ts` —— 跑在隔离 perf.db、自带 `perf_repro` 前缀可清理；A/C 两个场景改前必须复现、改后必须通过
+- 并发复现（动并发相关代码时跑）：`DATABASE_URL="file:./perf.db" pnpm exec tsx scripts/perf/repro-races.ts` —— 跑在隔离 perf.db、自带 `perf_repro` 前缀可清理；A/C 两个场景改前必须复现、改后必须通过，D 场景（工单号）在四位数用尽的既有数据上必须给出 DZ10001
 
 ## 服务与恢复
 - workshop :3002：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
@@ -103,10 +112,10 @@
 - 生产：https://d-z-crm.vercel.app （push main 自动部署）
 
 ## git 状态
-- main = origin/main = **625e9da**（PR #24 已合并；本地 main 领先若干条**未推送**的 docs 提交——HANDOFF 刷新一律用这个方式，不 push main）
-- **远端分支（三条待审）**：`fix/api-auth-gate`（eac73f4）· `fix/write-path-authorization`（e093f63）· `fix/concurrency-atomicity`（0a5aeb7），加 `main`
-- **本地分支**：`main`（当前所在）· `perf/kl-branch-stress-test`（5c73b08，压测工具链，**owner 要求不推送**）· `feat/workshop-module-setup`（a614dc0，未推送，待定）
-- ⚠️ 本节的 HANDOFF 刷新是一条**本地 main 上的未推送 docs 提交**（沿用 `fe2f0d7` 的先例：不 push main，随下一条 feature 分支一起送审）
+- main = **c731d61**（= origin/main，PR #25/#26/#27 均已合并）；本地 main 另有两条**未推送**的 docs 提交（随本分支一并送审）
+- **远端分支（待审）**：`fix/job-number-sequence`（4cbad91），加 `main`
+- **本地分支**：`fix/job-number-sequence`（当前所在）· `main` · `perf/kl-branch-stress-test`（5c73b08，压测工具链，**owner 要求不推送**）· `feat/workshop-module-setup`（a614dc0，未推送，待定）
+- 已合并的三条审计分支：本地与远端都已删除（删前逐条 `git merge-base --is-ancestor` 验过）
 - 未提交：0（tracked 干净；工作区只有 docs/ACCEPTANCE_REPORT.html 等历史未跟踪产物）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
 
@@ -150,9 +159,9 @@
 ## 新会话头 10 分钟
 1. **探活**：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login`（另 :3003 / :3102）；挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个文件**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **查 git**：`git fetch --prune`——**有三条待审分支**（`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity`）。逐条看 owner 合没合；合了就 `git checkout main && git pull --ff-only`，再用 `git merge-base --is-ancestor <branch> main` **验过后**删掉本地 + 远端已合分支
-4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**439**，34 文件）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）
-5. **挑下一步**：优先「下一步 1–3」（把关三支待审 → 工单号并发 → rider IDOR）；**动手前先读本文件「关键决策与约定」里 2026-09-14 的三条**（API 门禁 / 授权分层 / 并发原子化）——那三条是这轮审计的结论固化，照着做可以避免重复发现。新改动写 `pnpm new:change <名字>`，守卫必须做反向验证
+3. **查 git**：`git fetch --prune`——**待审分支只有 `fix/job-number-sequence`**（审计三支已于 PR #25/#26/#27 合并、分支已删）。owner 合了就 `git checkout main && git pull --ff-only`，再用 `git merge-base --is-ancestor <branch> main` **验过后**删掉本地 + 远端已合分支
+4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**470**，37 文件；含本分支 486）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）
+5. **挑下一步**：优先「下一步 1–2」（把关工单号分支 → rider IDOR 批次 4）；**动手前先读本文件「关键决策与约定」里 2026-09-14 的三条**（API 门禁 / 授权分层 / 并发原子化）——那三条是这轮审计的结论固化，照着做可以避免重复发现。新改动写 `pnpm new:change <名字>`，守卫必须做反向验证
 
 ---
 
