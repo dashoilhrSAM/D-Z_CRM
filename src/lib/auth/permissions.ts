@@ -1,8 +1,11 @@
 import "server-only";
 import { db } from "@/lib/db";
 import type { User } from "@prisma/client";
+import { ROLE_MODULES, type PermissionAction } from "@/lib/auth/role-modules";
 
-export type PermissionAction = "view" | "create" | "edit" | "delete" | "export";
+// 动作类型与默认矩阵都定义在 role-modules.ts（客户端侧边栏也要读同一份，
+// 副本会漂移——2026-09-15 就漂移过一次，考勤在柜台同事的导航里消失了）。
+export type { PermissionAction } from "@/lib/auth/role-modules";
 
 export const MODULES = [
   "DASHBOARD", "LEADS", "CUSTOMERS", "MOTORCYCLES", "PIPELINE", "TEST_RIDES",
@@ -12,134 +15,13 @@ export const MODULES = [
   "FINANCE", "MESSAGING", "AI", "ATTENDANCE",
 ] as const;
 
-// Built-in default matrix (role -> module -> actions). "*" = all modules.
-// Custom Permission rows in the DB override these per (role, module).
-const DEFAULT_MATRIX: Record<string, Record<string, PermissionAction[]>> = {
-  SUPER_ADMIN: { "*": ["view", "create", "edit", "delete", "export"] },
-  OWNER: { "*": ["view", "create", "edit", "delete", "export"] },
-  HEAD_OFFICE_ADMIN: { "*": ["view", "create", "edit", "delete", "export"] },
-  MANAGER: {
-    "*": ["view", "create", "edit", "export"],
-    FINANCE: ["view", "export"],
-    SETTINGS: ["view", "edit"],
-    USERS: ["view", "create", "edit"],
-  },
-  SALES_MANAGER: {
-    "*": ["view", "export"],
-    // HRM: 销售团队的考勤（本店的更正由销售经理批）
-    ATTENDANCE: ["view", "create", "edit"],
-    LEADS: ["view", "create", "edit", "delete", "export"],
-    PIPELINE: ["view", "create", "edit"],
-    TEST_RIDES: ["view", "create", "edit"],
-    TASKS: ["view", "create", "edit", "delete"],
-    CUSTOMERS: ["view", "create", "edit"],
-    ANALYTICS: ["view", "export"],
-    REPORTS: ["view", "export"],
-  },
-  SALES_ADVISOR: {
-    // HRM: 销售顾问自己打卡（拍照 + 定位）
-    ATTENDANCE: ["view", "create"],
-    LEADS: ["view", "create", "edit"],
-    PIPELINE: ["view", "create", "edit"],
-    TEST_RIDES: ["view", "create", "edit"],
-    TASKS: ["view", "create", "edit"],
-    CUSTOMERS: ["view", "create", "edit"],
-    MOTORCYCLES: ["view", "create", "edit"],
-    DASHBOARD: ["view"],
-  },
-  SERVICE_MANAGER: {
-    "*": ["view", "export"],
-    ATTENDANCE: ["view", "create", "edit"],
-    BOOKINGS: ["view", "create", "edit", "delete"],
-    WORKSHOP: ["view", "create", "edit"],
-    JOB_CARDS: ["view", "create", "edit", "delete"],
-    TECHNICIANS: ["view", "create", "edit"],
-    REMINDERS: ["view", "create", "edit"],
-    PARTS: ["view"],
-    ANALYTICS: ["view", "export"],
-  },
-  SERVICE_ADVISOR: {
-    ATTENDANCE: ["view", "create"],
-    BOOKINGS: ["view", "create", "edit"],
-    WORKSHOP: ["view", "create", "edit"],
-    JOB_CARDS: ["view", "create", "edit"],
-    CUSTOMERS: ["view", "create", "edit"],
-    MOTORCYCLES: ["view", "create", "edit"],
-    REMINDERS: ["view", "edit"],
-    DASHBOARD: ["view"],
-  },
-  COUNTER_STAFF: {
-    DASHBOARD: ["view"],
-    ATTENDANCE: ["view", "create"],
-    CUSTOMERS: ["view", "create", "edit"],
-    BOOKINGS: ["view", "create", "edit"],
-    JOB_CARDS: ["view", "create", "edit"],
-    WORKSHOP: ["view"],
-    INVENTORY: ["view"],
-    AI: ["view"],
-  },
-  CUSTOMER_SERVICE: {
-    DASHBOARD: ["view"],
-    ATTENDANCE: ["view", "create"],
-    CUSTOMERS: ["view", "create", "edit"],
-    BOOKINGS: ["view", "create", "edit"],
-    REMINDERS: ["view", "create", "edit"],
-    TASKS: ["view", "create", "edit"],
-    MESSAGING: ["view", "create"],
-    LOYALTY: ["view", "edit"],
-  },
-  MECHANIC: {
-    DASHBOARD: ["view"],
-    ATTENDANCE: ["view", "create"],
-    WORKSHOP: ["view", "edit"],
-    JOB_CARDS: ["view", "edit"],
-    TECHNICIANS: ["view"],
-    INVENTORY: ["view"],
-    PARTS: ["view"],
-  },
-  PARTS_MANAGER: {
-    "*": ["view", "export"],
-    ATTENDANCE: ["view", "create"],
-    PARTS: ["view", "create", "edit", "delete"],
-    INVENTORY: ["view", "create", "edit", "delete", "export"],
-    BRANCHES: ["view"],
-    ANALYTICS: ["view", "export"],
-  },
-  INVENTORY: {
-    ATTENDANCE: ["view", "create"],
-    PARTS: ["view", "create", "edit"],
-    INVENTORY: ["view", "create", "edit", "export"],
-    DASHBOARD: ["view"],
-  },
-  MARKETING: {
-    ATTENDANCE: ["view", "create"],
-    CAMPAIGNS: ["view", "create", "edit", "delete"],
-    LOYALTY: ["view", "edit"],
-    REFERRALS: ["view"],
-    CUSTOMERS: ["view"],
-    ANALYTICS: ["view", "export"],
-    AI: ["view"],
-    DASHBOARD: ["view"],
-  },
-  ACCOUNTING: {
-    ATTENDANCE: ["view", "create"],
-    FINANCE: ["view", "create", "edit", "export"],
-    REPORTS: ["view", "export"],
-    ANALYTICS: ["view", "export"],
-    INVOICES: ["view", "create", "edit"],
-    DASHBOARD: ["view"],
-  },
-  AUDITOR: {
-    "*": ["view", "export"],
-    USERS: ["view"],
-    SETTINGS: ["view"],
-  },
-};
+// 默认矩阵来自 role-modules.ts（唯一定义）。DB 里的自定义 Permission 行按 (role, module) 覆盖它。
+
 
 export function defaultAllowed(role: string, module: string, action: PermissionAction): boolean {
-  const wildcard = DEFAULT_MATRIX[role]?.["*"];
+  const wildcard = ROLE_MODULES[role]?.["*"];
   if (wildcard) return wildcard.includes(action);
-  return DEFAULT_MATRIX[role]?.[module]?.includes(action) ?? false;
+  return ROLE_MODULES[role]?.[module]?.includes(action) ?? false;
 }
 
 /** Role-based access check. DB Permission rows (custom roles) override defaults. */

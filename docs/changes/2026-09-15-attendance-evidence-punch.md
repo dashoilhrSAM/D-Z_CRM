@@ -101,8 +101,31 @@ owner 给的真实地址：**B-10-7, 3 Two Square, 2, Jalan 19/1, Seksyen 19, 46
 那是 migrate 与 seed 之间数据库文件被重新创建的竞态，手工按 global-setup 的步骤重跑两次都成功，
 紧接着重跑 spec 也全绿。**不是**本次改动引起，但再遇到时先按这个顺序手工复现，再怀疑代码。）
 
-## 影响
+### 修掉一个我自己引入的 bug：柜台同事在侧边栏看不到考勤（同日）
 
+在本地用真浏览器走查时发现：**柜台员工（COUNTER_STAFF）的侧边栏里没有「考勤」**——
+页面本身能打开（手输 URL 就能打卡），但没人找得到。根因不在考勤，而在一处**老的双份实现**：
+
+- `src/lib/nav-registry.ts` 里手抄了一份「角色 → 可 view 的模块」矩阵（注释写着「与 permissions.ts 一致」），
+  因为它被 `"use client"` 的 sidebar 引用，**不能** import 带 `server-only`+`db` 的 permissions.ts；
+- 我给考勤加权限时只改了 `permissions.ts`（`MODULES` + 各角色 `ATTENDANCE`），抄件没跟；
+- 于是 `moduleAllowed(role, "ATTENDANCE")` 对非通配角色恒为 false → 侧边栏把考勤整条过滤掉。
+  OWNER 是 `"*"`，所以我看自己测的时候一切正常——**这类 bug 只在非通配角色身上出现**。
+
+修法不是给抄件补一行（那只会等下一次漂移），而是**把矩阵收敛成一份**：
+
+- 新增 `src/lib/auth/role-modules.ts`（纯数据、无依赖、可进客户端 bundle）持有 `ROLE_MODULES`；
+- `permissions.ts` 与 `nav-registry.ts` 都读它，手抄的 `DEFAULT_VIEW_MATRIX` 删除；
+- `PermissionAction` 类型也移到那里并由 permissions.ts 转出（两个 action 文件原本从 permissions 引它）。
+
+新增守卫 `tests/role-matrix.test.ts`（4 例）：① nav-registry 里不许再出现手抄矩阵；② 两个消费方都读同一份；
+③ **考勤那条具体回归**——`moduleAllowed("COUNTER_STAFF", "ATTENDANCE")` 必须为 true；④ 逐角色逐模块，
+导航的 view 判定与授权判定一致。反向验证：把 nav-registry 退回改前版本，这 4 条**全部失败**（含第 3 条）。
+
+验证：本地浏览器实走 —— 柜台侧边栏出现「考勤」；柜台打卡成功；OWNER 看板 16 行 / 1 条证据 / 无「未设坐标」提示；
+设置页政策面板在；技师端打卡按钮在。tsc 0；vitest 500；build 通过；e2e 全量 51 通过。
+
+## 影响
 - 打卡不再只是一行时间：每次打卡都有照片、位置、距离和结论，且**结论会如实告诉本人**
   （越界/低精度/无定位/照片重复 → 提示"待主管确认"）。
 - 「谁在店里」有了可核对的依据：面板上每一笔都能点开看照片（走鉴权路由，本人与管理者可见）。
