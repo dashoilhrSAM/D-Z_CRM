@@ -28,7 +28,9 @@ export default async function StockPage() {
   return (
     <PageTransition>
     <div>
-      <PageHeader title={t("ws.stock.title", lang)} subtitle={t("ws.stock.subtitle", lang).replace("{branch}", "Kuala Lumpur")} />
+      {/* 副标题里的分行以前是写死的 "Kuala Lumpur"——门店搬到 PJ 之后这句话就一直在说谎，
+          而且这个页面本来就查了 branch，用真实城市即可。 */}
+      <PageHeader title={t("ws.stock.title", lang)} subtitle={t("ws.stock.subtitle", lang).replace("{branch}", branch?.city ?? "")} />
       <div className="rounded-2xl border bg-card overflow-hidden">
         <div data-tut="stock-list" className="overflow-x-auto max-h-[560px] overflow-y-auto">
           <table className="dz-table">
