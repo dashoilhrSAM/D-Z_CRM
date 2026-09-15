@@ -1,18 +1,15 @@
 "use client";
 
+import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { MapPin } from "lucide-react";
 import { AttendancePunch } from "@/components/shared/attendance-punch";
+import { PunchDetailDialog, locationSummary, type PunchDetail } from "@/components/workshop/punch-detail-dialog";
 import { t, tpl } from "@/lib/i18n";
 import { fmtTime } from "@/lib/format";
 import type { Lang } from "@/lib/i18n";
 
-export interface PunchEvidence {
-  id: string;
-  kind: string;
-  at: string;
-  verdict: string;
-  distanceM: number | null;
-}
+export type PunchEvidence = PunchDetail;
 
 export interface StaffStatus {
   id: string;
@@ -40,11 +37,15 @@ function verdictTone(verdict: string): string {
 /**
  * 考勤面板：本人打卡（拍照 + 定位）+ 全员当日状态与证据。
  *
- * 「证据」这一列是 P1 的重点：打卡不再只是一个时间，而是一条能点开看的记录
- * （照片 + 距离 + 结论）。照片走鉴权路由，不是公开 URL。
+ * 两件事是刻意的：
+ *  · **地点直接显示在行上**（距门店多少米 / 未取到定位），不用悬停才发现——老板扫一眼
+ *    就要能看出"人是不是在店里」，藏进 title 属性等于没显示；
+ *  · 点证据条打开**详情弹窗**（照片 + 时间 + 地点 + 判定 + 右上角关闭），
+ *    而不是像原来那样直接跳到一个裸照片：单独一张照片判断不了任何事。
  */
 export function AttendancePanel({ staff, currentUserId, lang }: { staff: StaffStatus[]; currentUserId: string; lang: Lang }) {
   const router = useRouter();
+  const [open, setOpen] = useState<{ punch: PunchEvidence; name: string } | null>(null);
   const me = staff.find((s) => s.id === currentUserId);
   const onDuty = !!me && me.status === "INCOMPLETE";
 
@@ -91,6 +92,8 @@ export function AttendancePanel({ staff, currentUserId, lang }: { staff: StaffSt
         <div className="divide-y divide-border/60">
           {sorted.map((s) => {
             const on = s.status === "INCOMPLETE";
+            // 行上显示的是**最近一笔**打卡的地点：那才是"他现在在哪"的答案
+            const latest = s.punches.length ? s.punches[s.punches.length - 1] : null;
             return (
               <div key={s.id} className="px-4 py-3" data-testid={"attendance-row-" + s.id}>
                 <div className="flex items-center gap-3">
@@ -103,13 +106,27 @@ export function AttendancePanel({ staff, currentUserId, lang }: { staff: StaffSt
                       {s.id === currentUserId ? " (" + t("att.you", lang) + ")" : ""}
                       <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">{s.role.replace(/_/g, " ")}</span>
                     </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      {s.checkInAt
-                        ? tpl("att.in-out-line", lang, {
-                            in: fmtTime(new Date(s.checkInAt)),
-                            out: s.checkOutAt ? fmtTime(new Date(s.checkOutAt)) : "—",
-                          }) + (s.workedMinutes > 0 ? " · " + tpl("att.minutes", lang, { m: String(s.workedMinutes) }) : "")
-                        : t("att.not-checked", lang)}
+                    <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-muted-foreground">
+                      <span>
+                        {s.checkInAt
+                          ? tpl("att.in-out-line", lang, {
+                              in: fmtTime(new Date(s.checkInAt)),
+                              out: s.checkOutAt ? fmtTime(new Date(s.checkOutAt)) : "—",
+                            }) + (s.workedMinutes > 0 ? " · " + tpl("att.minutes", lang, { m: String(s.workedMinutes) }) : "")
+                          : t("att.not-checked", lang)}
+                      </span>
+                      {latest && (
+                        <span
+                          className={
+                            "inline-flex items-center gap-1 " +
+                            (latest.lat == null ? "text-amber-700 dark:text-amber-300" : "text-foreground/70")
+                          }
+                          data-testid={"attendance-row-location-" + s.id}
+                        >
+                          <MapPin className="h-3 w-3" />
+                          {locationSummary(latest, lang)}
+                        </span>
+                      )}
                     </div>
                   </div>
                   {s.exceptionCount > 0 && (
@@ -132,24 +149,24 @@ export function AttendancePanel({ staff, currentUserId, lang }: { staff: StaffSt
                   </span>
                 </div>
 
-                {/* 证据行：每笔打卡的结论 + 可点开的照片（鉴权路由） */}
+                {/* 证据条：点开是详情弹窗（照片 + 时间 + 地点 + 判定） */}
                 {s.punches.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-2 pl-12">
                     {s.punches.map((p) => (
-                      <a
+                      <button
                         key={p.id}
-                        href={"/api/attendance/photo/" + p.id}
-                        target="_blank"
-                        rel="noreferrer"
+                        type="button"
+                        onClick={() => setOpen({ punch: p, name: s.name })}
+                        data-testid={"punch-chip-" + p.id}
+                        data-punch-id={p.id}
                         className="flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] hover:bg-accent"
-                        title={p.distanceM != null ? tpl("att.distance", lang, { m: String(Math.round(p.distanceM)) }) : ""}
                       >
                         <span className="font-semibold">{p.kind === "IN" ? t("att.in", lang) : t("att.out", lang)}</span>
                         <span className="tabular-nums text-muted-foreground">{fmtTime(new Date(p.at))}</span>
                         <span className={"rounded-full px-1.5 py-0.5 font-bold " + verdictTone(p.verdict)}>
                           {t("att.verdict-" + verdictKey(p.verdict), lang)}
                         </span>
-                      </a>
+                      </button>
                     ))}
                   </div>
                 )}
@@ -158,6 +175,10 @@ export function AttendancePanel({ staff, currentUserId, lang }: { staff: StaffSt
           })}
         </div>
       </div>
+
+      {open && (
+        <PunchDetailDialog punch={open.punch} staffName={open.name} lang={lang} onClose={() => setOpen(null)} />
+      )}
     </div>
   );
 }

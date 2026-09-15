@@ -42,7 +42,8 @@ export default async function AttendancePage() {
       attendancePunches: {
         where: { businessDate: today },
         orderBy: { at: "asc" },
-        select: { id: true, kind: true, at: true, verdict: true, distanceM: true },
+        // 地点信息要一起查出来：看板和弹窗都要显示「人在哪里打的卡」
+        select: { id: true, kind: true, at: true, verdict: true, distanceM: true, lat: true, lng: true, accuracyM: true, source: true },
       },
     },
     orderBy: { name: "asc" },
@@ -66,6 +67,10 @@ export default async function AttendancePage() {
         at: p.at.toISOString(),
         verdict: p.verdict,
         distanceM: p.distanceM ?? null,
+        lat: p.lat ?? null,
+        lng: p.lng ?? null,
+        accuracyM: p.accuracyM ?? null,
+        source: p.source,
       })),
     };
   });
