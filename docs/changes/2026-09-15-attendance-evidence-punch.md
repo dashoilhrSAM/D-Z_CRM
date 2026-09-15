@@ -53,8 +53,29 @@ branch: feat/hrm-attendance
   - 考勤页在「本店没坐标 + 你是 org 级角色」时给一条提示横幅，点进设置——否则所有人都是 NO_GEOFENCE，
     看起来像功能坏了。
 
-## 影响
+### 门店坐标已确认并写入（同日）
 
+owner 给的真实地址：**B-10-7, 3 Two Square, 2, Jalan 19/1, Seksyen 19, 46300 Petaling Jaya, Selangor**，
+坐标 **3.1111141, 101.6316582**。这个数字不是猜的，做了三层核对：
+
+1. Nominatim 查 `3 Two Square, Petaling Jaya` → `3.1111141, 101.6316582`；
+2. Photon（另一个独立数据源）查同一地点 → `101.6316582, 3.1111141`（精确到小数位一致）；
+3. **反向地理编码**该坐标 → road `Jalan 19/1`、neighbourhood `Seksyen 19`、postcode `46300`、
+   city `Petaling Jaya` —— 与 owner 给的地址逐项吻合。第 3 步是决定性的：
+   前两步只能说明「两个服务都认为 3 Two Square 在这里」，反查才能确认「这个点确实落在 Jalan 19/1 46300」。
+
+半径 150m 对这个场地是合适的（用真实坐标跑了一遍判定）：本楼 0m → OK；大楼另一端 60m → OK；
+停车场另一侧 110m → OK；**隔一条街 230m → OUT_OF_RANGE**；对面商场 600m → OUT_OF_RANGE；
+室内拿不到定位 → NO_LOCATION（待确认，不判越界）。
+
+已写入**本地演示库**的主店（`D&Z Smart Workshop`），并留下审计 `ATTENDANCE_GEOFENCE_SET`（before/after 都在）。
+工具是 `scripts/set-branch-geofence.ts`（幂等；校验规则与审计动作名都跟界面的 `updateBranch` 对齐）。
+
+**生产暂时写不进去**：PostgREST 查 `Branch.latitude` 返回 `42703 column does not exist` —— 这列的迁移还没部署
+（分支未合并）。合并部署后构建期 schema 同步会补上列，届时在 `/workshop/settings` 里填一次即可
+（`set-branch-geofence.ts` 走的是本地 sqlite client，连不上 PG，已在脚本头部写明）。
+
+## 影响
 - 打卡不再只是一行时间：每次打卡都有照片、位置、距离和结论，且**结论会如实告诉本人**
   （越界/低精度/无定位/照片重复 → 提示"待主管确认"）。
 - 「谁在店里」有了可核对的依据：面板上每一笔都能点开看照片（走鉴权路由，本人与管理者可见）。
