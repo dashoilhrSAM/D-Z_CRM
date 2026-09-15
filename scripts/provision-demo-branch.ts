@@ -6,6 +6,7 @@
 // 生产环境默认拒绝（与 seed 一致），除非 PROVISION_ALLOWED=1。
 import { PrismaClient } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
+import { DEMO_BRANCH_ADDRESS, DEMO_BRANCH_COORDS, DEMO_BRANCH_CITY } from "../src/lib/branch-info";
 
 if (process.env.NODE_ENV === "production" && process.env.PROVISION_ALLOWED !== "1") {
   console.error("Refusing to provision in production (NODE_ENV=production). Set PROVISION_ALLOWED=1 to override.");
@@ -15,7 +16,9 @@ if (process.env.NODE_ENV === "production" && process.env.PROVISION_ALLOWED !== "
 const prisma = new PrismaClient();
 
 const DEMO_BRANCH_NAME = process.env.DEMO_BRANCH_NAME ?? "D&Z Testing Branch";
-const DEMO_CITY = process.env.DEMO_BRANCH_CITY ?? "Subang Jaya";
+// 测试分行是占位分行，没有自己的门牌：**暂与主店同址**（owner 2026-09-15）。
+// 地址/城市/坐标都取自 src/lib/branch-info.ts 的唯一定义——将来它有真实地址时改那一处。
+const DEMO_CITY = process.env.DEMO_BRANCH_CITY ?? DEMO_BRANCH_CITY;
 const SLOT_TIMES = ["09:00", "11:00", "14:00", "16:00"];
 const SLOT_DAYS = Number(process.env.SLOT_DAYS ?? 7);
 const MAX_BOOKINGS = Number(process.env.MAX_BOOKINGS ?? 2);
@@ -66,7 +69,10 @@ async function main() {
         name: DEMO_BRANCH_NAME,
         city: DEMO_CITY,
         phone: "03-1234 5678",
-        address: "Lot 123, Jalan Test, " + DEMO_CITY,
+        address: DEMO_BRANCH_ADDRESS,
+        // 有坐标才会做围栏判断；同址 = 同围栏
+        latitude: DEMO_BRANCH_COORDS.lat,
+        longitude: DEMO_BRANCH_COORDS.lng,
         isMain: false,
         operatingHours: JSON.stringify({ mon: "09:00-19:00", tue: "09:00-19:00", wed: "09:00-19:00", thu: "09:00-19:00", fri: "09:00-19:00", sat: "09:00-18:00", sun: "Closed" }),
         appointmentCapacity: MAX_BOOKINGS,
