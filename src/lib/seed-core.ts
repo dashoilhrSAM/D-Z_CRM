@@ -3,6 +3,7 @@
 import { PrismaClient } from "@prisma/client";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { MAIN_BRANCH_ADDRESS, MAIN_BRANCH_CITY, MAIN_BRANCH_NAME } from "@/lib/branch-info";
 
 const prisma = new PrismaClient();
 
@@ -144,9 +145,11 @@ export async function runSeed(): Promise<Record<string, number>> {
   const org = await prisma.organisation.create({ data: { name: "D&Z Smart Workshop", currency: "MYR", qrToken: genQr() } });
   const branches = [];
   for (const [i, b] of ([
-    { name: "D&Z Smart Workshop", city: "Kuala Lumpur", isMain: true },
+    // 主店用**真实地址**：它不只是展示用的字符串——考勤地理围栏以它为锚点，
+    // 而随机拼出来的 "No. 62, Jalan Kuala Utama" 那种占位地址会让人以为坐标是配好的。
+    { name: MAIN_BRANCH_NAME, city: MAIN_BRANCH_CITY, address: MAIN_BRANCH_ADDRESS, isMain: true },
   ] as const).entries()) {
-    branches.push(await prisma.branch.create({ data: { organisationId: org.id, name: b.name, city: b.city, isMain: b.isMain, phone: "03-78" + int(1000, 9999), address: "No. " + int(1, 99) + ", Jalan " + b.city.split(" ")[0] + " Utama" } }));
+    branches.push(await prisma.branch.create({ data: { organisationId: org.id, name: b.name, city: b.city, isMain: b.isMain, phone: "03-78" + int(1000, 9999), address: b.address } }));
   }
   const kl = branches[0];
 

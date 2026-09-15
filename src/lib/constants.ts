@@ -1,11 +1,9 @@
-// D&Z demo constants — the seed and the runtime demo are anchored to these.
-export const ORG_NAME = "D&Z Smart Workshop";
-
-export const BRANCHES = [
-  { name: "D&Z Smart Workshop", city: "Kuala Lumpur", isMain: true },
-  { name: "D&Z Smart Workshop", city: "Shah Alam", isMain: false },
-  { name: "D&Z Smart Workshop", city: "Johor Bahru", isMain: false },
-] as const;
+// D&Z constants.
+//
+// 2026-09-15 删掉了 ORG_NAME 与 BRANCHES：两者**零引用**（唯一的 "BRANCHES" 命中是权限矩阵里
+// 同名的模块），而 BRANCHES 还宣称有三家门店在 Kuala Lumpur / Shah Alam / Johor Bahru——
+// 与真实情况不符（主店在 Petaling Jaya）。真的分行在 DB 的 Branch 表里，
+// 种子数据在 src/lib/seed-core.ts（那里带着主店真实地址）。
 
 /** Standard service interval used for deterministic next-service prediction. */
 export const DEFAULT_SERVICE_INTERVAL_KM = 3000;

@@ -63,7 +63,8 @@ plist 文件：`com.dz-platform.server.plist` / `com.dz-platform.e2e.plist`
 | `WHATSAPP_PHONE_ID` | WhatsApp 商业号 | Meta |
 | `WHATSAPP_VERIFY_TOKEN` | WhatsApp webhook 验签 | Meta Developers |
 | `WHATSAPP_APP_SECRET` | WhatsApp webhook HMAC 验签（可选） | Meta Developers |
-| `STORAGE_BUCKET` | Supabase Storage bucket | Supabase |
+| `STORAGE_BUCKET` | Supabase Storage bucket（公共：海报/附件/商品图） | Supabase |
+| `STORAGE_PRIVATE_BUCKET` | Supabase Storage 私有桶（考勤自拍等个人数据，须在 Supabase 控制台设为 **private**） | Supabase |
 | `SENTRY_DSN` | 错误监控 | Sentry |
 | `NEXTAUTH_SECRET` / `AUTH_SECRET` | 认证加密 | 自生成 |
 

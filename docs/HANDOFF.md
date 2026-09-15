@@ -1,4 +1,4 @@
-# HANDOFF — D&Z Platform（2026-09-11 04:39）
+# HANDOFF — D&Z Platform（2026-09-15 10:29）
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
@@ -8,17 +8,48 @@
 > 最新的几个 `docs/changes/*.md`。下方历史段落冻结保留。
 
 ## 一句话状态
-**main 干净（PR #23 已合并，main = `1997eda`），一条新分支待 review**：`feat/workshop-shows-promo-promise`（**柜台侧也显示促销承诺**——工单报价面板与打印报价单新增促销行 + 净额 Total，此前只有骑手看得到折扣）。远端只剩 `main` 与这条分支（两条旧分支已删）。生产健康（/ /login /contact 全 200）。基线全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
+**main 上有三条「已推送待 owner review」的修复分支，另有本地压测分支**：全项目只读审计（4 路扫描 + 自验）找到一组真实缺口，已按批次做成可独立 review 的三个分支——`fix/api-auth-gate`（API 层补门禁，16/20 路由此前零校验）、`fix/write-path-authorization`（写路径授权：员工提权 / 发票 / 薪资）、`fix/concurrency-atomicity`（时段容量 + 库存原子化）。三支互不依赖、可分别合；**合之前 main 的行为仍与审计结果一致（缺口仍在）**。压测工具链（`scripts/perf/*`、`scripts/k6/branch.js`、`docs/PERF_*`）在本地分支 `perf/kl-branch-stress-test`，**owner 明确要求不推送**。main 基线实测全绿：tsc 0 / vitest **439**（34 文件）/ build 0 / **Playwright 全量 49 通过 · 0 失败**。
 
 ## 会话信息
 - 原会话 ID：session-a62205e6-be99-40cf-a61b-7fa862f52af4
-- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：确认 PR #23 已合 → 同步 main + 清理两条已合分支 → 基线复验（tsc/vitest/e2e 全绿）→ **柜台侧促销承诺**）
+- 本会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（「继续 D&Z 任务」；本轮做了：PR #23/#24 同步与合并 → **KL 分店压测（D1–D2）** → **全项目只读扫描（4 路并行）** → **三批安全与一致性修复并分别推送待审** → 本次 session-pack）
 - 上一会话 ID：session-8b24dc21-4d74-4908-8f08-f11b45dc7b86（「Continue D&Z work」：e2e 失败修复 / 完工消息净额 / 促销「报价即承诺」/ 首页优惠卡改落 News 页）
 - 上一次打包：2026-09-14 09:54（session-pack，docs-only 提交 `b4dcbb4`）
+- 本次打包：2026-09-15 10:29（session-pack）
 - 续接口令：继续 D&Z
 
 ## 完成进度（近期，最新在上；完整逐次记录见 docs/changes/）
-- **柜台侧也显示促销承诺（分支 `feat/workshop-shows-promo-promise` 待合）**：促销「报价即承诺」此前**只有骑手看得到**——
+- **并发一致性：时段容量 + 库存原子化（分支 `fix/concurrency-atomicity` 待审，commit 0a5aeb7）**：
+  先复现再修。复现脚本 `scripts/perf/repro-races.ts`（跑隔离 perf.db）改前实测：容量 3 的时段上
+  **10 个并发预约全部成功（超卖 7 单）**、取消后 bookedCount 仍是 1（名额永久占用）；
+  改后：恰好 3 单成功 + 7 条 SLOT_FULL、取消归 0。库存那条**本地复现不出来**（Prisma + sqlite 的
+  交互事务会串行化），但在 PG READ COMMITTED 下「读 5 → 写 4」是标准丢失更新——所以按写法修，
+  不按「跑不出来就先不管」。改法：时段容量做成一次条件更新（claimSeat）+ 建单失败补偿释放 +
+  取消/爽约/改期释放旧名额；库存改 `addInventory`(increment) 与 `deductInventory`(条件扣减)。
+  **未做**：工单号 max+1（两处副本）留待下一批，已在 change 文档写明。
+- **写路径授权：员工提权 / 发票 / 薪资（分支 `fix/write-path-authorization` 待审，commit e093f63）**：
+  发现项目**本来就有 RBAC 矩阵**，但只用来门禁「页面查看」（`workshop/layout.tsx` 的 redirect，
+  实测柜台账号访问 /workshop/staff 会 307），**动作层从没用过它**。修：员工管理改问矩阵
+  （`can(user,"USERS",action)`，机修在矩阵里没有 USERS 权限——而旧的手写清单把 MECHANIC 列了进去、
+  且 `updateStaff` 会把 `input.role` 直落库）；新增 `src/lib/auth/staff-policy.ts` 纯函数管
+  「能对谁做、能改成什么」（分行级只能管本店、碰不到 org 级账号、谁都不能改自己角色、分行级不能授予 org 级角色）；
+  发票与薪资的资金写入补身份 + 分行 + AuditLog。**刻意保留 owner 已记录的两条业务决定**：收钱不加权限门槛
+  （见 `setInvoiceDiscount` 注释）、MANAGER 保留 USERS:create/edit。
+- **API 层补门禁（分支 `fix/api-auth-gate` 待审，commit eac73f4）**：实测发现 middleware 的 matcher 不含 `/api`，
+  于是 20 个路由里 16 个**完全无身份校验**——不带 Cookie 就能下载全组织客户 CSV（含电话邮箱）与商品成本价、
+  无鉴权写入 import/upload。修：matcher 覆盖 `/api/:path*` 且 API 默认拒绝（公开面只在 `API_PUBLIC`
+  显式列出并注明各自鉴权方式）；`src/lib/api-auth.ts` 的 `requireStaff()` 作为统一入口（18 路由接入）；
+  cron 从 fail-open 改 fail-closed；WhatsApp webhook 验签改为必需 + 恒定时间比较 + 回执不降级。
+- **全项目只读扫描（4 路并行 + 自验）**：权限隔离 / 数据一致性 / 健壮性与可观测性 / 前端体验四个维度。
+  P0 三条已实测确证（API 裸奔、rider actions IDOR、员工自提权）；P2 一批体验与性能项
+  （错误边界 0 个、Suspense 0 处、zxing 469KB 进 54/89 路由首屏、183 个 th 零 scope、日期 i18n 未做）。
+- **KL 分店压测工具链（本地分支 `perf/kl-branch-stress-test`，owner 要求不推送）**：装 k6、
+  建隔离实例 :3202（1 年档 7007 工单/4000 客户）与 :3203（小档）、造数脚本
+  `scripts/perf/seed-volume.ts`（93k 行 1.4 秒）、登录态 `mint-cookie.ts`、场景 `scripts/k6/branch.js`。
+  实测：1 VU 下 dashboard 2088ms / jobs_kanban 3011ms / mechanic_board 2110ms 已破 2s；
+  只换数据量（107→7007 工单，同代码）列表页涨 4.6–7.8x 而 inventory/job_detail 平坦 = O(n) 确诊；
+  /workshop/bookings 单页 17.5MB。结论见 `docs/PERF_STRESS_RESULTS.md`（在该分支内）。
+- **柜台侧也显示促销承诺（PR #24 已合）**：促销「报价即承诺」此前**只有骑手看得到**——
   柜台看的工单报价面板与打印出来的报价单都只显示原价，同一张单两个数字。新增 `promisedPromoFor(snapshot, quoteTotalSen)`
   作为「快照 + 报价额 → 承诺额」的**唯一定义**（骑手 status 改为调用它），工单页报价面板与 `/quotation/[id]`
   打印页新增促销行 + 净额 Total（客户签字的是实付）。守卫：单测逐个断言三个界面必须用同一函数、不得自己再算，
@@ -40,9 +71,15 @@
 - **指派机械师（PR #16，已进 main）**：下拉按工单分行过滤（此前列全部分行，选跨行的必被拒）+ 修裁切（共享 Select primitive 受益）。
 
 ## 下一步（按优先级）
-1. ~~清理已合进 main 的分支~~ **已清理（2026-09-11）**：删前逐条 `git merge-base --is-ancestor` 验过，本地 + 远端各 5 条（`docs/handoff-post-merge` · `feat/content-studio-save` · `feat/promo-quoted-lines` · `fix/completion-quote-nets-promo` · `fix/rider-off-news-leak`）；现在远端只剩 `main`。
-2. ~~4 个既有 e2e 失败要查~~ **已解决（`3c85e8c`，随 PR #20 进 main）**：真因是页内导览浮层挡住点击 + 一条会腐烂的日期断言，都不是业务 bug。
-3. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**；~~骑手报价单看不到折扣行~~ 与 ~~revenueSen/ServiceHistory 口径~~ **也已一并做掉**。① ~~编辑工单弹窗里下拉浮层宽 22px~~ **已实测，建议不改**：浮层实测 256px、触发器 237px（差 19px），加宽来自刻意写的 `min-w-64`——机械师选项带分店名很长，改成等宽会把名字截断（该 primitive 的注释已说明「下拉靠 popup 的 min-width 保持可读」）。③ ~~workshop 侧报价单/job 页也显示促销行~~ **已做（见完成进度首条）**。仍等 owner 表态：② **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）；④ **忠诚度积分仍按毛额计**（`pts = round(subtotal/100)`，严格按「1 分/RM1 实付」应改 `totalSen`，但那是**减少**客户积分，属业务决定）。
+1. **三支待审修复要把关（最优先）**：`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity`，互不依赖可分别合。
+   合完逐条 `git merge-base --is-ancestor <branch> main` 验过再删本地 + 远端分支（删前先验是既定纪律）。
+   **注意：这三支没合之前，main 上那些缺口仍然存在**（审计结论与当前 main 行为一致）。
+2. **批次 3b：工单号并发**（`jobs.repository.ts` 与 `bookings/service.ts` 各一份 max+1 副本）——收敛成一处 + 撞唯一约束时重试整笔建单，或上 DB 序列。
+3. **批次 4：rider actions 的归属校验（IDOR）**：`src/actions/rider.ts` 的 `updateProfile`/`markNotificationsRead`/`submitReview`/`respondQuotation` 信任客户端传入的 customerId/quotationId；正确范式 `getRiderCustomer()` + 按 customerId 收窄（`rider-profile.ts` 已做对）。攻击链：开放注册骑手 → 从 `/api/search` 拿任意客户 id → 改他人资料/代他人批单。
+4. **批次 5：dashboard 聚合下推**——实测 6.0x 增长的大头：`stockStatus()` 被 `criticalStockCount`/`deadStockValue` **各调一次**（同一份全量商品跑两遍）、`listProducts` 每个商品带 200 条流水、复购率把全量客户的全部工单拉进内存。三处小改，收益最大。
+5. **批次 6：前端三件**——zxing 469KB 静态进 54/89 路由首屏（一行 dynamic import）、错误边界 0 个（`error.tsx` 全缺）、假 loading（固定 500/800ms 遮罩 + 26 页无 `loading.tsx`）。
+6. **压测 D3（可选，全本地）**：并发扫描 10/25/50/100 VU + 5 年档（35k 工单）+ 换 PG 复跑同一矩阵；工具链在 `perf/kl-branch-stress-test` 分支。
+7. ~~促销折扣口子~~ **已解决（`feat/promo-quoted-lines`）**；~~骑手报价单看不到折扣行~~ 与 ~~revenueSen/ServiceHistory 口径~~ **也已一并做掉**。① ~~编辑工单弹窗里下拉浮层宽 22px~~ **已实测，建议不改**：浮层实测 256px、触发器 237px（差 19px），加宽来自刻意写的 `min-w-64`——机械师选项带分店名很长，改成等宽会把名字截断（该 primitive 的注释已说明「下拉靠 popup 的 min-width 保持可读」）。③ ~~workshop 侧报价单/job 页也显示促销行~~ **已做（见完成进度首条）**。仍等 owner 表态：② **柜台散客单（无 booking）要不要也吃促销**（本次有意不发明承诺）；④ **忠诚度积分仍按毛额计**（`pts = round(subtotal/100)`，严格按「1 分/RM1 实付」应改 `totalSen`，但那是**减少**客户积分，属业务决定）。
 4. **`feat/workshop-module-setup`（本地唯一未合并分支）**：a614dc0 含 scripts/setup-workshop-modules.ts（first-wave 开放 13/关闭 15），从未推送——推送 / 删除 / 放着，待定。
 5. **可选清理**：`Organisation.qrEnabled` 现以 `@ignore` 挂在 pg schema（早期手工 DDL 遗留），可择机真正 DROP。
 6. **经销商验证（需真人）**：填 docs/DEALER_FEEDBACK.md，按 DEMO_SCRIPT 演示，回答 6 个产品决策（dtodo 59e04e5e，逾期）。
@@ -50,23 +87,26 @@
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0 错误**（务必 `set -o pipefail`，否则 `| head` 会吞掉退出码）
-- `pnpm test`：**439 个通过（34 文件）**
+- `pnpm test`：**main 上 439 个通过（34 文件）**；三个待审分支各自更高：`fix/api-auth-gate` 449（+10 API 门禁守卫）· `fix/write-path-authorization` 464（+15 策略测试）· `fix/concurrency-atomicity` 445（+6 并发形态守卫）。每条守卫都做过**反向验证**（在 origin/main 上必须失败）
 - `pnpm build`：通过。生产 build 复现：`pnpm exec prisma generate --schema prisma/schema.pg.prisma && pnpm exec next build`
 - `pnpm exec playwright test --project=desktop-chromium`：**49 通过 · 0 失败**（跑一次会 wipe+seed prisma/e2e.db 并重启 :3102，约 6 分钟）
 - 页内导览首次访问必弹且会挡住点击：spec 里导航到带引导的页面后先 `await dismissGuide(page)`（e2e/helpers.ts），不要用超时硬等
 - 促销折扣的规则只有一条：**报价即承诺**（百分比在第一次报价时定下，金额＝百分比×报价行，完工只兑现承诺额；金额算法在 `promoDiscountForBill`，各界面取数统一走 `promisedPromoFor`）。单测 `tests/promo-promise.test.ts` 守着「完工不许再按总账单重算」「三个报价界面（骑手卡/工单面板/打印报价单）必须用同一函数、不得自己再算」；e2e `promo-at-checkin.spec.ts` 覆盖没选套餐的单子 + 三个界面的可见性（详见 docs/changes/2026-09-11-promo-quoted-lines.md 与 2026-09-11-promo-visible-and-net-revenue.md）
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
+- 并发复现（动并发相关代码时跑）：`DATABASE_URL="file:./perf.db" pnpm exec tsx scripts/perf/repro-races.ts` —— 跑在隔离 perf.db、自带 `perf_repro` 前缀可清理；A/C 两个场景改前必须复现、改后必须通过
 
 ## 服务与恢复
 - workshop :3002：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
 - rider :3003 / e2e :3102：同上换端口与 label（com.dz-platform.rider / .e2e）
+- **压测实例（与三端完全隔离，随时可撤）**：:3202 = `com.dz-platform.perf` 用 prisma/perf.db（1 年档 7007 工单/4000 客户）；:3203 = `com.dz-platform.perf-small` 用 prisma/perf_small.db（小档）。撤掉：`launchctl unload ~/Library/LaunchAgents/com.dz-platform.perf.plist`（与 `...perf-small.plist`）；`launchctl kickstart -k gui/$(id -u)/com.dz-platform.perf` 重启。**只打这两个实例，绝不打 :3002/:3003/:3102，更不打生产**
 - **改了源码必须 `pnpm build` 后 kickstart**。⚠️ **即使没改代码，只要重建过 .next 也必须 kickstart**——服务在跑期间换掉 .next，旧页面会去加载不存在的 chunk，浏览器报「This page couldn't load」。
 - 生产：https://d-z-crm.vercel.app （push main 自动部署）
 
 ## git 状态
-- main = origin/main = **1997eda**（PR #23 已合并；本地 main 另含一条未推送的 docs 提交 `fe2f0d7`，已随本分支带上）
-- 远端分支：`main` · `feat/workshop-shows-promo-promise`（待合）
-- 本地分支：`main` · `feat/workshop-shows-promo-promise`（当前所在）· `feat/workshop-module-setup`（未合并，见下一步 4）
+- main = origin/main = **625e9da**（PR #24 已合并；本地 main 领先若干条**未推送**的 docs 提交——HANDOFF 刷新一律用这个方式，不 push main）
+- **远端分支（三条待审）**：`fix/api-auth-gate`（eac73f4）· `fix/write-path-authorization`（e093f63）· `fix/concurrency-atomicity`（0a5aeb7），加 `main`
+- **本地分支**：`main`（当前所在）· `perf/kl-branch-stress-test`（5c73b08，压测工具链，**owner 要求不推送**）· `feat/workshop-module-setup`（a614dc0，未推送，待定）
+- ⚠️ 本节的 HANDOFF 刷新是一条**本地 main 上的未推送 docs 提交**（沿用 `fe2f0d7` 的先例：不 push main，随下一条 feature 分支一起送审）
 - 未提交：0（tracked 干净；工作区只有 docs/ACCEPTANCE_REPORT.html 等历史未跟踪产物）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本（_dims.ts、capture-*.ts、gen-*.ts 等）、screenshots/、docs/templates/ 等未跟踪产物，加文件务必逐个列出。
 
@@ -80,6 +120,10 @@
 - **双 schema 同步铁律**：prisma/schema.prisma（sqlite）+ prisma/schema.pg.prisma（PG）必须同步改；改完 `pnpm exec prisma generate`。
 - **业务日期存 UTC 零点；金额存整数 sen。**
 - **发票语义**：`Invoice.discountSen` 是**促销归因**（marketing 的 ROI 读它），柜台手动折扣必须走 `manualDiscount*` 五个字段，不得混写。
+- **API 层门禁（2026-09-14 起，见 `fix/api-auth-gate`）**：`src/middleware.ts` 的 matcher 必须含 `/api/:path*`（历史上漏了它 = 20 个路由里 16 个零校验）；API 默认拒绝，公开面只在 `API_PUBLIC` 显式列出并注明各自鉴权方式；新增 API 路由必须调 `requireStaff()`，`tests/api-auth.test.ts` 会扫全部 `route.ts` 强制这条不变量；密钥类校验一律 fail-closed（未配置返回 503，不是放行）。
+- **授权分层（2026-09-14 起，见 `fix/write-path-authorization`）**：RBAC 矩阵 `src/lib/auth/permissions.ts` 门禁的是**页面查看**（layout 的 redirect，实测有效）；**动作层必须自己校验**——Server Action 从没被矩阵覆盖过，历史上同一文件常一半有一半没有。角色红线：谁都不能改自己角色、分行级不能授予 org 级角色、分行级碰不到 org 级账号（纯函数 `src/lib/auth/staff-policy.ts`）。**两条 owner 已定的业务边界不要当成漏洞**：收钱不加权限门槛（control 是审计，见 `setInvoiceDiscount` 注释）、MANAGER 保留 USERS:create/edit。
+- **并发一致性（2026-09-14 起，见 `fix/concurrency-atomicity`）**：能原子更新的地方**不许先读后写**——条件更新 + 受影响行数判定（时段容量 `claimSeat`、库存 `deductInventory`/`addInventory`）。累计型字段（bookedCount）必须「谁占用谁释放」，且只在状态真的变化时释放。
+- **守卫必须能证伪**：每条守卫都要做**反向验证**（在 origin/main 上跑，必须失败）。本项目已两次栽在「守卫看起来有效、其实在测别的东西」（正则 `|` 作用域过宽、切片 -1 把后续函数带进来、取函数体被多行签名提前截断）——**通过得太容易的守卫比失败的守卫更危险**。
 
 ## 踩坑与事实
 - **服务是 launchd `next start`，读 ./next**：改源码或重建 .next 后必须 kickstart。
@@ -93,6 +137,11 @@
 - **本地 dev.db 重置后 Customer.authId 丢失** → rider 登录报「No D&Z account linked」（演示/截图用生产环境）。
 - **Vercel CLI token 已失效**（403 invalidToken）：无法再用 API 查部署状态，看 dashboard。
 - Branch/ServicePackage/Inventory 等无 createdAt（defaultSort/select 勿用）。
+- **本地 sqlite 复现不了整类并发 bug**：Prisma 的交互事务在 sqlite 上会串行化，所以「读 current → 写 current-qty」在本地跑一百遍都对，而在生产 PG（READ COMMITTED）下是标准丢失更新。**判断标准是「这段代码在目标隔离级别下是否原子」，不是「本地能不能复现」**。
+- **vitest 里 import 服务端模块需要别名**：`server-only` 在 node 环境按浏览器条件解析会抛错，导致任何测试都无法 import 带它的模块（第一个撞上的是 `permissions.ts`）。`vitest.config.ts` 已把它 alias 到 `tests/stubs/server-only.ts`；真实边界仍由 `next build` 保证。
+- **`docs/ACCEPTANCE_REPORT.html` 已过期**：里面写的「仅 8/33 action 有会话校验」「e2e 69 过 6 失败」与当前代码不符（现在是 13/36、49 全绿）。引用它之前先核实。
+- **写提交信息用 `-F 文件`，不要内联**：提交信息里的反引号会提前闭合并行工具里的模板字符串（本会话踩了两次）。
+- **e2e 与 build 的顺序**：三个 launchd 服务都读同一份 `.next`，所以「build → kickstart 三端 → 跑 e2e」是固定顺序；build 期间跑 e2e 会让 :3102 加载到半成品。
 
 ## 待办（dtodo）
 - 59e04e5e 经销商验证（逾期 2026-08-19，需真人）
@@ -101,9 +150,9 @@
 ## 新会话头 10 分钟
 1. **探活**：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login`（另 :3003 / :3102）；挂了 `launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个文件**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **查 git**：`git fetch --prune` 看 owner 合了没有（待合的是 `docs/handoff-after-promo-merge` 与 `fix/rider-home-offers-to-news`，后者叠在前者上）；合了就 `git checkout main && git pull --ff-only` 并把已合分支清掉
-4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**434**，34 文件）；要动源码再加 `pnpm build`
-5. **挑下一步**：优先「下一步 3」里那 4 个等 owner 表态的口径问题（其中「柜台散客单要不要吃促销」影响营收）；改完源码记得 `pnpm build` + kickstart 三端，新改动写 `pnpm new:change <名字>`
+3. **查 git**：`git fetch --prune`——**有三条待审分支**（`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity`）。逐条看 owner 合没合；合了就 `git checkout main && git pull --ff-only`，再用 `git merge-base --is-ancestor <branch> main` **验过后**删掉本地 + 远端已合分支
+4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**439**，34 文件）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）
+5. **挑下一步**：优先「下一步 1–3」（把关三支待审 → 工单号并发 → rider IDOR）；**动手前先读本文件「关键决策与约定」里 2026-09-14 的三条**（API 门禁 / 授权分层 / 并发原子化）——那三条是这轮审计的结论固化，照着做可以避免重复发现。新改动写 `pnpm new:change <名字>`，守卫必须做反向验证
 
 ---
 

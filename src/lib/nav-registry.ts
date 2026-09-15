@@ -4,6 +4,7 @@
 // exactly what the current persona is entitled to see.
 
 import type { LucideIcon } from "lucide-react";
+import { ROLE_MODULES } from "@/lib/auth/role-modules";
 import {
   LayoutDashboard, Users, UserCheck, BellRing, CalendarClock, Wrench, ClipboardList, ListChecks, Package,
   Store, Megaphone, MessageSquare, Star, Users2, Gauge, Boxes, AlertTriangle, Archive, RefreshCw,
@@ -107,7 +108,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { key: "staff", label: "Staff", labelKey: "nav.staff", href: "/workshop/staff", icon: Users2, module: "USERS", access: ["OWNER", "MECHANIC"] },
       { key: "kpi", label: "KPI Board", labelKey: "nav.kpi", href: "/workshop/staff/kpi", icon: Gauge, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
       { key: "settlements", label: "Settlements", labelKey: "nav.settlements", href: "/workshop/settlements", icon: Wallet, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
-      { key: "attendance", label: "Attendance", labelKey: "nav.attendance", href: "/workshop/attendance", icon: Clock, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
+      // HRM: 考勤不再挂在 TECHNICIANS 下（那是技师技能口径），也不只给技师看——
+      // 柜台/销售/行政都要打卡，而 MECHANIC 实际走 /mechanic-app（workshop layout 会把他们重定向过去）。
+      { key: "attendance", label: "Attendance", labelKey: "nav.attendance", href: "/workshop/attendance", icon: Clock, module: "ATTENDANCE", access: ["OWNER", "COUNTER_STAFF"] },
     ],
   },
   {
@@ -159,32 +162,21 @@ export function navForRole(role: string, persona: WorkshopPersona): NavSection[]
   })).filter((g) => g.items.length > 0);
 }
 
-/** 同步的 module→view 判定（与 permissions.ts DEFAULT_MATRIX 一致，避免 server-only 依赖）。 */
+/**
+ * 同步的 module→view 判定。
+ *
+ * 读的是 role-modules.ts 那份**唯一**矩阵（permissions.ts 也用同一份）——
+ * 这个函数以前配套一张手抄的视图矩阵，2026-09-15 它漂移了：
+ * permissions.ts 给 ATTENDANCE 加了授权，抄件没跟，于是柜台/销售同事的侧边栏里
+ * 「考勤」直接不出现（只有通配角色 OWNER 看得到）。**不要再抄第二份。**
+ */
 export function moduleAllowed(role: string, module: string): boolean {
-  const M = DEFAULT_VIEW_MATRIX as Record<string, string[] | "*">;
-  const r = M[role];
-  if (!r) return false;
-  if (r === "*") return true;
-  return (r as string[]).includes(module);
+  const entry = ROLE_MODULES[role];
+  if (!entry) return false;
+  const wildcard = entry["*"];
+  if (wildcard) return wildcard.includes("view");
+  return entry[module]?.includes("view") ?? false;
 }
-
-/** 精简视图矩阵：role → 可 view 的 module 列表（从 permissions.ts 提炼）。 */
-const DEFAULT_VIEW_MATRIX: Record<string, string[] | "*"> = {
-  SUPER_ADMIN: "*", OWNER: "*", HEAD_OFFICE_ADMIN: "*",
-  MANAGER: "*",
-  SALES_MANAGER: "*",
-  SALES_ADVISOR: ["LEADS", "PIPELINE", "TEST_RIDES", "TASKS", "CUSTOMERS", "MOTORCYCLES", "DASHBOARD"],
-  SERVICE_MANAGER: "*",
-  SERVICE_ADVISOR: ["BOOKINGS", "WORKSHOP", "JOB_CARDS", "CUSTOMERS", "MOTORCYCLES", "REMINDERS", "DASHBOARD"],
-  COUNTER_STAFF: ["DASHBOARD", "CUSTOMERS", "BOOKINGS", "JOB_CARDS", "WORKSHOP", "INVENTORY", "AI"],
-  CUSTOMER_SERVICE: ["DASHBOARD", "CUSTOMERS", "BOOKINGS", "REMINDERS", "TASKS", "MESSAGING", "LOYALTY"],
-  MECHANIC: ["DASHBOARD", "WORKSHOP", "JOB_CARDS", "TECHNICIANS", "INVENTORY", "PARTS"],
-  PARTS_MANAGER: "*",
-  INVENTORY: ["PARTS", "INVENTORY", "DASHBOARD"],
-  MARKETING: ["CAMPAIGNS", "LOYALTY", "REFERRALS", "CUSTOMERS", "ANALYTICS", "AI", "DASHBOARD"],
-  ACCOUNTING: ["FINANCE", "REPORTS", "ANALYTICS", "DASHBOARD"],
-  AUDITOR: "*",
-};
 
 /** Flat list of accessible hrefs for a persona — used for URL-level gating. */
 export function accessibleHrefs(persona: WorkshopPersona): string[] {

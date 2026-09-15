@@ -53,20 +53,23 @@ export function LostReasonsEditor({ current }: { current: string }) {
   );
 }
 
-export function BranchManager({ branches }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null; appointmentCapacity: number | null }[] }) {
+export function BranchManager({ branches }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null; appointmentCapacity: number | null; latitude: number | null; longitude: number | null }[] }) {
   const router = useRouter();
   const lang = useLang();
   const [nf, setNf] = useState({ name: "D&Z Smart Workshop", city: "", phone: "", address: "" });
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [edit, setEdit] = useState<{ name: string; city: string; phone: string; address: string; capacity: string; hours: Record<string, DayHours> }>({ name: "", city: "", phone: "", address: "", capacity: "", hours: {} });
+  const [edit, setEdit] = useState<{ name: string; city: string; phone: string; address: string; capacity: string; hours: Record<string, DayHours>; lat: string; lng: string }>({ name: "", city: "", phone: "", address: "", capacity: "", hours: {}, lat: "", lng: "" });
   const [msg, setMsg] = useState("");
 
-  function startEdit(b: { id: string; name: string; city: string; phone: string | null; address: string | null; operatingHours: string | null; appointmentCapacity: number | null }) {
+  function startEdit(b: { id: string; name: string; city: string; phone: string | null; address: string | null; operatingHours: string | null; appointmentCapacity: number | null; latitude: number | null; longitude: number | null }) {
     setEditingId(b.id); setMsg("");
-    setEdit({ name: b.name, city: b.city, phone: b.phone ?? "", address: b.address ?? "", capacity: String(b.appointmentCapacity ?? ""), hours: parseHours(b.operatingHours) });
+    setEdit({ name: b.name, city: b.city, phone: b.phone ?? "", address: b.address ?? "", capacity: String(b.appointmentCapacity ?? ""), hours: parseHours(b.operatingHours), lat: b.latitude != null ? String(b.latitude) : "", lng: b.longitude != null ? String(b.longitude) : "" });
   }
   async function saveEdit() {
-    const res = await updateBranch(editingId!, { name: edit.name, city: edit.city, phone: edit.phone, address: edit.address, operatingHours: serializeHours(edit.hours), appointmentCapacity: Number(edit.capacity) || 0 });
+    // HRM: 坐标留空 = 清掉（打卡会记 NO_GEOFENCE，而不是判人越界）
+    const lat = edit.lat.trim() === "" ? null : Number(edit.lat);
+    const lng = edit.lng.trim() === "" ? null : Number(edit.lng);
+    const res = await updateBranch(editingId!, { name: edit.name, city: edit.city, phone: edit.phone, address: edit.address, operatingHours: serializeHours(edit.hours), appointmentCapacity: Number(edit.capacity) || 0, latitude: lat, longitude: lng });
     setMsg(res.ok ? "" : (res.error ?? "Failed"));
     if (res.ok) { setEditingId(null); router.refresh(); }
   }
@@ -84,6 +87,15 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
               <input className={inputCls} value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} placeholder={t("form.address", lang)} />
               <input className={inputCls} type="number" min="1" value={edit.capacity} onChange={(e) => setEdit({ ...edit, capacity: e.target.value })} placeholder={t("settings-form.no-capacity", lang)} />
             </div>
+            {/* HRM 考勤地理围栏：从 Google Maps 右键复制这两个数字即可 */}
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold text-muted-foreground">{t("att.branch-coords", lang)}</h4>
+              <div className="grid grid-cols-2 gap-2">
+                <input className={inputCls} value={edit.lat} onChange={(e) => setEdit({ ...edit, lat: e.target.value })} placeholder="3.1390" data-testid="branch-latitude" />
+                <input className={inputCls} value={edit.lng} onChange={(e) => setEdit({ ...edit, lng: e.target.value })} placeholder="101.6869" data-testid="branch-longitude" />
+              </div>
+              <p className="text-[11px] text-muted-foreground">{t("att.branch-coords-hint", lang)}</p>
+            </div>
             <div className="space-y-1">
               <h4 className="text-xs font-semibold text-muted-foreground">{t("settings-form.no-hours-label", lang)}</h4>
               {DAYS.map(([k]) => (
@@ -98,7 +110,7 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
             </div>
             {msg && <p className="text-xs text-destructive">{msg}</p>}
             <div className="flex gap-2">
-              <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" onClick={saveEdit}>{t("common.save", lang)}</button>
+              <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium" data-testid="branch-save" onClick={saveEdit}>{t("common.save", lang)}</button>
               <button className="rounded-md border px-3 py-1.5 text-sm font-medium" onClick={() => { setEditingId(null); setMsg(""); }}>{t("settings-form.cancel", lang)}</button>
             </div>
           </div>
@@ -108,8 +120,11 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
             {b.isMain && <span className="rounded-full bg-primary/10 text-primary text-[10px] px-2 py-0.5">{t("settings-form.main", lang)}</span>}
             <span className="text-xs text-muted-foreground">{b.phone}</span>
             <div className="flex-1" />
+            <span className={b.latitude == null ? "rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/60 dark:text-amber-300" : "text-[11px] text-muted-foreground"}>
+              {b.latitude == null ? t("att.no-coords", lang) : t("att.coords-set", lang)}
+            </span>
             <span className="text-[11px] text-muted-foreground">{t(b.operatingHours ? "settings-form.hours-set" : "settings-form.no-hours", lang)}</span>
-            <button className="text-primary hover:underline" onClick={() => startEdit(b)}>{t("settings-form.edit-branch", lang)}</button>
+            <button className="text-primary hover:underline" data-testid="branch-edit" onClick={() => startEdit(b)}>{t("settings-form.edit-branch", lang)}</button>
           </div>
         ))}
       </div>
