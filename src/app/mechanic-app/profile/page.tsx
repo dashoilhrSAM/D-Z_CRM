@@ -3,12 +3,14 @@ import { Settings as SettingsIcon } from "lucide-react";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { AttendanceButton } from "@/components/mechanic/attendance-button";
+import { AttendancePunch } from "@/components/shared/attendance-punch";
 import { EarningsConfirm } from "@/components/mechanic/earnings-confirm";
 import { MonthlyEarningsChart } from "@/components/mechanic/monthly-earnings-chart";
 import { SignOutIconButton } from "@/components/rider/sign-out-button";
 import { getLang } from "@/lib/get-lang";
-import { t } from "@/lib/i18n";
+import { t, tpl, type Lang } from "@/lib/i18n";
+import { businessDayUtc, safeTimezone } from "@/lib/business-day";
+import { fmtTime } from "@/lib/format";
 import { formatRM } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
@@ -26,14 +28,11 @@ export default async function MechanicProfilePage() {
     db.staffPayout.findMany({ where: { userId: me.id, status: "AWAITING_CONFIRM" }, select: { id: true, period: true, periodStart: true, totalSen: true }, orderBy: { createdAt: "desc" } }),
     db.review.aggregate({ _avg: { rating: true }, _count: true, where: { job: { mechanicId: me.id }, rating: { not: null } } }),
   ]);
-  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kuala_Lumpur", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date()) + "T00:00:00Z";
-  const todayAtt = user?.attendance.find((a) => a.date.toISOString().slice(0, 10) === today.slice(0, 10));
-  // 最后动作判定：有 in 且（无 out 或 in 晚于 out）→ ON DUTY（当天可多次打卡）
-  const lastIn = todayAtt?.checkInAt;
-  const lastOut = todayAtt?.checkOutAt;
-  const status = !lastIn ? { state: "NOT_CHECKED" as const, checkInAt: null, checkOutAt: null }
-    : !lastOut || lastIn > lastOut ? { state: "ON_DUTY" as const, checkInAt: lastIn.toISOString(), checkOutAt: null }
-    : { state: "OFF" as const, checkInAt: lastIn.toISOString(), checkOutAt: lastOut.toISOString() };
+  const org = await db.organisation.findFirst({ select: { timezone: true } });
+  const today = businessDayUtc(new Date(), safeTimezone(org?.timezone));
+  const todayAtt = user?.attendance.find((a) => a.date.toISOString().slice(0, 10) === today.toISOString().slice(0, 10));
+  // 在岗判定交给当日汇总（status 由 AttendancePunch 重算），不再靠比较两个时间戳
+  const onDuty = todayAtt?.status === "INCOMPLETE";
 
   const completed = jobs.length;
   const earnings = jobs.reduce((s, j) => s + (j.commissionSen ?? 1000), 0);
@@ -112,7 +111,14 @@ export default async function MechanicProfilePage() {
       {/* 打卡（与 workshop OS 考勤同步） */}
       <div className="rounded-2xl border bg-card p-4">
         <div className="mb-2 text-sm font-semibold">{t("mech.attendance", lang)}</div>
-        <AttendanceButton status={status} lang={lang} />
+        <div className="mb-2 text-[11px] text-muted-foreground">
+          {onDuty
+            ? tpl("mech.on-duty", lang, { time: todayAtt?.checkInAt ? fmtTime(todayAtt.checkInAt) : "" })
+            : todayAtt?.checkOutAt
+              ? tpl("mech.checked-out-at", lang, { time: fmtTime(todayAtt.checkOutAt) })
+              : t("mech.not-checked", lang)}
+        </div>
+        <AttendancePunch kind={onDuty ? "OUT" : "IN"} lang={lang} compact />
         <p className="mt-2 text-[11px] text-muted-foreground">{t("mech.synced", lang)}</p>
       </div>
 

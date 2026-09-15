@@ -60,10 +60,29 @@ export interface AiChatMessage {
   content: string;
 }
 
+/**
+ * 私有对象的键前缀 —— **唯一定义**。
+ *
+ * 公共对象（海报、附件、商品图）走 /api/storage 直接对外给图；考勤自拍、证件这类
+ * 个人数据不能走那条路：Supabase 的公共桶会把对象暴露成
+ * /storage/v1/object/public/<bucket>/<key>，任何人拿到 URL 就能看。
+ * 所以私有对象一律带这个前缀：既存到私有桶、又被 /api/storage 直接 404 掉，
+ * 只能经应用层鉴权路由读出（见 src/app/api/attendance/photo/[id]/route.ts）。
+ */
+export const PRIVATE_OBJECT_PREFIX = "private/";
+
+export function isPrivateObjectKey(key: string): boolean {
+  return key.startsWith(PRIVATE_OBJECT_PREFIX);
+}
+
 export interface StorageProvider {
   readonly name: string;
   put(key: string, data: Uint8Array, contentType: string): Promise<string>;
   get(key: string): Promise<Uint8Array | null>;
+  /** 存私有对象：**不返回**任何可公开访问的 URL（返回 void 是故意的）。 */
+  putPrivate(key: string, data: Uint8Array, contentType: string): Promise<void>;
+  /** 读私有对象：调用方必须先自己做鉴权，provider 不做权限判断。 */
+  getPrivate(key: string): Promise<Uint8Array | null>;
   /** Production: Supabase Storage. Prototype: LocalStorageProvider (./storage). */
 }
 

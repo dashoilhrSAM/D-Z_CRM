@@ -16,7 +16,15 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "desktop-chromium", use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop-chromium",
+      use: {
+        ...devices["Desktop Chrome"],
+        // HRM 考勤要真实调用 getUserMedia：给它一个合成摄像头，
+        // 否则打卡弹窗永远停在"正在启动摄像头"，测的就成了空壳。
+        launchOptions: { args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"] },
+      },
+    },
     { name: "mobile-chromium", use: { ...devices["Pixel 7"] } },
     { name: "mobile-webkit", use: { ...devices["iPhone 13"] } },
   ],

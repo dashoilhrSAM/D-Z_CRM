@@ -59,6 +59,12 @@ model Organisation {
   // MKT-013: when true, any booking during a live promo is discounted automatically,
   // not just bookings that arrived through a campaign link. Marketing controls this.
   promoAutoApply Boolean @default(true)
+  // HRM: 考勤证据规则（业务方在设置页决定，不写死源码常量）。照片是个人数据——
+  // 这几个开关决定"一次打卡必须提供什么"，而不是"我们存什么"。
+  attendancePhotoRequired Boolean @default(true)
+  attendanceGeoRequired   Boolean @default(true)
+  attendanceGeofenceM     Int     @default(150)
+  attendanceAccuracyMaxM  Int     @default(100)
   createdAt     DateTime @default(now())
   branches      Branch[]
   users         User[]
@@ -246,6 +252,9 @@ model Branch {
   isMain         Boolean      @default(false)
   operatingHours String?      // JSON {mon:"09:00-18:00",...}
   appointmentCapacity Int     @default(1)
+  // HRM: 考勤地理围栏锚点（null = 还没填坐标，此时打卡记 NO_GEOFENCE 而不是判越界）
+  latitude       Float?
+  longitude      Float?
   users          User[]
   customers      Customer[]
   bookings       Booking[]
@@ -300,6 +309,7 @@ model User {
   testRidesAssigned TestRide[]    @relation("SalespersonTestRides")
   payouts        StaffPayout[]   @relation("StaffPayouts")
   attendance     Attendance[]
+  attendancePunches AttendancePunch[]
   /** 个人提成算法 { commissionType, commissionValue, addonBonusSen? } — null 用 org 默认 */
   commissionRules String?
 }
@@ -1329,7 +1339,63 @@ model Attendance {
   checkInAt  DateTime?
   checkOutAt DateTime?
   createdAt  DateTime  @default(now())
+  // HRM: 当日汇总（由 AttendancePunch 重算得出）。原字段保留 → 历史数据零迁移，
+  // 看板查询也不变；新增的明细只活在 AttendancePunch 里。
+  branchId       String?
+  firstInAt      DateTime?
+  lastOutAt      DateTime?
+  workedMinutes  Int      @default(0)
+  exceptionCount Int      @default(0)
+  status         String   @default("PRESENT") // PRESENT | INCOMPLETE
   @@unique([userId, date])
+  @@index([branchId, date])
+}
+
+/**
+ * HRM 考勤打卡明细 —— 不可变证据链。
+ * 只能追加：没有 update/delete 入口，要改只能追加 AttendanceCorrection 并写 AuditLog。
+ * 判定（距离/精度/可疑）全部由服务端复算，客户端只允许上报原始 lat/lng/accuracy。
+ */
+model AttendancePunch {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id])
+  branchId     String?
+  kind         String   // IN | OUT
+  at           DateTime // 服务端时间戳（UTC）——不信客户端时钟
+  businessDate DateTime // 业务日（组织时区）UTC 零点
+  photoKey     String   // 私有对象键，绝不走公共 /api/storage
+  photoSha256  String   // 去重 + 完整性：同一张照片重复使用会被标可疑
+  photoMime    String
+  photoBytes   Int
+  lat          Float?
+  lng          Float?
+  accuracyM    Float?
+  distanceM    Float?   // 服务端按 Branch 坐标复算
+  source       String   @default("WEB") // WEB | MOBILE
+  deviceId     String?
+  userAgent    String?
+  ip           String?
+  verdict      String   @default("OK") // OK|OUT_OF_RANGE|LOW_ACCURACY|NO_LOCATION|NO_GEOFENCE|SUSPECT_REUSE
+  note         String?
+  createdAt    DateTime @default(now())
+  @@index([userId, businessDate])
+  @@index([branchId, businessDate])
+  @@index([photoSha256])
+}
+
+/** 更正申请：原记录永不改，这里追加「谁、何时、把什么改成什么、为什么、谁批的」。 */
+model AttendanceCorrection {
+  id          String    @id @default(cuid())
+  punchId     String
+  requestedBy String
+  reason      String
+  beforeJson  String
+  afterJson   String
+  approvedBy  String?
+  approvedAt  DateTime?
+  createdAt   DateTime  @default(now())
+  @@index([punchId])
 }
 
 model ServiceType {
