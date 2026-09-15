@@ -5,6 +5,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { OrgProfileForm, BranchManager, ServiceTypeManager, LostReasonsEditor, MyBranchSettings } from "@/components/workshop/settings-forms";
 import { isOrgLevelRole } from "@/lib/branch-scope";
 import { QrSettings } from "@/components/workshop/qr-settings";
+import { AttendancePolicyPanel } from "@/components/workshop/attendance-policy-panel";
 import { getLang } from "@/lib/get-lang";
 import { QrToggle } from "@/components/shared/qr-toggle";
 import { workshopQrUrl } from "@/lib/qr";
@@ -67,7 +68,15 @@ export default async function SettingsPage() {
               ))}
             </div>
           </div>
-          <BranchManager branches={branches.map((b) => ({ id: b.id, name: b.name, city: b.city, phone: b.phone, address: b.address, isMain: b.isMain, operatingHours: b.operatingHours, appointmentCapacity: b.appointmentCapacity }))} />
+          <BranchManager branches={branches.map((b) => ({ id: b.id, name: b.name, city: b.city, phone: b.phone, address: b.address, isMain: b.isMain, operatingHours: b.operatingHours, appointmentCapacity: b.appointmentCapacity, latitude: b.latitude, longitude: b.longitude }))} />
+          <AttendancePolicyPanel
+            values={{
+              photoRequired: org!.attendancePhotoRequired,
+              geoRequired: org!.attendanceGeoRequired,
+              geofenceM: org!.attendanceGeofenceM,
+              accuracyMaxM: org!.attendanceAccuracyMaxM,
+            }}
+          />
           <ServiceTypeManager serviceTypes={serviceTypes.map((s) => ({ id: s.id, name: s.name, category: s.category, durationMin: s.durationMin, priceSen: s.priceSen, active: s.active }))} />
         </>
       ) : (

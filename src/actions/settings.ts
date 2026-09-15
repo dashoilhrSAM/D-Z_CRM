@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getSessionUser } from "@/lib/session-user";
 import { isOrgLevelRole } from "@/lib/branch-scope";
+import { audit } from "@/lib/auth/audit";
+import { isValidLatLng } from "@/lib/geo";
 
 async function requireStaff(): Promise<{ ok: true; orgLevel: boolean; branchId: string | null } | { ok: false; error: string }> {
   const session = await getSessionUser();
@@ -29,7 +31,7 @@ export async function updateOrganisation(input: { name?: string; contactPhone?: 
  * - org 级：可改任意分行（含 name/city/isMain 由 owner 管理）；
  * - branch 级：只能改 **自己** 分行，且仅运营细节（phone/address/operatingHours/appointmentCapacity），name/city 不可改。
  */
-export async function updateBranch(id: string, input: { name?: string; city?: string; phone?: string; address?: string; operatingHours?: string; appointmentCapacity?: number }) {
+export async function updateBranch(id: string, input: { name?: string; city?: string; phone?: string; address?: string; operatingHours?: string; appointmentCapacity?: number; latitude?: number | null; longitude?: number | null }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
   if (!auth.orgLevel && auth.branchId !== id) return { ok: false as const, error: "You can only edit your own branch." };
@@ -42,9 +44,84 @@ export async function updateBranch(id: string, input: { name?: string; city?: st
   if (input.operatingHours != null) data.operatingHours = input.operatingHours;
   if (input.appointmentCapacity != null) data.appointmentCapacity = input.appointmentCapacity;
 
+  // HRM: 门店坐标决定考勤「算不算在店里」，所以它是要留痕的改动，不是普通字段
+  // （老板把围栏悄悄挪一下，就能让所有人的越界记录变成正常）。
+  const current = await db.branch.findUnique({ where: { id }, select: { latitude: true, longitude: true } });
+  let geofenceChange: { before: { latitude: number | null; longitude: number | null }; after: { latitude: number | null; longitude: number | null } } | null = null;
+  if (input.latitude !== undefined || input.longitude !== undefined) {
+    const lat = input.latitude ?? null;
+    const lng = input.longitude ?? null;
+    if ((lat === null) !== (lng === null)) return { ok: false as const, error: "Latitude and longitude must be set together." };
+    if (lat !== null && lng !== null && !isValidLatLng(lat, lng)) return { ok: false as const, error: "Those coordinates are not a valid location." };
+    data.latitude = lat;
+    data.longitude = lng;
+    // 只在坐标**真的变了**时留痕：否则每次编辑分行都会多一条审计，把真正的改动淹掉
+    const before = { latitude: current?.latitude ?? null, longitude: current?.longitude ?? null };
+    if (before.latitude !== lat || before.longitude !== lng) geofenceChange = { before, after: { latitude: lat, longitude: lng } };
+  }
+
   await db.branch.update({ where: { id }, data });
+  if (geofenceChange) {
+    const session = await getSessionUser();
+    const org = await db.organisation.findFirst();
+    if (org) {
+      await audit({
+        organisationId: org.id,
+        branchId: id,
+        userId: session.user?.id ?? null,
+        action: "ATTENDANCE_GEOFENCE_SET",
+        entity: "Branch",
+        entityId: id,
+        before: geofenceChange.before,
+        after: geofenceChange.after,
+      });
+    }
+  }
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/**
+ * 考勤政策（HRM）：拍照/定位是否必填、围栏半径、精度上限。
+ * 营收与合规相关，所以按项目惯例**存 DB 由业务方决定**，不写源码常量（先例 promoAutoApply）。
+ * 只有 org 级角色能改——这些值对所有门店生效。
+ */
+export async function updateAttendancePolicy(input: { photoRequired?: boolean; geoRequired?: boolean; geofenceM?: number; accuracyMaxM?: number }) {
+  const auth = await requireStaff();
+  if (!auth.ok) return { ok: false as const, error: auth.error };
+  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can change attendance policy." };
+  const org = await db.organisation.findFirst();
+  if (!org) return { ok: false as const, error: "No organisation" };
+
+  // 夹到合理区间：围栏 10–5000 米、精度上限 5–2000 米。
+  // 允许 0 或负数会让"在店里"这个判断失去意义（人人越界或人人正常）。
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, Math.round(v)));
+  const data: Record<string, boolean | number> = {};
+  if (input.photoRequired != null) data.attendancePhotoRequired = input.photoRequired;
+  if (input.geoRequired != null) data.attendanceGeoRequired = input.geoRequired;
+  if (input.geofenceM != null) data.attendanceGeofenceM = clamp(input.geofenceM, 10, 5000);
+  if (input.accuracyMaxM != null) data.attendanceAccuracyMaxM = clamp(input.accuracyMaxM, 5, 2000);
+  if (Object.keys(data).length === 0) return { ok: true as const };
+
+  const before = {
+    attendancePhotoRequired: org.attendancePhotoRequired,
+    attendanceGeoRequired: org.attendanceGeoRequired,
+    attendanceGeofenceM: org.attendanceGeofenceM,
+    attendanceAccuracyMaxM: org.attendanceAccuracyMaxM,
+  };
+  await db.organisation.update({ where: { id: org.id }, data });
+  await audit({
+    organisationId: org.id,
+    branchId: null,
+    userId: null,
+    action: "ATTENDANCE_POLICY",
+    entity: "Organisation",
+    entityId: org.id,
+    before,
+    after: data,
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const };
 }
 
 /** 仅 org 级可新增分行。 */

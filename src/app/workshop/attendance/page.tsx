@@ -1,8 +1,9 @@
+import Link from "next/link";
 import { PageHeader } from "@/components/shared/page-header";
 import { AttendancePanel, type StaffStatus } from "@/components/workshop/attendance-panel";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
+import { scopedBranchId, isOrgLevelRole } from "@/lib/branch-scope";
 import { businessDayUtc, safeTimezone } from "@/lib/business-day";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
@@ -69,9 +70,25 @@ export default async function AttendancePage() {
     };
   });
 
+  // 本店还没填坐标时，所有打卡都会记成 NO_GEOFENCE —— 让能改设置的人一眼看到原因，
+  // 而不是以为"考勤坏了"。
+  const branchMissingCoords = session.branchId
+    ? !(await db.branch.count({ where: { id: session.branchId, latitude: { not: null }, longitude: { not: null } } }))
+    : false;
+  const canEditSettings = session.kind === "staff" && isOrgLevelRole(session.role);
+  const showGeofenceHint = branchMissingCoords && canEditSettings;
+
   return (
     <div>
       <PageHeader title={t("att.title", lang)} subtitle={t("att.subtitle", lang)} />
+      {showGeofenceHint && (
+        <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200" data-testid="attendance-geofence-hint">
+          {t("att.geofence-missing-hint", lang)}{" "}
+          <Link href="/workshop/settings" className="font-semibold underline">
+            {t("ws.settings.title", lang)}
+          </Link>
+        </div>
+      )}
       <AttendancePanel
         staff={rows}
         currentUserId={session.kind === "staff" && session.user ? session.user.id : ""}

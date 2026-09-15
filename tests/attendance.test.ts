@@ -14,12 +14,42 @@ import { decideVerdict, rollupDay, type AttendancePolicy } from "@/modules/atten
 
 const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-/** 取函数体：从 name 起，到顶格两空格闭合花括号为止（与 concurrency-guards 同一套小心思）。 */
+/**
+ * 取函数体：从名字起按花括号配对数到函数结束。
+ *
+ * 不用 concurrency-guards 里那套"找顶格两空格闭合花括号"的写法——它会被**函数内的
+ * if/for 块**提前截断（updateBranch 里就有 `  }` 开头的内层块）。
+ * 截断的后果正是本项目的老毛病：断言看起来在测那个函数，其实只测了前半段。
+ */
 const fnBody = (src: string, name: string): string => {
   const start = src.indexOf(name);
   if (start < 0) return "";
-  const end = src.slice(start).search(/\n  \}\n/);
-  return end < 0 ? src.slice(start) : src.slice(start, start + end);
+  // ① 先配对**参数列表的圆括号**：参数里常写内联对象类型（{ photoRequired?: boolean }），
+  //    直接从第一个 { 开始数会在参数类型那里就归零，只切出签名——第一版就是这么假通过的。
+  const parenOpen = src.indexOf("(", start);
+  if (parenOpen < 0) return src.slice(start);
+  let pdepth = 0;
+  let afterParams = -1;
+  for (let i = parenOpen; i < src.length; i++) {
+    if (src[i] === "(") pdepth++;
+    else if (src[i] === ")") {
+      pdepth--;
+      if (pdepth === 0) { afterParams = i; break; }
+    }
+  }
+  if (afterParams < 0) return src.slice(start);
+  // ② 从参数列表之后的第一个 { 开始数花括号，配对归零即函数结束
+  const braceOpen = src.indexOf("{", afterParams);
+  if (braceOpen < 0) return src.slice(start);
+  let depth = 0;
+  for (let i = braceOpen; i < src.length; i++) {
+    if (src[i] === "{") depth++;
+    else if (src[i] === "}") {
+      depth--;
+      if (depth === 0) return src.slice(start, i + 1);
+    }
+  }
+  return src.slice(start);
 };
 
 const POLICY: AttendancePolicy = { photoRequired: true, geoRequired: true, geofenceM: 150, accuracyMaxM: 100 };
@@ -217,6 +247,31 @@ describe("源码守卫：证据链靠写法维持", () => {
     const mw = read("src/middleware.ts");
     const list = mw.slice(mw.indexOf("API_PUBLIC"), mw.indexOf("API_PUBLIC") + 1200);
     expect(list, "attendance 不能出现在 API 公开白名单").not.toContain("attendance");
+  });
+
+  it("政策由业务方在界面决定：动作会夹取合理区间并留痕", () => {
+    const act = strip(read("src/actions/settings.ts"));
+    const body = fnBody(act, "export async function updateAttendancePolicy");
+    expect(body, "updateAttendancePolicy 找不到（断言会空跑）").not.toBe("");
+    // 只有 org 级能改（这些值对所有门店生效）
+    expect(body).toContain("auth.orgLevel");
+    // 0 或负数会让"在店里"失去意义，所以必须夹区间
+    expect(body, "围栏半径必须夹到合理区间").toMatch(/clamp\(input\.geofenceM/);
+    expect(body, "精度上限必须夹到合理区间").toMatch(/clamp\(input\.accuracyMaxM/);
+    expect(body, "改政策要进审计").toContain("audit(");
+
+    // 围栏半径必须是"读出来的"，不是写死的常数
+    const svc = strip(read("src/modules/attendance/service.ts"));
+    expect(svc).toContain("attendanceGeofenceM");
+    expect(svc, "不许在服务端写死 150 米").not.toMatch(/geofenceM:\s*150/);
+  });
+
+  it("门店坐标是要留痕的改动（挪一下围栏就能让越界变正常）", () => {
+    const act = strip(read("src/actions/settings.ts"));
+    const body = fnBody(act, "export async function updateBranch");
+    expect(body).toContain("isValidLatLng(");
+    expect(body, "经纬度必须成对").toContain("Latitude and longitude must be set together");
+    expect(body, "改要围栏坐标要进审计").toContain("ATTENDANCE_GEOFENCE_SET");
   });
 
   it("考勤页不再只列技师，且用同一个打卡组件", () => {

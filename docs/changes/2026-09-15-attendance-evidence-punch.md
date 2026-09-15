@@ -35,22 +35,40 @@ branch: feat/hrm-attendance
 - i18n：`att.*` 从「技师考勤」口径改为全员口径并新增 30+ 键（EN/ZH/BM）；`src/actions/attendance.ts` 与
   `src/components/mechanic/attendance-button.tsx` 删除。
 
+### 补充：私有桶已建 + 坐标/政策可在界面里填（同日追加）
+
+- **Supabase 私有桶已建并验过**：新增 `scripts/provision-private-bucket.ts`（幂等），在项目
+  `dukbfgqbrprivnzcsrlh` 上创建了 `dz-private`（`public=false`）。脚本不是"建完就算"——
+  它会传一个探针对象上去，**用公开地址去取必须失败**，再用 service key 读回来确认可用，然后删掉探针。
+  实测：公开地址 **400**（拒绝）、鉴权读取 ok、探针已清理。顺带确认了 `dz-assets` 是 `public=true`，
+  这正是考勤自拍绝不能走那条路的原因。代码默认桶名就是 `dz-private`，所以 **Vercel 不需要加任何 env**。
+- **坐标与政策改成界面可填**（原来我说"直接改库"）：
+  - `/workshop/settings` 的行车表单里新增**门店坐标**两个输入（Google Maps 右键复制即可），
+    未填的分行在列表上显示琥珀色「未设坐标」；`updateBranch` 接受并校验坐标（必须成对、必须是合法经纬度），
+    且**坐标变更写 AuditLog**（`ATTENDANCE_GEOFENCE_SET`）——老板把围栏悄悄挪一下就能让越界记录变正常，
+    这种改动必须留痕。
+  - 新增「考勤政策」面板（OWNER 专属）：必须拍照 / 必须定位 / 围栏半径 / 精度上限，
+    action `updateAttendancePolicy` 把数值**夹到合理区间**（围栏 10–5000m、精度 5–2000m，0 或负数会让
+    "在店里"失去意义）并写 AuditLog。
+  - 考勤页在「本店没坐标 + 你是 org 级角色」时给一条提示横幅，点进设置——否则所有人都是 NO_GEOFENCE，
+    看起来像功能坏了。
+
 ## 影响
 
 - 打卡不再只是一行时间：每次打卡都有照片、位置、距离和结论，且**结论会如实告诉本人**
   （越界/低精度/无定位/照片重复 → 提示"待主管确认"）。
 - 「谁在店里」有了可核对的依据：面板上每一笔都能点开看照片（走鉴权路由，本人与管理者可见）。
 - 员工自拍与定位**不会**出现在任何公开 URL 上——这是这次改动里最要紧的一条隐私边界。
-- 组织政策可调：围栏半径、精度阈值、是否强制拍照/定位。**门店坐标还没填**（`Branch.latitude/longitude` 为空），
-  此时打卡记为 `NO_GEOFENCE`——是配置缺口，不算员工异常，不计入 exceptionCount。
+- 组织政策可调：围栏半径、精度阈值、是否强制拍照/定位，**都在 /workshop/settings 里填**（不用改库）。
+  门店坐标此前为空，此时打卡记为 `NO_GEOFENCE`——是配置缺口，不算员工异常，不计入 exceptionCount。
 - 数据库：新增 2 表 + 4 列 + 若干索引；迁移 `20260915025446_attendance_evidence`（sqlite，**纯加性**；
   Prisma 对 SQLite 的表重定义会 DROP+重建，但数据由 INSERT…SELECT 带过去，本地实测 Organisation 1 行 / User 16 行未变）。
 - 生产 PG 由构建期 `scripts/sync-prod-schema.mjs` 自动加列建表（本分支合前跑一次 `--check` 复核）。
 
 ## 交接说明
 
-- **验证过的事**：`pnpm exec tsc --noEmit` 0 错误；`pnpm test` **493 通过 / 38 文件**（新增 `tests/attendance.test.ts` 23 例，main 基线 470/37）；
-  `pnpm build` 通过；`pnpm exec playwright test --project=desktop-chromium` **50 通过 · 0 失败**（新增 `e2e/attendance-punch.spec.ts`）。
+- **验证过的事**：`pnpm exec tsc --noEmit` 0 错误；`pnpm test` **495 通过 / 38 文件**（`tests/attendance.test.ts` 25 例，main 基线 470/37）；
+  `pnpm build` 通过；`pnpm exec playwright test --project=desktop-chromium` **51 通过 · 0 失败**（`e2e/attendance-punch.spec.ts` 2 例：填坐标 + 打卡）。
 - **e2e 是真的在打卡**：Chromium 用 `--use-fake-device-for-media-stream` 给合成摄像头
   （不加这两个开关，弹窗永远停在"正在启动摄像头"，测的会是空壳），context 授予 geolocation 并给一个吉隆坡坐标。
   断言链：摄像头 ready → 提交 → 弹窗关闭 → 板上出现可点开的证据 → 本人读该照片 200 且 `image/*` 且 `no-store`
@@ -58,6 +76,8 @@ branch: feat/hrm-attendance
 - **守卫做了反向验证**：`git stash push -- src/ prisma/` 把改动退回 origin/main 状态后，
   `tests/attendance.test.ts` 的 4 条源码守卫失败（旧的 `src/actions/attendance.ts` 回来了、provider 没有 `putPrivate`、
   公共出口没有 `isPrivateObjectKey`、考勤页还在按 MECHANIC 过滤），其余 19 条照常通过。
+  （第二次做了同一件事，但**提交之后 stash 只会退回未提交的那部分**——那次只回退了「设置页/政策」这一增量，
+  于是新增的 2 条守卫失败、其余 23 条通过。两次验证各自对应各自改动的「缺了就会失败」。）
   **一条诚实的例外**：「考勤照片路由不在 API 公开白名单」在旧代码上也通过——旧代码里没有这个路由，
   它守的是一个**保持成立**的不变量，不是一次修复。
 - **踩到的坑（第一版守卫假通过）**：源码守卫一开始用 `not.toContain('role: "MECHANIC"')` 读考勤页，

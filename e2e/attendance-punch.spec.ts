@@ -27,11 +27,44 @@ async function punch(page: Page, kind: "IN" | "OUT") {
   await settle(page);
 }
 
+// 打卡点与门店坐标取同一个位置，后面那条用例才能断言"判定为在店内"。
+const SHOP = { latitude: 3.139, longitude: 101.6869 };
+
 test.describe("attendance: photo + location punch", () => {
+  /**
+   * 先由 OWNER 把门店坐标填进去（走真实的设置界面，不是直接改库）。
+   * 没有坐标时所有打卡都是 NO_GEOFENCE（配置缺口），
+   * 所以"在店内算通过""在店外算越界"这两条判定在浏览器里就永远测不到——这条补上。
+   */
+  test("owner sets the branch coordinates in settings", async ({ browser }) => {
+    const context = await browser.newContext();
+    await setPersona(context, "OWNER");
+    const page = await context.newPage();
+    await page.goto(BASE_URL + "/workshop/settings");
+    await dismissGuide(page);
+
+    // 政策面板要真的渲染出来（这几个开关决定判定结果）
+    await expect(page.getByTestId("attendance-policy")).toBeVisible();
+
+    await page.getByTestId("branch-edit").first().click();
+    await page.getByTestId("branch-latitude").fill(String(SHOP.latitude));
+    await page.getByTestId("branch-longitude").fill(String(SHOP.longitude));
+    // 用带 testid 的保存按钮：页面上还有组织资料表单的 Save，取 first() 会存错东西
+    await page.getByTestId("branch-save").click();
+    await settle(page);
+    await page.reload();
+    await dismissGuide(page);
+
+    await expect(page.getByTestId("branch-edit").first()).toBeVisible();
+    await page.getByTestId("branch-edit").first().click();
+    await expect(page.getByTestId("branch-latitude"), "坐标必须真的存下来了").toHaveValue(String(SHOP.latitude));
+    await context.close();
+  });
+
   test("counter staff punches in with evidence, and the photo is not public", async ({ browser }) => {
     const context = await browser.newContext({
       permissions: ["geolocation"],
-      geolocation: { latitude: 3.139, longitude: 101.6869 },
+      geolocation: SHOP,
     });
     await setPersona(context, "COUNTER_STAFF");
     const page = await context.newPage();
@@ -61,6 +94,10 @@ test.describe("attendance: photo + location punch", () => {
     await expect(page.getByTestId("attendance-check-out")).toBeVisible({ timeout: 20_000 });
     await expect(evidence.first()).toBeVisible({ timeout: 20_000 });
     expect(await evidence.count(), "一笔打卡应产生一条可点开的证据").toBe(before + 1);
+
+    // 门店坐标已在前一条用例里填好、打卡点就在门店上 → 必须算出距离，判定为"在店内"。
+    // 没有距离就等于又退回了 NO_GEOFENCE（服务端没拿到门店坐标）。
+    await expect(evidence.last(), "站在门店里打卡应当算出与门店的距离").toHaveAttribute("title", /from the branch/);
 
     // 2) 照片：本人能从鉴权路由读到，且不许有公开缓存
     const photoHref = await evidence.last().getAttribute("href");
