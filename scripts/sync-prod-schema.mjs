@@ -226,14 +226,25 @@ async function main() {
     sql = diffSql(url);
     console.log("[schema-sync] inspected in " + elapsed(inspectStarted));
   } catch (e) {
-    if (e instanceof PrismaTimeout) {
-      // Fail OPEN on inspection: a read-only check that cannot reach the database must
-      // never block a release. This is the rule the script already had for an unreachable
-      // database; a hang is the same situation with worse manners.
-      console.log("[schema-sync] inspection timed out after " + e.seconds + "s — skipping the check (build continues, schema NOT verified)");
-      return;
+    const why = e instanceof PrismaTimeout
+      ? "inspection timed out after " + e.seconds + "s"
+      : "could not inspect the database (" + String(e.message).split("\n")[0] + ")";
+    if (isProduction && !checkOnly) {
+      // 2026-09-15 生产事故后收紧：以前这里一律 fail-open（"连不上就不检查，让构建继续"），
+      // 结果 owner 合并了带 schema 变更的分支后，构建**成功**、站点**全挂**——
+      // 因为 Prisma 默认 SELECT 全部标量列，缺一列就不是某个功能坏，而是整个站点 500。
+      // 现在：生产环境下"无法验证"= 构建失败。失败的部署会保留上一个能用的版本，
+      // 而"没验证过的部署"会把站点直接打下去——两害相权，取前者。
+      // 本地/预览仍然 fail-open：那里连不上数据库不该拦住任何人。
+      console.error("[schema-sync] " + why + ".");
+      console.error("[schema-sync] In production this fails the build on purpose: we could not verify that");
+      console.error("[schema-sync] the database matches the schema, and Prisma selects every scalar column —");
+      console.error("[schema-sync] one missing column takes the whole site down, not just the new feature.");
+      console.error("[schema-sync] Fix the connection (set DIRECT_URL to the direct Supabase url, port 5432,");
+      console.error("[schema-sync] not the pooler) and redeploy. The previous deployment stays live meanwhile.");
+      process.exit(1);
     }
-    console.log("[schema-sync] could not inspect the database — skipping (" + String(e.message).split("\n")[0] + ")");
+    console.log("[schema-sync] " + why + " — skipping the check (build continues, schema NOT verified)");
     return;
   }
 
