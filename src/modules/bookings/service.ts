@@ -8,6 +8,7 @@ import { messagingModule } from "@/modules/messaging/service";
 import { resolvePromoForBooking, toPromoSnapshot } from "@/modules/marketing/promo-resolve";
 import type { PricedLine } from "@/modules/marketing/promo";
 import type { DbLike } from "@/modules/customers/repository";
+import { allocateJobNumber, retryOnJobNumberConflict } from "@/lib/job-number";
 
 export type BookingStatusInput = BookingStatus;
 
@@ -241,10 +242,10 @@ export class BookingService {
       await this.repo.update(bookingId, { status: "CHECKED_IN" } as never);
       return { bookingId, jobId: null, jobNumber: null, type: "REPAIR", customerId: booking.customerId, motorcycleId: booking.motorcycleId };
     }
-    const res = await db.$transaction(async (tx: DbLike) => {
-      const lastJob = await (tx as PrismaClient).serviceJob.findFirst({ orderBy: { jobNumber: "desc" } });
-      const base = lastJob ? parseInt(lastJob.jobNumber.replace(/\D/g, ""), 10) : 1023;
-      const jobNumber = "DZ" + (isNaN(base) ? 1024 : base + 1);
+    // 算号与插入在同一个事务里；并发抢到同一个号时由 jobNumber 的唯一约束判定输赢，
+    // 输的那笔整笔重来（工单号的定义在 src/lib/job-number.ts，这里不再自己算）
+    const res = await retryOnJobNumberConflict(() => db.$transaction(async (tx: DbLike) => {
+      const jobNumber = await allocateJobNumber(tx);
       // service 内容：counter 可覆盖，缺省用 booking 里 rider 选好的（套餐 + 附加服务）
       const pkgId = opts.packageId ?? booking.servicePackageId ?? undefined;
       const addons = (booking.serviceAddons as { description: string; kind: string; quantity: number; unitPriceSen: number }[] | null) ?? [];
@@ -268,7 +269,7 @@ export class BookingService {
       await jobService.attachPackage(job.id, pkgId, addons, tx);
       await this.repo.update(bookingId, { status: "CHECKED_IN" } as never, tx);
       return { bookingId, jobId: job.id, jobNumber };
-    });
+    }));
     // QUOT-001: 服务 job 建后自动生成报价单（PENDING）；维修 job 不自动建（counter 加配件/工时后 Send）
     if (res && type === "SERVICE") {
       try { await quotationService.send(res.jobId); } catch (e) { console.error("quotation create failed:", e); }

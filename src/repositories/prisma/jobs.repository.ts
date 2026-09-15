@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import type { DbLike, IJobRepository, JobFull } from "@/modules/service-jobs/repository";
 import { db } from "@/lib/db";
+import { allocateJobNumber } from "@/lib/job-number";
 
 const jobInclude = {
   customer: true,
@@ -53,10 +54,8 @@ export class PrismaJobRepository implements IJobRepository {
   countByStatus(status: import("@prisma/client").JobStatus, client?: DbLike) {
     return this.c(client).serviceJob.count({ where: { status } });
   }
-  async nextJobNumber(client?: DbLike) {
-    const c = this.c(client);
-    const last = await c.serviceJob.findFirst({ orderBy: { jobNumber: "desc" } });
-    const base = last ? parseInt(last.jobNumber.replace(/\D/g, ""), 10) : 1023;
-    return "DZ" + (isNaN(base) ? 1024 : base + 1);
+  /** 工单号的唯一定义在 src/lib/job-number.ts，这里只做转发。 */
+  nextJobNumber(client?: DbLike) {
+    return allocateJobNumber(this.c(client));
   }
 }

@@ -17,6 +17,7 @@
 import { PrismaClient } from "@prisma/client";
 import { inventoryService } from "@/modules/inventory/service";
 import { bookingService } from "@/modules/bookings/service";
+import { PrismaJobRepository } from "@/repositories/prisma/jobs.repository";
 
 const db = new PrismaClient();
 const TAG = "perf_repro";
@@ -141,11 +142,84 @@ async function scenarioC() {
   await db.appointmentSlot.delete({ where: { id: slot.id } });
 }
 
+/** 删掉这些工单号对应的工单（连带从属行），让复现脚本可以反复跑 */
+async function cleanupJobs(jobNumbers: string[]) {
+  const ids = (await db.serviceJob.findMany({ where: { jobNumber: { in: jobNumbers } }, select: { id: true } })).map((j) => j.id);
+  if (ids.length === 0) return;
+  const dep = { jobId: { in: ids } };
+  await db.booking.updateMany({ where: dep, data: { jobId: null } });
+  await db.quotation.deleteMany({ where: dep });
+  await db.invoice.deleteMany({ where: dep });
+  await db.checklistExecution.deleteMany({ where: dep });
+  await db.inspectionFinding.deleteMany({ where: dep });
+  await db.customerApproval.deleteMany({ where: dep });
+  await db.jobStatusHistory.deleteMany({ where: dep });
+  await db.serviceJobItem.deleteMany({ where: dep });
+  await db.serviceJobPart.deleteMany({ where: dep });
+  await db.serviceJobPhoto.deleteMany({ where: dep });
+  await db.serviceReminder.deleteMany({ where: dep });
+  await db.serviceHistory.deleteMany({ where: dep });
+  await db.message.deleteMany({ where: dep });
+  await db.review.deleteMany({ where: dep });
+  await db.serviceJob.deleteMany({ where: { id: { in: ids } } });
+}
+
+/**
+ * D：工单号 max+1 —— 十进位数位悬崖（确定性复现，不需要并发）
+ * 现状：orderBy: { jobNumber: "desc" } 是**字符串**排序，而工单号是 "DZ" + 不补零的十进制数。
+ * 于是 DZ9999 排在 DZ10000 **之后**（'9' > '1'），系统认定最大号是 DZ9999 → 下一个给 DZ10000，
+ * 而 DZ10000 已经存在 → 唯一约束冲突。不是「并发才偶发」：过了 9999 号之后**每次建单都失败**，
+ * 且重试算出的还是同一个号（不会自愈）。这条与 PG/sqlite 无关，本地可确定性复现。
+ */
+async function scenarioD() {
+  const branch = await klBranch();
+  const cust = await db.customer.findFirst({ where: { id: { startsWith: "perf_" } }, include: { motorcycles: true } });
+  if (!cust || cust.motorcycles.length === 0) throw new Error("perf.db 里没有带车的合成客户，先跑 seed-volume.ts");
+  const bike = cust.motorcycles[0];
+
+  // 把库摆成「已经发到五位数」的样子
+  const seeded = ["DZ9998", "DZ9999", "DZ10000"];
+  await cleanupJobs(seeded);
+  for (const jobNumber of seeded) {
+    await db.serviceJob.create({ data: { jobNumber, branchId: branch.id, customerId: cust.id, motorcycleId: bike.id, mileage: 0, type: "SERVICE", status: "WAITING" } });
+  }
+
+  // ① 柜台建单这条路（jobService.create → repo.nextJobNumber）
+  const promised = await new PrismaJobRepository().nextJobNumber();
+  let counterError: string | null = null;
+  try {
+    await db.serviceJob.create({ data: { jobNumber: promised, branchId: branch.id, customerId: cust.id, motorcycleId: bike.id, mileage: 0, type: "SERVICE", status: "WAITING" } });
+  } catch (e) { counterError = String((e as Error).message).slice(0, 72); }
+
+  // ② 预约 check-in 这条路（bookings/service.ts 里另有一份同样的 max+1）
+  const date = new Date(Date.now() + 402 * 86400000);
+  const startTime = "23:55";
+  await db.appointmentSlot.deleteMany({ where: { branchId: branch.id, date, startTime } });
+  const slot = await db.appointmentSlot.create({ data: { branchId: branch.id, date, startTime, maxBookings: 1, bookedCount: 0, isHoliday: false } });
+  const booking = (await bookingService.create({ branchId: branch.id, customerId: cust.id, motorcycleId: bike.id, serviceType: "Standard Service", date, timeSlot: startTime, source: "RIDER_APP" })) as { id: string };
+  let checkInError: string | null = null;
+  try { await bookingService.checkIn(booking.id, { mileage: 1000, branchId: branch.id }); }
+  catch (e) { checkInError = String((e as Error).message).slice(0, 72); }
+
+  const ok = promised === "DZ10001" && !counterError && !checkInError;
+  console.log("\n=== D. 工单号 max+1（库里已有 DZ9998 / DZ9999 / DZ10000）===");
+  console.log("  nextJobNumber() 给出 : " + promised + "（应为 DZ10001）");
+  console.log("  柜台建单             : " + (counterError ? "❌ " + counterError : "✅ 成功"));
+  console.log("  预约 check-in        : " + (checkInError ? "❌ " + checkInError : "✅ 成功"));
+  console.log(ok
+    ? "  ✅ 号码单调递增且能落库"
+    : "  ❌ 工单号在四位数用尽后撞唯一约束 —— 此后每次建单都失败且不会自愈");
+
+  await db.booking.deleteMany({ where: { branchId: branch.id, date, timeSlot: startTime } });
+  await db.appointmentSlot.delete({ where: { id: slot.id } });
+  await cleanupJobs(counterError ? seeded : [...seeded, promised]);
+}
 async function main() {
   console.log("目标库: " + (process.env.DATABASE_URL ?? "(来自 .env)"));
   if (!only || only === "A") await scenarioA();
   if (!only || only === "B") await scenarioB();
   if (!only || only === "C") await scenarioC();
+  if (!only || only === "D") await scenarioD();
   await db.$disconnect();
 }
 main().catch(async (e) => { console.error("repro failed:", e); await db.$disconnect(); process.exit(1); });

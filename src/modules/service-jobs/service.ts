@@ -4,6 +4,7 @@ import type { IJobRepository } from "./repository";
 import { PrismaJobRepository } from "@/repositories/prisma/jobs.repository";
 import { canTransitionJob, type JobStatus as StatusT } from "@/lib/state-machines";
 import { db } from "@/lib/db";
+import { retryOnJobNumberConflict } from "@/lib/job-number";
 
 export type JobStatusInput = JobStatus;
 
@@ -69,21 +70,24 @@ export class JobService {
     customerRequest?: string; packageId?: string; mechanicId?: string; type?: "SERVICE" | "REPAIR";
     addons?: { description: string; kind: string; quantity: number; unitPriceSen: number }[];
   }): Promise<{ id: string; jobNumber: string }> {
-    const jobNumber = await this.repo.nextJobNumber();
-    const created = await this.repo.create({
-      jobNumber,
-      branchId: input.branchId,
-      customerId: input.customerId,
-      motorcycleId: input.motorcycleId,
-      mileage: input.mileage,
-      customerRequest: input.customerRequest,
-      servicePackageId: input.packageId || undefined,
-      mechanicId: input.mechanicId || undefined,
-      type: input.type ?? "SERVICE",
-      status: "WAITING",
+    // 算号与落库必须一起重试：并发的两笔会算出同一个号，输的那笔重算再插
+    const created = await retryOnJobNumberConflict(async () => {
+      const jobNumber = await this.repo.nextJobNumber();
+      return this.repo.create({
+        jobNumber,
+        branchId: input.branchId,
+        customerId: input.customerId,
+        motorcycleId: input.motorcycleId,
+        mileage: input.mileage,
+        customerRequest: input.customerRequest,
+        servicePackageId: input.packageId || undefined,
+        mechanicId: input.mechanicId || undefined,
+        type: input.type ?? "SERVICE",
+        status: "WAITING",
+      });
     });
     await this.attachPackage(created.id, input.packageId, input.addons);
-    return { id: created.id, jobNumber };
+    return { id: created.id, jobNumber: created.jobNumber };
   }
 
   /** Attach package line items + counter add-ons to a job (INCLUDED). */
