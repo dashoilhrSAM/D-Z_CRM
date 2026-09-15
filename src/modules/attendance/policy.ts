@@ -18,6 +18,9 @@ export type PunchVerdict =
   | "NO_LOCATION"    // 没拿到定位（室内、拒绝授权）
   | "SUSPECT_REUSE"; // 这张照片之前用过（同一张自拍反复打卡）
 
+/** 全部结论（界面文案与它一一对应，tests/attendance.test.ts 会逐个检查有没有对应 i18n 键）。 */
+export const PUNCH_VERDICTS: PunchVerdict[] = ["OK", "NO_GEOFENCE", "OUT_OF_RANGE", "LOW_ACCURACY", "NO_LOCATION", "SUSPECT_REUSE"];
+
 /** 会计入「异常」的结论。NO_GEOFENCE 是配置问题，不该让员工背。 */
 export const EXCEPTION_VERDICTS: PunchVerdict[] = ["OUT_OF_RANGE", "LOW_ACCURACY", "NO_LOCATION", "SUSPECT_REUSE"];
 

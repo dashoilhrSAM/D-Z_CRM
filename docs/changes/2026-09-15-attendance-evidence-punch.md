@@ -67,7 +67,7 @@ branch: feat/hrm-attendance
 
 ## 交接说明
 
-- **验证过的事**：`pnpm exec tsc --noEmit` 0 错误；`pnpm test` **495 通过 / 38 文件**（`tests/attendance.test.ts` 25 例，main 基线 470/37）；
+- **验证过的事**：`pnpm exec tsc --noEmit` 0 错误；`pnpm test` **496 通过 / 38 文件**（`tests/attendance.test.ts` 25 例，main 基线 470/37）；
   `pnpm build` 通过；`pnpm exec playwright test --project=desktop-chromium` **51 通过 · 0 失败**（`e2e/attendance-punch.spec.ts` 2 例：填坐标 + 打卡）。
 - **e2e 是真的在打卡**：Chromium 用 `--use-fake-device-for-media-stream` 给合成摄像头
   （不加这两个开关，弹窗永远停在"正在启动摄像头"，测的会是空壳），context 授予 geolocation 并给一个吉隆坡坐标。

@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { businessDayKey, businessDayUtc, safeTimezone } from "@/lib/business-day";
 import { haversineMeters, isValidLatLng } from "@/lib/geo";
-import { decideVerdict, rollupDay, type AttendancePolicy } from "@/modules/attendance/policy";
+import { decideVerdict, rollupDay, PUNCH_VERDICTS, type AttendancePolicy } from "@/modules/attendance/policy";
 
 const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -272,6 +272,43 @@ describe("源码守卫：证据链靠写法维持", () => {
     expect(body).toContain("isValidLatLng(");
     expect(body, "经纬度必须成对").toContain("Latitude and longitude must be set together");
     expect(body, "改要围栏坐标要进审计").toContain("ATTENDANCE_GEOFENCE_SET");
+  });
+
+  it("考勤界面用到的每个 i18n 键都真的存在", () => {
+    // 这条守卫是因为一次真实的疏忽：新面板引用了 att.policy-* / att.branch-coords 等键，
+    // 但 i18n.ts 忘了提交（git status 里它还是未暂存的 M）——tsc、build、e2e 全绿，
+    // 因为 t() 找不到键时只是把键名显示出来，没有任何东西会失败。
+    const dict = read("src/lib/i18n.ts");
+    const files = [
+      "src/components/shared/attendance-punch.tsx",
+      "src/components/workshop/attendance-panel.tsx",
+      "src/components/workshop/attendance-policy-panel.tsx",
+      "src/app/workshop/attendance/page.tsx",
+      "src/app/mechanic-app/profile/page.tsx",
+      "src/app/workshop/settings/page.tsx",
+      "src/components/workshop/settings-forms.tsx",
+    ];
+    const used = new Set<string>();
+    for (const f of files) {
+      const src = read(f);
+      // 注意是 (?:pl)? 而不是 tpl?：后者是"t + p + 可选的 l"，只匹配 tpl(，
+      // 于是 t( 的键一个也扫不到——第一版就是这么写的，守卫"通过"了两轮都没发现。
+      // 结尾必须是字母/数字：t("att.verdict-" + verdict) 这种**动态拼键**不能被当成一个键，
+      // 否则守卫会去要一个永远不存在的 att.verdict-
+      for (const m of src.matchAll(/\bt(?:pl)?\("((?:att|mech|nav|common|ws)\.[a-z0-9.-]*[a-z0-9])"/g)) used.add(m[1]);
+    }
+    expect(used.size, "没扫到任何 i18n 键——正则失效了，守卫会空跑").toBeGreaterThan(20);
+    // 防空跑：挑一个**只用 t() 调用**的键，它必须被扫到（tpl( 那批扫到了也不说明问题）
+    expect(used.has("att.policy-title"), "t() 形式的键没被扫到——正则又只匹配了 tpl(").toBe(true);
+    const missing = [...used].filter((k) => !dict.includes('"' + k + '":'));
+    expect(missing, "这些键在 i18n.ts 里不存在，界面上会直接显示键名：" + missing.join(", ")).toEqual([]);
+
+    // 动态拼出来的那批（att.verdict-<verdict>）单独钉：每个结论都必须有人话可显示，
+    // 否则新加一个 verdict 时界面会直接显示 "att.verdict-xxx"。
+    for (const v of PUNCH_VERDICTS) {
+      const key = "att.verdict-" + v.toLowerCase().replace(/_/g, "-");
+      expect(dict.includes('"' + key + '":'), "结论 " + v + " 没有对应文案（" + key + "）").toBe(true);
+    }
   });
 
   it("考勤页不再只列技师，且用同一个打卡组件", () => {
