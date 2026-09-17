@@ -1,4 +1,4 @@
-# HANDOFF — D&Z Platform（2026-09-15 16:15）
+# HANDOFF — D&Z Platform（2026-09-17 11:20）
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
@@ -6,7 +6,11 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**HRM 考勤（打卡 + 照片 + 定位）已合并上线，并在生产上真跑通**（PR #28，今天 15:03 部署）。同一次部署引发过整站 500——生产库缺整批 schema——已用加性 DDL 修好，并新增「生产无法验证 schema 就拦住构建」的护栏。**两条分支待审**：`fix/schema-drift-fails-the-build`（护栏，建议优先合）、`fix/job-number-sequence`（工单号序列，仍未合）。本地基线全绿：tsc 0 / vitest **500**（39 文件）/ build 通过 / Playwright **51 通过·0 失败**；生产 `/` 200、schema 复检 agree。
+**🔴 生产部署目前是停的**：护栏（PR #29）与考勤 P2（PR #30）都已合进 main，但**两次生产部署都失败了**——构建期 schema 验证连不上生产库（`DIRECT_URL` 在 Vercel Production 里没生效，回落到池化 `DATABASE_URL`），护栏按设计 exit 1 拦住构建。**这是护栏在起作用，不是新 bug**；以前同样的连不上是静默放行的（fail-open），正是 2026-09-15 整站 500 的病因。
+
+**生产本身是健康的**：失败的部署不覆盖线上，`/` 200，仍跑上一个可用版本 **e86d7f4**（= HRM 考勤 P1；P2 与护栏都还没上线）。本地基线全绿：tsc 0 / vitest **521**（39 文件）/ build 通过 / Playwright **55 通过 · 0 失败**；生产 schema 复检：PR #29 的 schema 与库 **agree**，PR #30 的只剩 13 条**纯加性**语句（新表 AttendanceReview）。
+
+**owner 要做的第一件事**：在 Vercel → d-z-crm → Settings → Environment Variables 的 **Production** 环境加 `DIRECT_URL`（直连 5432，值同本地 `.env` 的 `DST_DATABASE_URL`），然后 redeploy。**在它修好之前，main 上任何一次部署都会失败**（护栏已上线）。详见 `docs/changes/2026-09-17-deploy-blocked-by-schema-verification.md`。
 
 ## 会话信息
 - 原会话 ID：session-c5af9e3c-d22c-49a6-8fde-3c246dbfe102（「继续 D&Z」；本轮：HRM 考勤 P1 全链路 → 合并上线 → 生产 schema 事故与修复 → 护栏 → 权限矩阵收敛 → 地址/坐标落地 → 本次 session-pack）
@@ -24,19 +28,26 @@
 - **工单号序列修复（`fix/job-number-sequence`，未合并）**：字符串排序当数字用（DZ9999 > DZ10000，四位数用尽即永久卡死）+ 外来前缀污染（PERF900299 → DZ900300）；收敛到 `src/lib/job-number.ts` + 撞唯一约束重试。
 
 ## 下一步（按优先级）
-1. **合并 `fix/schema-drift-fails-the-build`**（护栏）——建议在**下一次改 schema 之前**合，否则仍是「构建成功但站点可能挂」。
-2. **验证 `DIRECT_URL` 生效**（owner 已在 Vercel 加好；我无权限加也验不了）：下次部署在 Build Logs 搜 `schema-sync`，出现 `database from DIRECT_URL` 即生效；仍显示 `from DATABASE_URL` 说明没读到（多半只加了 Preview 环境）。
-3. **合并 `fix/job-number-sequence`**（生产还没吃到这个修复；工单号未到五位数所以暂不触发）。
-4. **考勤 P2**：异常队列 + 更正审批（`AttendanceCorrection` 表已建）、月度报表 + CSV 导出。
+1. **🔴 owner：在 Vercel 的 Production 环境加 `DIRECT_URL`，然后 redeploy。** 这是当前唯一的阻塞点——
+   加好之前 main 上**任何**部署都会失败（护栏已上线）。值同本地 `.env` 的 `DST_DATABASE_URL`：
+   `postgresql://postgres:<密码>@db.dukbfgqbrprivnzcsrlh.supabase.co:5432/postgres`（**5432 直连，不是 6543 池化**）。
+   加完后在 Build Logs 搜 `[schema-sync]`：第一行应是 `database from DIRECT_URL`；仍是 `from DATABASE_URL` 就是没读到。
+2. **部署成功后核对一次**：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check` 应输出
+   `schema and database agree`（P2 的 AttendanceReview 由那次部署自动建）。
+3. **`fix/job-number-sequence` 必须先 rebase 到 main 再合**：它是在 HRM 之前分出去的，schema 落后一大截。
+   实测（只读 diff）：拿它去部署会得到 **16 条全是 DROP/TRUNCATE**（`DROP COLUMN "workedMinutes"`、`DROP TABLE "AttendancePunch"` …），
+   护栏会拒绝并 exit 1。**这不是 bug，是护栏在阻止生产库被清空**。
+4. **考勤 P2 的后续（P2 本体已合并）**：更正审批（`AttendanceCorrection` 表已建但零调用、没有 relation——做之前先定它的形状）、
+   员工自助查看本人历史、导出加照片链接。
 5. **生产数据卫生（待 owner 决定）**：Testing 账号（test.owner / test.mech6 等）及其打卡记录是否清理。
 6. **逾期待办**：经销商验证 59e04e5e、WhatsApp 真机上线 92b29072（含 Vercel env）。
 7. 本地可选：`.vercel/project.json` 指向失效项目 id，`npx vercel link --scope dashoilhrsams-projects --project d-z-crm` 重链（需要权限）。
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm exec tsc --noEmit`：**0**（务必 `set -o pipefail`）
-- `pnpm test`：**500 通过 / 39 文件**（含 `tests/attendance.test.ts` 25 例、`tests/role-matrix.test.ts` 4 例）
+- `pnpm test`：**521 通过 / 39 文件**（含 `tests/attendance.test.ts` 47 例、`tests/role-matrix.test.ts` 4 例）
 - `pnpm build`：通过（改源码后必须 build → kickstart 三端 → 才跑 e2e）
-- `pnpm exec playwright test --project=desktop-chromium`：**51 通过 · 0 失败**（约 6 分钟；会 wipe+seed `prisma/e2e.db` 并重启 :3102）
+- `pnpm exec playwright test --project=desktop-chromium`：**55 通过 · 0 失败**（约 5.5 分钟；会 wipe+seed `prisma/e2e.db` 并重启 :3102）
 - 生产 schema 漂移：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check` → 期望 `schema and database agree`
 - 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
 
@@ -48,10 +59,10 @@
 - 生产：https://d-z-crm.vercel.app （push main 自动部署；**带 schema 变更的部署前先确认 DIRECT_URL 生效**）
 
 ## git 状态
-- 当前分支：`fix/schema-drift-fails-the-build`（ceeccdb + 本条 HANDOFF 提交，已推送）；未提交 0（tracked）
-- main = **e86d7f4**（PR #28 `feat/hrm-attendance` 已合并）
-- **待审分支**：`fix/schema-drift-fails-the-build` · `fix/job-number-sequence`
-- 已合并并删除：`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity` · `feat/hrm-attendance`
+- main = **6a726b9**（PR #30 `feat/attendance-p2-review-and-reports` 已合并）；**线上正在跑的仍是 e86d7f4**（最后一个部署成功的）
+- 已合并：PR #29 `fix/schema-drift-fails-the-build`（护栏，代码在 main 上但**从未成功部署**）· PR #30 考勤 P2 ·
+  `fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity` · `feat/hrm-attendance`
+- **仍未合并**：`fix/job-number-sequence`（**需先 rebase 到 main**，见「下一步」第 3 条）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本、`screenshots/`（含 `hrm-local/`、`prod/` 截图）、`docs/templates/` 等未跟踪产物，加文件逐个列出
 
 ## 关键决策与约定
@@ -70,7 +81,16 @@
 - 源码守卫的取函数体助手别按「顶格两空格闭合花括号」截断：会被函数内 `if` 块或**参数列表里的内联对象类型**提前截断（本轮连栽两次），要按括号配对。
 - **大文件慎用 read→write 往返**：本轮 HANDOFF 的 read+concat+write 曾静默丢掉尾 18 行；改这类文件要 `git show` 抽原文用 shell 拼接，并**用 diff 校验尾段一字未改**。macOS 是 BSD sed，`sed -n '1,/x/{...}'` 这种块语法会报错并使输出为空。
 - 真机定位实测：桌面约 ±35 m、手机 ±11 m；150 m 围栏覆盖得住（生产实测距门店 52 m 判 OK）。
-- **Vercel CLI 权限**：本机登录 `dashoilai5-3794`，可列部署/读部署元数据（`inspect`），但**读不到构建日志与环境变量**（404/403）；`--scope dashoilhrsams-projects` 是必须的（`.vercel/project.json` 指向失效项目）。
+- **Vercel CLI 权限**：本机登录 `dashoilai5-3794`，可列部署/读部署元数据（`inspect` + `vercel ls <project>`），但**读不到构建日志与环境变量**——`inspect --logs` 与 REST `/v3/deployments/<id>/events` 都返回 404，`env ls` 报「项目已删除或已转移」；`.vercel/project.json` 里的 `orgId` 是**另一个团队**，照它查什么都查不到。
+  → **排查构建失败只能靠「本地复现 + 让 owner 贴日志」，别再花时间试图在线读日志。**
+- **部署失败的三种「快速失败」（都在 `next build` 之前，约 20–25 秒）**：① `prisma generate` 失败（本地实测 1.1s，所以"快"不等于"不可能"）
+  ② schema 验证连不上库 → 护栏 exit 1（本地实测 **<1s**）③ diff 里出现 DROP/TRUNCATE → 拒绝并 exit 1。
+  成功的部署要 1–4 分钟，所以**看部署耗时就能判断失败在哪一段**。
+- **本地复现护栏的失败路径**（安全，不碰生产，<1s 出结果）：
+  `VERCEL_ENV=production DATABASE_URL="postgresql://postgres:x@127.0.0.1:59999/postgres" node scripts/sync-prod-schema.mjs`
+- **判断一条分支能不能部署，不用真部署**（只读）：`git show <branch>:prisma/schema.pg.prisma > /tmp/b.prisma` 再
+  `npx prisma migrate diff --from-url "$DST_DATABASE_URL" --to-schema-datamodel /tmp/b.prisma --script`，
+  最后 `grep -ciE '\b(DROP|TRUNCATE)\b'` 数破坏性语句。**stale 分支会在这里现原形**（实测 `fix/job-number-sequence` 16/16 全是 DROP）。
 - Prisma 对 SQLite 的「表重定义」迁移会 DROP+CREATE，但数据由 INSERT…SELECT 带过，本地实测行数不变，属正常。
 - 生产 `AttendancePunch` 已有 2 条测试账号打卡（Testing Owner / Testing Mechanic 6），照片在私有桶、公开地址 400。
 
@@ -81,9 +101,10 @@
 ## 新会话头 10 分钟
 1. **探活**：`:3002` / `:3003` / `:3102` 的 `/login` 应 200；另 `curl -s -o /dev/null -w %{http_code} https://d-z-crm.vercel.app/` 应 200。挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **查 git**：`git fetch --prune` → 两条待审分支（`fix/schema-drift-fails-the-build` · `fix/job-number-sequence`）合没合；合了先 `git merge-base --is-ancestor <b> main` 验过再删
-4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**500**）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）+ 生产 drift `--check`
-5. **挑下一步**：优先「护栏合并 → 验证 DIRECT_URL → job-number 合并 → 考勤 P2」。**改 schema 前必读**「关键决策与约定」里生产 schema 那条。
+3. **查 git + 查部署**：`git fetch --prune`；再 `npx vercel ls d-z-crm --scope dashoilhrsams-projects` 看最近部署是 Ready 还是 Error。
+   **main 上有提交 ≠ 线上跑的是它**——当前正是这个状态（main = 6a726b9，线上 = e86d7f4）。
+4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**521**）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）+ 生产 drift `--check`
+5. **挑下一步**：**先确认「下一步」第 1 条那条阻塞还在不在**（`DIRECT_URL` 没生效时，任何部署都白搭）→ 再看 job-number rebase → 再往下做功能。**改 schema 前必读**「关键决策与约定」里生产 schema 那条。
 ## 历史段落（冻结于 2026-09-11，逐次改动的原始记录）
 
 **🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
