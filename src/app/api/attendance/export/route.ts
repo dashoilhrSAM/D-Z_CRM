@@ -35,8 +35,16 @@ export async function GET(req: NextRequest) {
   if (!org) return NextResponse.json({ ok: false, error: "No organisation" }, { status: 500 });
 
   const sp = req.nextUrl.searchParams;
+  // **没有 preset 但给了区间 = custom。**
+  //
+  // 这一行修的是一个真实缺陷（2026-09-17 在生产上实测到）：页面的「导出 CSV」链接只带
+  // from/to（见 attendance-range-picker 的 exportHref），而 resolveRange 的 preset 缺省是
+  // "today"，**"today" 会忽略 from/to** —— 于是「导出本月」静默变成「导出今天」：
+  // 前端选 2026-09 导出只拿到一行占位 "(no records in range)"，而同一页的 KPI 写着 2 人天。
+  // 一个只给起止日期的入口，就该按起止日期取数。
+  const preset = sp.get("preset") ?? (sp.get("from") || sp.get("to") ? "custom" : null);
   const range = resolveRange({
-    preset: sp.get("preset"),
+    preset,
     from: sp.get("from"),
     to: sp.get("to"),
     timezone: safeTimezone(org.timezone),

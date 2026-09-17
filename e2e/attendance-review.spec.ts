@@ -170,6 +170,18 @@ test.describe("attendance P2: range report + flag review", () => {
     // 时间是按组织时区渲染的 HH:MM，不是 ISO 串
     expect(body).toMatch(/,\d{2}:\d{2},/);
 
+    // ⚠️ 上面那条断言**不够**，它第一次就放过去了一个真缺陷：本用例造的打卡就在「今天」，
+    // 所以即使导出把 from/to 整段丢掉、退化成「今天」，断言照样通过。
+    // 真正能钉死的是**反向**那条：选一段肯定没有记录的区间，导出里就必须**没有**本人。
+    const past = await page.request.get(BASE_URL + "/api/attendance/export?from=2020-01-01&to=2020-01-02");
+    expect(past.status()).toBe(200);
+    const pastBody = (await past.text()).replace(/^\uFEFF/, "");
+    expect(
+      pastBody,
+      "区间外不能出现本人的记录——出现了就说明导出丢掉了 from/to（页面的导出链接只带 from/to，曾经就这样静默导成了「今天」）",
+    ).not.toContain("Daniel Tan");
+    expect(pastBody, "空区间要给占位行，而不是一个只有表头的空文件").toContain("(no records in range)");
+
     await context.close();
   });
 });
