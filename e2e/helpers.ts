@@ -24,8 +24,20 @@ export async function setPersona(context: BrowserContext, persona: DemoPersona) 
   await page.fill('form input:not([type="password"])', account.email);
   await page.fill('input[type="password"]', "Dashoil@!789");
   await page.getByRole("button", { name: /sign in/i }).click();
-  // 等待 session cookie 写入（跳转或 header 更新）
-  await page.waitForTimeout(1500);
+  // 等**登录真的完成**（Supabase 落下 sb-*-auth-token），而不是睡固定 1.5 秒。
+  //
+  // 固定 sleep 是在赌「一次 auth 往返一定快过 1.5 秒」。套件变长、机器忙、网络抖一下就会输；
+  // 输了以后**不会在这里报错**，而是让后面每条断言都在登录页上跑，症状是
+  // 「某个 testid 一个都找不到」，看起来像功能坏了（2026-09-17 全量跑时
+  // promo-at-checkin 就这么失败过一次，单独跑与再跑全量都通过——典型的竞态）。
+  // middleware 认的就是这个 cookie（见 src/middleware.ts 顶部注释），所以它是精确的前置条件。
+  await expect
+    .poll(async () => (await context.cookies()).some((c) => /-auth-token/.test(c.name)), {
+      timeout: 30_000,
+      message: "登录没有落下 Supabase auth cookie —— 后面的断言会全部跑在未登录的页面上",
+    })
+    .toBe(true);
+  await page.waitForTimeout(300);
   await page.close();
 }
 

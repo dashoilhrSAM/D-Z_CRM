@@ -1379,6 +1379,7 @@ model AttendancePunch {
   verdict      String   @default("OK") // OK|OUT_OF_RANGE|LOW_ACCURACY|NO_LOCATION|NO_GEOFENCE|SUSPECT_REUSE
   note         String?
   createdAt    DateTime @default(now())
+  reviews      AttendanceReview[]
   @@index([userId, businessDate])
   @@index([branchId, businessDate])
   @@index([photoSha256])
@@ -1396,6 +1397,31 @@ model AttendanceCorrection {
   approvedAt  DateTime?
   createdAt   DateTime  @default(now())
   @@index([punchId])
+}
+
+/**
+ * 异常处置：主管对一笔异常打卡的表态（HRM P2）。
+ *
+ * 为什么不给 AttendancePunch 加一个 reviewedBy 列：打卡是**不可变证据链**，
+ * 原始判定必须原样留着。「人对这个判定的看法」是另一件事，所以另起一张只追加的表；
+ * 改了主意就再追加一条，最新的算数（见 modules/attendance/ledger.ts 的 latestReviews）。
+ *
+ * 处置**不改变** Attendance.exceptionCount —— 那个数字回答的是「系统当时判了几笔异常」，
+ * 抹掉它等于篡改事实。界面同时显示「记录到的异常」与「还没处置的」。
+ */
+model AttendanceReview {
+  id         String   @id @default(cuid())
+  punchId    String
+  // 有 relation 才问得出「哪些异常还没人处置」（reviews: { none: {} }）——那正是工作队列的定义。
+  // 只存 punchId 字符串的话，要问这个问题就得先把全部 id 拉回内存再 notIn，区间一大就退化成全表扫描。
+  punch      AttendancePunch @relation(fields: [punchId], references: [id], onDelete: Cascade)
+  decision   String   // CONFIRMED（判定成立）| DISMISSED（判定不成立）
+  reviewedBy String
+  note       String?
+  createdAt  DateTime @default(now())
+  @@index([punchId])
+  @@index([reviewedBy, createdAt])
+  @@index([createdAt])
 }
 
 model ServiceType {
