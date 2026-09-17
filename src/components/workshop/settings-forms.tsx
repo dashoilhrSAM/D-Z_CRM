@@ -53,7 +53,14 @@ export function LostReasonsEditor({ current }: { current: string }) {
   );
 }
 
-export function BranchManager({ branches }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null; appointmentCapacity: number | null; latitude: number | null; longitude: number | null }[] }) {
+/**
+ * 分行管理面板。
+ *
+ * `canEditIdentity`：能不能改**门店身份**（店名/城市）。只有 org 级能——
+ * `updateBranch` 对非 org 会**静默忽略** name/city（只放行运营细节），
+ * 所以非 org 时这里不渲染那两个输入框：填了、提示保存成功、值却没变是最糟的一种失败。
+ */
+export function BranchManager({ branches, canEditIdentity = true }: { branches: { id: string; name: string; city: string; phone: string | null; address: string | null; isMain: boolean; operatingHours: string | null; appointmentCapacity: number | null; latitude: number | null; longitude: number | null }[]; canEditIdentity?: boolean }) {
   const router = useRouter();
   const lang = useLang();
   const [nf, setNf] = useState({ name: "D&Z Smart Workshop", city: "", phone: "", address: "" });
@@ -81,8 +88,20 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
         {branches.map((b) => editingId === b.id ? (
           <div key={b.id} className="rounded-lg border p-3 space-y-2 bg-muted/20">
             <div className="grid grid-cols-2 gap-2">
-              <input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder={t("ws.products.col.name", lang)} />
-              <input className={inputCls} value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} placeholder={t("settings-form.city", lang)} />
+              {canEditIdentity ? (
+                <>
+                  <input className={inputCls} value={edit.name} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder={t("ws.products.col.name", lang)} />
+                  <input className={inputCls} value={edit.city} onChange={(e) => setEdit({ ...edit, city: e.target.value })} placeholder={t("settings-form.city", lang)} />
+                </>
+              ) : (
+                <>
+                  {/* 非 org 级：门店身份只读（服务端也会忽略这两个字段） */}
+                  <div className={(inputCls + " text-muted-foreground").replace("bg-background", "bg-muted/40")} data-testid="branch-name-readonly">
+                    {edit.name} · {edit.city}
+                  </div>
+                  <div />
+                </>
+              )}
               <input className={inputCls} value={edit.phone} onChange={(e) => setEdit({ ...edit, phone: e.target.value })} placeholder={t("common.phone", lang)} />
               <input className={inputCls} value={edit.address} onChange={(e) => setEdit({ ...edit, address: e.target.value })} placeholder={t("form.address", lang)} />
               <input className={inputCls} type="number" min="1" value={edit.capacity} onChange={(e) => setEdit({ ...edit, capacity: e.target.value })} placeholder={t("settings-form.no-capacity", lang)} />
@@ -128,14 +147,18 @@ export function BranchManager({ branches }: { branches: { id: string; name: stri
           </div>
         ))}
       </div>
-      <div className="mt-3 grid grid-cols-4 gap-2 border-t pt-3">
-        <input className={inputCls} placeholder={t("settings-form.city", lang)} value={nf.city} onChange={(e) => setNf({ ...nf, city: e.target.value })} />
-        <input className={inputCls} placeholder={t("common.phone", lang)} value={nf.phone} onChange={(e) => setNf({ ...nf, phone: e.target.value })} />
-        <input className={inputCls + " col-span-2"} placeholder={t("form.address", lang)} value={nf.address} onChange={(e) => setNf({ ...nf, address: e.target.value })} />
-        <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium col-span-4" disabled={!nf.city} onClick={async () => { await createBranch(nf); setNf({ name: "D&Z Smart Workshop", city: "", phone: "", address: "" }); router.refresh(); }}>
-          {t("settings-form.add-branch", lang)}
-        </button>
-      </div>
+      {/* 新增分行是**组织结构**变更，只有 org 级能做（createBranch 本身也是 org 级门禁）——
+          非 org 时连表单都不给，否则就是"能填、点下去报 Only the owner can add branches"。 */}
+      {canEditIdentity && (
+        <div className="mt-3 grid grid-cols-4 gap-2 border-t pt-3">
+          <input className={inputCls} placeholder={t("settings-form.city", lang)} value={nf.city} onChange={(e) => setNf({ ...nf, city: e.target.value })} />
+          <input className={inputCls} placeholder={t("common.phone", lang)} value={nf.phone} onChange={(e) => setNf({ ...nf, phone: e.target.value })} />
+          <input className={inputCls + " col-span-2"} placeholder={t("form.address", lang)} value={nf.address} onChange={(e) => setNf({ ...nf, address: e.target.value })} />
+          <button className="rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-sm font-medium col-span-4" disabled={!nf.city} onClick={async () => { await createBranch(nf); setNf({ name: "D&Z Smart Workshop", city: "", phone: "", address: "" }); router.refresh(); }}>
+            {t("settings-form.add-branch", lang)}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

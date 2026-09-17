@@ -7,7 +7,13 @@ import { t } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
 
-/** Developer Settings：密码门禁 + 角色×模块访问矩阵 + 数据管理（仅 OWNER）。 */
+/**
+ * Developer Settings：密码门禁 + 角色×模块访问矩阵 + 数据管理（仅 OWNER / SUPER_ADMIN）。
+ *
+ * ⚠️ 2026-09-17 刻意**不**把 MANAGER 放进来，尽管 owner 要求「manager 有跟 owner 一样的后台权限」：
+ * 这个页面能改角色×模块的权限矩阵，也就是**给自己加权限**——把提权入口交出去，等于前面所有的红线都白设。
+ * 「后台功能对齐」到这一页为止。
+ */
 export default async function DeveloperSettingsPage() {
   const lang = await getLang();
   const session = await getSessionUser();

@@ -17,12 +17,21 @@ export const ROLE_MODULES: Record<string, Record<string, PermissionAction[]>> = 
   SUPER_ADMIN: { "*": ["view", "create", "edit", "delete", "export"] },
   OWNER: { "*": ["view", "create", "edit", "delete", "export"] },
   HEAD_OFFICE_ADMIN: { "*": ["view", "create", "edit", "delete", "export"] },
-  MANAGER: {
-    "*": ["view", "create", "edit", "export"],
-    FINANCE: ["view", "export"],
-    SETTINGS: ["view", "edit"],
-    USERS: ["view", "create", "edit"],
-  },
+  /**
+   * MANAGER = 后台功能与 OWNER 完全对齐（2026-09-17 owner 要求「manager 拥有跟 owner 一样的权限去做管理」）。
+   *
+   * ⚠️ 这里**只能**写 `"*"`，因为 `defaultAllowed()` 一见到 `"*"` 就立刻 return——
+   * 同一角色下的**模块级条目永远不会被读**。原来这里还写着
+   * `FINANCE: ["view","export"]` / `SETTINGS` / `USERS` 三行，那是**死代码**：
+   * 看起来在限制经理不能改财务，实际上通配早就把 create/edit 给出去了。
+   * 留着比删掉更危险（下一个人会照着它做判断），所以删掉并留这条说明。
+   * （同样的"影子"也存在于 SALES_MANAGER / SERVICE_MANAGER / PARTS_MANAGER 的模块清单上——
+   *  那些是**既有行为**，动它们等于**收回**权限，是另一件事，本轮刻意不碰。）
+   *
+   * 这条只管「能不能做这个动作」，**不管「看得见哪几家店」**——后者是 branch-scope 的
+   * `isOrgLevelRole`，MANAGER 仍然不是 org 级（数据限本店）。
+   */
+  MANAGER: { "*": ["view", "create", "edit", "delete", "export"] },
   SALES_MANAGER: {
     "*": ["view", "export"],
     // HRM: 销售团队的考勤（本店的更正由销售经理批）

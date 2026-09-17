@@ -3,7 +3,7 @@ import { Users, CalendarClock, Bot, Star, Plug, ShieldCheck, FileUp, MessageSqua
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { OrgProfileForm, BranchManager, ServiceTypeManager, LostReasonsEditor, MyBranchSettings } from "@/components/workshop/settings-forms";
-import { isOrgLevelRole } from "@/lib/branch-scope";
+import { isOrgLevelRole, canManageOrgSettings } from "@/lib/branch-scope";
 import { QrSettings } from "@/components/workshop/qr-settings";
 import { AttendancePolicyPanel } from "@/components/workshop/attendance-policy-panel";
 import { getLang } from "@/lib/get-lang";
@@ -16,8 +16,12 @@ export const dynamic = "force-dynamic";
 export default async function SettingsPage() {
   const lang = await getLang();
   const session = await getSessionUser();
-  // 严格 scope：org 级(OWNER/SUPER_ADMIN/HEAD_OFFICE_ADMIN)管理全部份；branch 级(MANAGER 等)只能看/改自己分行
+  // 两条轴，别再合并（2026-09-17 owner 要求「manager 有跟 owner 一样的后台权限，但数据仍限本店」）：
+  //  · isOrgLevel    = **数据范围**：看得到/改得了别的分店吗（只 org 级）
+  //  · fullBackOffice = **功能开关**：能不能用总部级后台功能（含 MANAGER）
+  // 下面凡是"列哪些数据"用 isOrgLevel，"显示哪些表单/入口"用 fullBackOffice。
   const isOrgLevel = session.kind === "staff" && isOrgLevelRole(session.role);
+  const fullBackOffice = session.kind === "staff" && canManageOrgSettings(session.role);
   const org = await db.organisation.findFirst();
   const myBranch = session.branchId ? await db.branch.findUnique({ where: { id: session.branchId } }) : null;
   const organs = myBranch ? [myBranch] : [];
@@ -34,9 +38,11 @@ export default async function SettingsPage() {
     { href: "/workshop/automations", label: t("ws.settings.link.automations", lang), desc: t("ws.settings.link.automations-desc", lang), icon: Bot },
     { href: "/workshop/messaging/templates", label: t("ws.settings.link.templates", lang), desc: t("ws.settings.link.templates-desc", lang), icon: MessageSquare },
     { href: "/workshop/loyalty", label: t("ws.settings.link.loyalty", lang), desc: t("ws.settings.link.loyalty-desc", lang), icon: Star },
-    ...(isOrgLevel ? [{ href: "/workshop/integrations", label: t("ws.settings.link.integrations", lang), desc: t("ws.settings.link.integrations-desc", lang), icon: Plug }] : []),
-    ...(isOrgLevel ? [{ href: "/workshop/settings/audit-logs", label: t("ws.settings.link.audit", lang), desc: t("ws.settings.link.audit-desc", lang), icon: ShieldCheck }] : []),
+    ...(fullBackOffice ? [{ href: "/workshop/integrations", label: t("ws.settings.link.integrations", lang), desc: t("ws.settings.link.integrations-desc", lang), icon: Plug }] : []),
+    ...(fullBackOffice ? [{ href: "/workshop/settings/audit-logs", label: t("ws.settings.link.audit", lang), desc: t("ws.settings.link.audit-desc", lang), icon: ShieldCheck }] : []),
     { href: "/workshop/import", label: t("ws.settings.link.import", lang), desc: t("ws.settings.link.import-desc", lang), icon: FileUp },
+    // Developer（角色×模块矩阵编辑器）**刻意不给 MANAGER**：改矩阵 = 给自己加权限，是一条自提权路径。
+    // 「后台功能跟 owner 一样」不等于「能把提权入口也交出去」。
     ...(isOrgLevel ? [{ href: "/workshop/settings/developer", label: t("ws.settings.link.developer", lang), desc: t("ws.settings.link.developer-desc", lang), icon: Code2 }] : []),
   ];
   return (
@@ -46,7 +52,7 @@ export default async function SettingsPage() {
         <p className="text-sm text-muted-foreground">{t("ws.settings.subtitle", lang)}</p>
       </div>
 
-      {isOrgLevel ? (
+      {fullBackOffice ? (
         <>
           <div className="grid md:grid-cols-2 gap-5">
             <OrgProfileForm org={{ name: org!.name, contactPhone: org!.contactPhone, contactEmail: org!.contactEmail, address: org!.address, taxId: org!.taxId, timezone: org!.timezone, currency: org!.currency }} />
@@ -68,7 +74,12 @@ export default async function SettingsPage() {
               ))}
             </div>
           </div>
-          <BranchManager branches={branches.map((b) => ({ id: b.id, name: b.name, city: b.city, phone: b.phone, address: b.address, isMain: b.isMain, operatingHours: b.operatingHours, appointmentCapacity: b.appointmentCapacity, latitude: b.latitude, longitude: b.longitude }))} />
+          {/* 店名/城市是门店身份，只有 org 级能改（updateBranch 对非 org 会**静默忽略**这两个字段）——
+              所以非 org 时不渲染输入框，避免"填了、保存成功、但没变"这种静默失败。 */}
+          <BranchManager
+            canEditIdentity={isOrgLevel}
+            branches={branches.map((b) => ({ id: b.id, name: b.name, city: b.city, phone: b.phone, address: b.address, isMain: b.isMain, operatingHours: b.operatingHours, appointmentCapacity: b.appointmentCapacity, latitude: b.latitude, longitude: b.longitude }))}
+          />
           <AttendancePolicyPanel
             values={{
               photoRequired: org!.attendancePhotoRequired,
