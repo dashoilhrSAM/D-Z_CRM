@@ -6,11 +6,14 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**🔴 生产部署目前是停的**：护栏（PR #29）与考勤 P2（PR #30）都已合进 main，但**两次生产部署都失败了**——构建期 schema 验证连不上生产库（`DIRECT_URL` 在 Vercel Production 里没生效，回落到池化 `DATABASE_URL`），护栏按设计 exit 1 拦住构建。**这是护栏在起作用，不是新 bug**；以前同样的连不上是静默放行的（fail-open），正是 2026-09-15 整站 500 的病因。
+**✅ 2026-09-17 的三连任务全部收尾：部署恢复、P2 上线、验收缺陷已修。** 那一轮两连败的根因是 Supabase **直连主机只有 IPv6**（`db.<ref>.supabase.co` 无 A 记录），而 **Vercel 构建出站只有 IPv4** → 连不上 → 护栏 fail-closed。改成 **Supavisor 会话池**地址（`postgres.<ref>@aws-0-ap-southeast-1.pooler.supabase.com:5432`）后部署一次过。
+这也是**构建期 schema 自动同步第一次真正生效**——此前它一直是 fail-open 地静默跳过，每次改 schema 都是人在本地手工补的；护栏只是把这份长期的静默变成了响亮的失败。
 
-**生产本身是健康的**：失败的部署不覆盖线上，`/` 200，仍跑上一个可用版本 **e86d7f4**（= HRM 考勤 P1；P2 与护栏都还没上线）。本地基线全绿：tsc 0 / vitest **521**（39 文件）/ build 通过 / Playwright **55 通过 · 0 失败**；生产 schema 复检：PR #29 的 schema 与库 **agree**，PR #30 的只剩 13 条**纯加性**语句（新表 AttendanceReview）。
+**线上 = main = `b893506`**（P2 + 护栏 + 两条修复都在线上）。本地基线全绿：tsc 0 / vitest **521**（39 文件）/ build 通过 / Playwright **55 通过 · 0 失败**；生产复检 `schema and database agree`、`/` 200、P2 页面登录后正常渲染。
 
-**owner 要做的第一件事**：在 Vercel → d-z-crm → Settings → Environment Variables 的 **Production** 环境加 `DIRECT_URL`（直连 5432，值同本地 `.env` 的 `DST_DATABASE_URL`），然后 redeploy。**在它修好之前，main 上任何一次部署都会失败**（护栏已上线）。详见 `docs/changes/2026-09-17-deploy-blocked-by-schema-verification.md`。
+**上线后在验收里抓到一个真缺陷**（KPI 说「本月 2 人天」而导出 CSV 说「没有记录」）：页面的导出链接只带 `from/to`，而导出路由把它交给 `resolveRange`，preset 缺省 `"today"` **会忽略 from/to** —— 于是「导出本月」静默变成「导出今天」。已修（PR #31），并补了反向 e2e 断言。
+
+**只剩一条分支没合**：`fix/job-number-sequence`——**必须先 rebase 到 main**，否则部署会被护栏拦下（实测它的 schema 比生产库会得到 **16 条全 DROP** 的语句，护栏拒绝应用并 exit 1；那是在保护生产库不被清空，不是 bug）。
 
 ## 会话信息
 - 原会话 ID：session-c5af9e3c-d22c-49a6-8fde-3c246dbfe102（「继续 D&Z」；本轮：HRM 考勤 P1 全链路 → 合并上线 → 生产 schema 事故与修复 → 护栏 → 权限矩阵收敛 → 地址/坐标落地 → 本次 session-pack）
@@ -28,30 +31,14 @@
 - **工单号序列修复（`fix/job-number-sequence`，未合并）**：字符串排序当数字用（DZ9999 > DZ10000，四位数用尽即永久卡死）+ 外来前缀污染（PERF900299 → DZ900300）；收敛到 `src/lib/job-number.ts` + 撞唯一约束重试。
 
 ## 下一步（按优先级）
-1. **🔴 owner：把 Vercel Production 的 `DIRECT_URL` 换成下面这条，然后 redeploy。** 当前唯一的阻塞点。
-
-   ```
-   postgresql://postgres.dukbfgqbrprivnzcsrlh:<密码>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
-   ```
-
-   **不能用直连地址。** 实测 `db.dukbfgqbrprivnzcsrlh.supabase.co` **只有 AAAA、没有 A 记录**（IPv6-only），
-   而 **Vercel 构建出站只有 IPv4** → `prisma migrate diff` 连不上 → 护栏 exit 1。
-   本机有 IPv6，所以**这个失败在本地永远复现不出来**（我第一轮就是这么误判成「DIRECT_URL 没设」的）。
-   三个都要对上：用户名是 **`postgres.<project-ref>`**（连字符·点·ref，不是 `postgres`）、
-   主机 `aws-0-ap-southeast-1.pooler.supabase.com`、端口 **5432**（会话模式）。
-   Supabase Dashboard → Settings → Database → Connection string → **Session pooler** 就是这一段。
-   另一处 `aws-1-ap-southeast-1` 实测报 `tenant/user ... not found`，所以区域要对。
-
-   ⚠️ 顺带：Supabase 文档模板里的 `[YOUR-PASSWORD]` **是占位符不是密码**，原样存会得到 `P1000 Authentication failed`——
-   它与「IPv6 连不上」在构建日志里**长得一模一样**（都是 `could not inspect the database`），两个都修对才行。
-   加完后在 Build Logs 搜 `[schema-sync]`：第一行应是 `database from DIRECT_URL`。
-2. **部署成功后核对一次**：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check` 应输出
-   `schema and database agree`（P2 的 AttendanceReview 由那次部署自动建）。
-3. **`fix/job-number-sequence` 必须先 rebase 到 main 再合**：它是在 HRM 之前分出去的，schema 落后一大截。
+1. **`fix/job-number-sequence` 必须先 rebase 到 main 再合**：它是在 HRM 之前分出去的，schema 落后一大截。
    实测（只读 diff）：拿它去部署会得到 **16 条全是 DROP/TRUNCATE**（`DROP COLUMN "workedMinutes"`、`DROP TABLE "AttendancePunch"` …），
-   护栏会拒绝并 exit 1。**这不是 bug，是护栏在阻止生产库被清空**。
-4. **考勤 P2 的后续（P2 本体已合并）**：更正审批（`AttendanceCorrection` 表已建但零调用、没有 relation——做之前先定它的形状）、
+   护栏会拒绝并 exit 1。**这不是 bug，是护栏在阻止生产库被清空**。rebase 后记得重跑基线再推。
+2. **考勤 P2 的后续**（P2 本体已上线）：更正审批（`AttendanceCorrection` 表已建但零调用、没有 relation——做之前先定它的形状）、
    员工自助查看本人历史、导出加照片链接。
+3. **`DIRECT_URL` 已完成，不要再动**（2026-09-17 收尾）。记录成事实：它必须是**会话池**那条，
+   `postgres.<项目ref>@aws-0-ap-southeast-1.pooler.supabase.com:5432`——**直连地址在这个部署上连不通**（IPv6-only 主机）。
+   构建日志里搜 `[schema-sync]` 应看到 `database from DIRECT_URL`。
 5. **生产数据卫生（待 owner 决定）**：Testing 账号（test.owner / test.mech6 等）及其打卡记录是否清理。
 6. **逾期待办**：经销商验证 59e04e5e、WhatsApp 真机上线 92b29072（含 Vercel env）。
 7. 本地可选：`.vercel/project.json` 指向失效项目 id，`npx vercel link --scope dashoilhrsams-projects --project d-z-crm` 重链（需要权限）。
@@ -69,13 +56,14 @@
 - rider :3003 / e2e :3102：同上换端口与 label（`.rider` / `.e2e`）
 - **加迁移后**：`dev.db` 与 `e2e.db` **都要**各跑一次 `DATABASE_URL="file:./<db>.db" pnpm exec prisma migrate deploy`，再 kickstart 对应服务（只 migrate 一个 → 那个服务页面 500 → Playwright 探活把它当没起来 → EADDRINUSE）
 - 压测实例（隔离，勿打）：:3202 `com.dz-platform.perf`、:3203 `com.dz-platform.perf-small`
-- 生产：https://d-z-crm.vercel.app （push main 自动部署；**带 schema 变更的部署前先确认 DIRECT_URL 生效**）
+- 生产：https://d-z-crm.vercel.app （push main 自动部署）。**DIRECT_URL 必须是会话池那条**（见「关键决策」里生产 schema 那条），
+  改环境变量后**必须重新部署**才生效；构建日志里搜 `[schema-sync]` 确认第一行是 `database from DIRECT_URL`
 
 ## git 状态
-- main = **6a726b9**（PR #30 `feat/attendance-p2-review-and-reports` 已合并）；**线上正在跑的仍是 e86d7f4**（最后一个部署成功的）
-- 已合并：PR #29 `fix/schema-drift-fails-the-build`（护栏，代码在 main 上但**从未成功部署**）· PR #30 考勤 P2 ·
-  `fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity` · `feat/hrm-attendance`
-- **仍未合并**：`fix/job-number-sequence`（**需先 rebase 到 main**，见「下一步」第 3 条）
+- main = **b893506**（= 线上正在跑的版本）：PR #32 `fix/schema-sync-pooler-warning` + PR #31 `fix/attendance-export-range`
+  合在 PR #29 `fix/schema-drift-fails-the-build`（护栏）+ PR #30 `feat/attendance-p2-review-and-reports`（考勤 P2）之上
+- 更早已合并：`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity` · `feat/hrm-attendance`
+- **仍未合并**：`fix/job-number-sequence`（**需先 rebase 到 main**，见「下一步」第 1 条）
 - ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本、`screenshots/`（含 `hrm-local/`、`prod/` 截图）、`docs/templates/` 等未跟踪产物，加文件逐个列出
 
 ## 关键决策与约定
@@ -86,7 +74,9 @@
 - **生产 schema**：加性变更由构建期 `scripts/sync-prod-schema.mjs` 自动同步；**生产无法验证时必须拦住构建**（失败部署保留上一个可用版本，未验证部署会打挂站点）。
   ⚠️ **但它在 2026-09-17 之前从未真正生效过**：Supabase 直连主机是 IPv6-only，而 Vercel 构建只有 IPv4，
   所以构建期永远连不上库、只是 fail-open 地跳过；每次 schema 变更其实都是**人在本地手工补的**。
-  修法 = `DIRECT_URL` 用 **Supavisor 会话池**（`aws-0-ap-southeast-1.pooler.supabase.com:5432` + `postgres.<ref>` 账号），见「下一步」第 1 条。
+  **2026-09-17 已修好并验证生效**：`DIRECT_URL` = **Supavisor 会话池**
+  `postgres.<项目ref>@aws-0-ap-southeast-1.pooler.supabase.com:5432`（**不是直连地址**——那条在这个部署上连不通）。
+  那一天 P2 的 AttendanceReview 表就是构建自己建的。**不要把它改回直连地址。**
 - **改动工作流**：feature branch → push → owner 在 GitHub review + merge；不直接 push main、不自行触发 Vercel 部署。
 - 业务日期存 UTC 零点；金额存整数 sen；营收相关开关存 DB（`Organisation.*`）不写源码常量。
 
@@ -118,9 +108,12 @@
 1. **探活**：`:3002` / `:3003` / `:3102` 的 `/login` 应 200；另 `curl -s -o /dev/null -w %{http_code} https://d-z-crm.vercel.app/` 应 200。挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
 2. **读本文件 + `docs/changes/` 最新几个**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
 3. **查 git + 查部署**：`git fetch --prune`；再 `npx vercel ls d-z-crm --scope dashoilhrsams-projects` 看最近部署是 Ready 还是 Error。
-   **main 上有提交 ≠ 线上跑的是它**——当前正是这个状态（main = 6a726b9，线上 = e86d7f4）。
+   ⚠️ **main 上有提交 ≠ 线上跑的是它**——2026-09-17 就出现过「main = 6a726b9 而线上 = e86d7f4」。
+   判断部署失败在哪一段可以看**耗时**：20–25 秒就失败 = 还没走到 `next build`（`prisma generate` 本地只要 1.1s，
+   护栏的失败路径 <1s）；正常成功是 1–4 分钟。
 4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**521**）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）+ 生产 drift `--check`
-5. **挑下一步**：**先确认「下一步」第 1 条那条阻塞还在不在**（`DIRECT_URL` 没生效时，任何部署都白搭）→ 再看 job-number rebase → 再往下做功能。**改 schema 前必读**「关键决策与约定」里生产 schema 那条。
+5. **挑下一步**：先看 job-number rebase（唯一未合的分支）→ 再做考勤 P2 的后续。**改 schema 前必读**「关键决策与约定」里生产 schema 那条
+   （尤其「`DIRECT_URL` 必须是会话池、不是直连」这一句——它是 2026-09-17 两次部署失败的全部原因）。
 ## 历史段落（冻结于 2026-09-11，逐次改动的原始记录）
 
 **🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
