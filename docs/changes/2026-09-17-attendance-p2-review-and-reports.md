@@ -44,6 +44,8 @@ P1 把打卡记成了不可变证据链，但看板只有「今天」，而且�
   `20260917023000_attendance_review_punch_fk`（sqlite，**纯加性**；第二条是给新表补外键，
   SQLite 不支持给已有表加 FK，按 Prisma 标准做法重建该表——表在本分支刚建、数据为空，重建零风险）。
 - **生产**：由构建期 `scripts/sync-prod-schema.mjs` 自动建表加外键。
+  已用只读检查实测过将要应用的 SQL（`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check`）：
+  **1 表 + 3 索引 + 1 外键，零 DROP/TRUNCATE**。
   ⚠️ **合并前请先合 `fix/schema-drift-fails-the-build`**：那条护栏是「生产无法验证 schema 就拦住构建」，
   本次是它上线后的第一个 schema 变更。
 
@@ -86,7 +88,9 @@ P1 把打卡记成了不可变证据链，但看板只有「今天」，而且�
 - **源码守卫做了反向验证**：新增的 4 条守卫里有 3 条是在**新文件**上断言（文件不存在即失败）；
   「处置只追加」那条同时断言 `reviewPunch` 的函数体**非空**——本项目栽过两次
   「守卫看起来有效、其实在测别的东西」，所以取函数体的助手必须显式防空跑。
-- **e2e**：新增 `e2e/attendance-review.spec.ts` 4 例，全部与全量套件一起跑（见下）。
+- **e2e**：新增 `e2e/attendance-review.spec.ts` 4 例（无定位打卡进队列 / 处置后队列清空而异常数不变且刷新仍在 /
+  柜台看得见但没有按钮且直接打导出接口 403 / 本月区间与 CSV 的请求头与内容），
+  全量 **55 通过 · 0 失败**（main 基线 51）。
 
 ### 踩到的坑
 
@@ -97,4 +101,11 @@ P1 把打卡记成了不可变证据链，但看板只有「今天」，而且�
 - **给已有表加外键在 SQLite 上要重建表**：`prisma migrate diff` 生成的 RedefineTables 是
   CREATE new → INSERT…SELECT → DROP → RENAME。表是本分支刚建的、数据为空，所以零风险，
   但以后对**有数据**的表这么改要先把重建窗口想清楚。
+- **套件变长暴露了一个既有竞态（顺手修了）**：第一次全量跑 55 例时 `promo-at-checkin` 挂在
+  `helpers.ts:115`（找不到那一行 booking），而**单独跑通过、与该 spec 加两条考勤 spec 一起跑也通过**、
+  把新 spec 排除掉再跑全量 51/51 通过、再跑一次全量 55/55 通过 —— 是一次竞态而不是功能坏了。
+  根因在共享助手：`setPersona` 点完 Sign in 之后 **sleep 1500ms**，赌一次 Supabase auth 往返一定够快。
+  输了以后**不在原地报错**，而是让后面每一条断言都跑在登录页上（症状就是「某个 testid 一个都找不到」，
+  看起来像功能坏了）。已改成等 middleware 真正认的那个 cookie（`sb-*-auth-token`，见 `src/middleware.ts`）。
+  **没有把"猜"当成结论**：四条不同组合的跑法就是为了把「我的改动造成的」与「偶发」分开。
 - **本机路径含 `&`**：bash 里引用项目路径必须加引号。
