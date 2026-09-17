@@ -194,12 +194,28 @@ export function resolveUrl(env = process.env) {
 }
 
 /**
- * True when a connection string looks like a transaction pooler.
+ * True when a connection string is a **transaction** pooler — the shape that makes
+ * Prisma's migrate commands hang, because they need a real session and a transaction
+ * pooler may hand each statement a different connection.
+ *
+ * WHY THE BLANKET `pooler.supabase.com` TEST IS GONE (2026-09-17)
+ * --------------------------------------------------------------
+ * It used to be one of the three patterns, which made the warning below fire on the
+ * Supavisor **session** pooler too — and then tell the reader to switch to the "direct"
+ * Supabase url. For this project that advice is exactly backwards:
+ *
+ *     db.<ref>.supabase.co   →  AAAA only, NO A record (IPv6-only)
+ *     Vercel build machines  →  IPv4 egress only
+ *
+ * so the direct host is unreachable from the build, while the session pooler
+ * (`<region>.pooler.supabase.com:5432`, user `postgres.<ref>`) works: measured
+ * `migrate diff` exit 0 and a CREATE/DROP probe both succeeded through it.
+ * Warning people away from the only address that works is worse than not warning.
  *
  * @param {string} url
  */
-export function looksPooled(url) {
-  return /:6543\b/.test(url) || /pgbouncer=true/.test(url) || /pooler\.supabase\.com/.test(url);
+export function isTransactionPooler(url) {
+  return /:6543\b/.test(url) || /pgbouncer=true/.test(url);
 }
 
 async function main() {
@@ -214,10 +230,14 @@ async function main() {
   }
   console.log("[schema-sync] database from " + source + " | timeout " + Math.round(COMMAND_TIMEOUT_MS / 1000) + "s per command");
 
-  if (looksPooled(url) && !process.env.DRIFT_CHECK_URL) {
-    console.warn("[schema-sync] WARNING: this looks like a connection-pooler url. Prisma migrate");
-    console.warn("[schema-sync] commands need a direct connection (port 5432) and will hang on a");
-    console.warn("[schema-sync] pooler. Set DIRECT_URL to the direct Supabase url.");
+  if (isTransactionPooler(url) && !process.env.DRIFT_CHECK_URL) {
+    console.warn("[schema-sync] WARNING: this looks like a TRANSACTION pooler (port 6543 / pgbouncer=true).");
+    console.warn("[schema-sync] Prisma migrate commands need a real session and will hang on one.");
+    console.warn("[schema-sync] Use the Supavisor SESSION pooler instead — same host, port 5432,");
+    console.warn("[schema-sync] user postgres.<project-ref>:");
+    console.warn("[schema-sync]   postgresql://postgres.<ref>:<password>@<region>.pooler.supabase.com:5432/postgres");
+    console.warn("[schema-sync] (Do NOT switch to db.<ref>.supabase.co — that host is IPv6-only and");
+    console.warn("[schema-sync] unreachable from Vercel builds.)");
   }
 
   let sql;
@@ -240,8 +260,13 @@ async function main() {
       console.error("[schema-sync] In production this fails the build on purpose: we could not verify that");
       console.error("[schema-sync] the database matches the schema, and Prisma selects every scalar column —");
       console.error("[schema-sync] one missing column takes the whole site down, not just the new feature.");
-      console.error("[schema-sync] Fix the connection (set DIRECT_URL to the direct Supabase url, port 5432,");
-      console.error("[schema-sync] not the pooler) and redeploy. The previous deployment stays live meanwhile.");
+      // 这段提示必须指向**真的能连上**的那个地址。2026-09-17 实测：Supabase 的直连主机只有 AAAA、
+      // 没有 A 记录，而 Vercel 构建出站只有 IPv4 —— 所以"改用直连地址"这条建议恰恰是把构建弄挂的原因。
+      console.error("[schema-sync] Fix the connection and redeploy. The previous deployment stays live meanwhile.");
+      console.error("[schema-sync] On Vercel, DIRECT_URL must be the Supavisor SESSION pooler:");
+      console.error("[schema-sync]   postgresql://postgres.<project-ref>:<password>@<region>.pooler.supabase.com:5432/postgres");
+      console.error("[schema-sync] Do NOT use db.<project-ref>.supabase.co — that host has no A record (IPv6-only)");
+      console.error("[schema-sync] and Vercel builds only have IPv4 egress.");
       process.exit(1);
     }
     console.log("[schema-sync] " + why + " — skipping the check (build continues, schema NOT verified)");

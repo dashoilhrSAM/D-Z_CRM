@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseSchema, ddlFor, resolveUrl, looksPooled } from "../scripts/sync-prod-schema.mjs";
+import { parseSchema, ddlFor, resolveUrl, isTransactionPooler } from "../scripts/sync-prod-schema.mjs";
 
 const schemaSrc = readFileSync(path.join(process.cwd(), "prisma/schema.pg.prisma"), "utf8");
 const models = parseSchema(schemaSrc) as Record<string, { column: string; type: string; optional: boolean; ddlDefault: string | null }[]>;
@@ -82,15 +82,22 @@ describe("resolveUrl", () => {
   });
 });
 
-describe("looksPooled", () => {
-  it("recognises the pooled shapes that break migrations", () => {
-    expect(looksPooled("postgresql://u:p@aws-0-ap.pooler.supabase.com:5432/postgres")).toBe(true);
-    expect(looksPooled("postgresql://u:p@db.x.supabase.co:6543/postgres")).toBe(true);
-    expect(looksPooled("postgresql://u:p@db.x.supabase.co:5432/postgres?pgbouncer=true")).toBe(true);
+describe("isTransactionPooler", () => {
+  it("recognises the shapes that make migrate hang", () => {
+    expect(isTransactionPooler("postgresql://u:p@db.x.supabase.co:6543/postgres")).toBe(true);
+    expect(isTransactionPooler("postgresql://u:p@db.x.supabase.co:5432/postgres?pgbouncer=true")).toBe(true);
+  });
+
+  it("does NOT flag the Supavisor session pooler — it is the only address that works from Vercel", () => {
+    // 旧实现把 pooler.supabase.com 一概判为 pooled，于是警告"请改用直连地址"。
+    // 2026-09-17 实测：直连主机只有 AAAA（IPv6-only），Vercel 构建只有 IPv4 → 连不上；
+    // 而这条会话池地址 migrate diff exit=0、CREATE/DROP 探针都成功。
+    // 把人从唯一能用的地址劝走，比不警告更糟。
+    expect(isTransactionPooler("postgresql://u:p@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres")).toBe(false);
   });
 
   it("leaves a direct connection alone", () => {
-    expect(looksPooled("postgresql://u:p@db.dukbfgqbrprivnzcsrlh.supabase.co:5432/postgres")).toBe(false);
+    expect(isTransactionPooler("postgresql://u:p@db.dukbfgqbrprivnzcsrlh.supabase.co:5432/postgres")).toBe(false);
   });
 });
 
