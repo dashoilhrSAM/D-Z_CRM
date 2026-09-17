@@ -19,6 +19,26 @@ export function isOrgLevelRole(role: string): boolean {
   return ORG_LEVEL_ROLES.has(role);
 }
 
+/**
+ * **总部级后台功能**的开关 —— 与 isOrgLevelRole 是**两条不同的轴**，不要合并。
+ *
+ *   isOrgLevelRole      = 数据范围：看得见、管得着**几家店**
+ *   canManageOrgSettings = 功能开关：能不能用总部级的后台功能（组织资料、考勤政策、服务目录…）
+ *
+ * 为什么必须分开（2026-09-17）：owner 要求「让 manager 拥有跟 owner 一样的权限去做管理」，
+ * 但明确**数据仍限本店**。如果图省事把 MANAGER 塞进 ORG_LEVEL_ROLES，会一次放开三件事——
+ *   ① 看到所有分店的数据（不想要）
+ *   ② staff-policy 里"分行级不能碰总部账号/不能授予总部角色"这两条红线同时失效（自提权）
+ *   ③ 能改别的分店的店名/城市（门店身份，不只是运营细节）
+ * 所以两个谓词各管一件事，MANAGER 只加进这一个。
+ */
+const BACK_OFFICE_ROLES = new Set([...ORG_LEVEL_ROLES, "MANAGER"]);
+
+/** 能不能用总部级后台功能（不影响他能看到哪几家店的数据）。 */
+export function canManageOrgSettings(role: string): boolean {
+  return BACK_OFFICE_ROLES.has(role);
+}
+
 /** org 级 → null（不分枝过滤）；branch 级 → session.branchId。 */
 export function scopedBranchId(session: BranchScopeSession): string | null {
   if (isOrgLevelRole(session.role)) return null;

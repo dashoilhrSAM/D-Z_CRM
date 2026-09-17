@@ -440,8 +440,11 @@ describe("源码守卫：证据链靠写法维持", () => {
     const act = strip(read("src/actions/settings.ts"));
     const body = fnBody(act, "export async function updateAttendancePolicy");
     expect(body, "updateAttendancePolicy 找不到（断言会空跑）").not.toBe("");
-    // 只有 org 级能改（这些值对所有门店生效）
-    expect(body).toContain("auth.orgLevel");
+    // 这些值对所有门店生效，所以必须过后台管理门禁。
+    // 2026-09-17：谓词从 auth.orgLevel 换成 auth.backOffice（owner 把后台**功能**对齐给了 manager，
+    // 但**没有**给数据范围）——所以这里断言的是「必须是这两个受控谓词之一」，而不是某一个的拼写，
+    // 免得下次再收敛谓词时这条守卫又被当成"规则变了"。
+    expect(body, "改考勤政策必须过后台管理门禁").toMatch(/if \(!auth\.(backOffice|orgLevel)\)/);
     // 0 或负数会让"在店里"失去意义，所以必须夹区间
     expect(body, "围栏半径必须夹到合理区间").toMatch(/clamp\(input\.geofenceM/);
     expect(body, "精度上限必须夹到合理区间").toMatch(/clamp\(input\.accuracyMaxM/);

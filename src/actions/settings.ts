@@ -4,21 +4,32 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { getSessionUser } from "@/lib/session-user";
-import { isOrgLevelRole } from "@/lib/branch-scope";
+import { isOrgLevelRole, canManageOrgSettings } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
 import { isValidLatLng } from "@/lib/geo";
 
-async function requireStaff(): Promise<{ ok: true; orgLevel: boolean; branchId: string | null } | { ok: false; error: string }> {
+/**
+ * 两个标志是**两条不同的轴**，别合并（2026-09-17）：
+ *  · `orgLevel`  = 数据范围：能不能动**别的分店**
+ *  · `backOffice` = 功能开关：能不能用总部级后台功能（组织资料/考勤政策/服务目录）
+ * MANAGER 有 backOffice、没有 orgLevel——owner 要的是「后台功能跟 owner 一样，数据仍限本店」。
+ */
+async function requireStaff(): Promise<{ ok: true; orgLevel: boolean; backOffice: boolean; branchId: string | null } | { ok: false; error: string }> {
   const session = await getSessionUser();
   if (session.kind !== "staff") return { ok: false, error: "Not authorized." };
-  return { ok: true, orgLevel: isOrgLevelRole(session.role), branchId: session.branchId };
+  return {
+    ok: true,
+    orgLevel: isOrgLevelRole(session.role),
+    backOffice: canManageOrgSettings(session.role),
+    branchId: session.branchId,
+  };
 }
 
-/** 仅 org 级（OWNER/SUPER_ADMIN/HEAD_OFFICE_ADMIN）可改组织资料。 */
+/** 后台管理者（org 级 + MANAGER）可改组织资料。 */
 export async function updateOrganisation(input: { name?: string; contactPhone?: string | null; contactEmail?: string | null; address?: string | null; taxId?: string | null; timezone?: string; currency?: string; lostReasons?: string }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can edit company details." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can edit company details." };
   const org = await db.organisation.findFirst();
   if (!org) return { ok: false as const, error: "No organisation" };
   await db.organisation.update({ where: { id: org.id }, data: { ...input, contactPhone: input.contactPhone ?? null, contactEmail: input.contactEmail ?? null, address: input.address ?? null, taxId: input.taxId ?? null } });
@@ -89,7 +100,7 @@ export async function updateBranch(id: string, input: { name?: string; city?: st
 export async function updateAttendancePolicy(input: { photoRequired?: boolean; geoRequired?: boolean; geofenceM?: number; accuracyMaxM?: number }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can change attendance policy." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can change attendance policy." };
   const org = await db.organisation.findFirst();
   if (!org) return { ok: false as const, error: "No organisation" };
 
@@ -139,7 +150,7 @@ export async function createBranch(input: { name: string; city: string; phone?: 
 export async function createServiceType(input: { name: string; category?: string; durationMin?: number; priceSen?: number }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can manage service catalogue." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can manage service catalogue." };
   const org = await db.organisation.findFirst();
   await db.serviceType.create({ data: { organisationId: org!.id, name: input.name, category: input.category ?? null, durationMin: input.durationMin ?? null, priceSen: input.priceSen ?? null } });
   revalidatePath("/", "layout");
@@ -165,7 +176,7 @@ export async function updateServiceType(input: {
 }) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can manage service catalogue." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can manage service catalogue." };
 
   const name = input.name?.trim();
   if (input.name !== undefined && !name) return { ok: false as const, error: "A service needs a name." };
@@ -189,7 +200,7 @@ export async function updateServiceType(input: {
 export async function toggleServiceType(id: string, active: boolean) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can manage service catalogue." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can manage service catalogue." };
   await db.serviceType.update({ where: { id }, data: { active } });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -199,7 +210,7 @@ export async function toggleServiceType(id: string, active: boolean) {
 export async function deleteServiceType(id: string) {
   const auth = await requireStaff();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  if (!auth.orgLevel) return { ok: false as const, error: "Only the owner can manage service catalogue." };
+  if (!auth.backOffice) return { ok: false as const, error: "Only the owner can manage service catalogue." };
   await db.serviceType.delete({ where: { id } });
   revalidatePath("/", "layout");
   return { ok: true };
