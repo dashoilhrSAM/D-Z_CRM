@@ -28,10 +28,23 @@
 - **工单号序列修复（`fix/job-number-sequence`，未合并）**：字符串排序当数字用（DZ9999 > DZ10000，四位数用尽即永久卡死）+ 外来前缀污染（PERF900299 → DZ900300）；收敛到 `src/lib/job-number.ts` + 撞唯一约束重试。
 
 ## 下一步（按优先级）
-1. **🔴 owner：在 Vercel 的 Production 环境加 `DIRECT_URL`，然后 redeploy。** 这是当前唯一的阻塞点——
-   加好之前 main 上**任何**部署都会失败（护栏已上线）。值同本地 `.env` 的 `DST_DATABASE_URL`：
-   `postgresql://postgres:<密码>@db.dukbfgqbrprivnzcsrlh.supabase.co:5432/postgres`（**5432 直连，不是 6543 池化**）。
-   加完后在 Build Logs 搜 `[schema-sync]`：第一行应是 `database from DIRECT_URL`；仍是 `from DATABASE_URL` 就是没读到。
+1. **🔴 owner：把 Vercel Production 的 `DIRECT_URL` 换成下面这条，然后 redeploy。** 当前唯一的阻塞点。
+
+   ```
+   postgresql://postgres.dukbfgqbrprivnzcsrlh:<密码>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
+   ```
+
+   **不能用直连地址。** 实测 `db.dukbfgqbrprivnzcsrlh.supabase.co` **只有 AAAA、没有 A 记录**（IPv6-only），
+   而 **Vercel 构建出站只有 IPv4** → `prisma migrate diff` 连不上 → 护栏 exit 1。
+   本机有 IPv6，所以**这个失败在本地永远复现不出来**（我第一轮就是这么误判成「DIRECT_URL 没设」的）。
+   三个都要对上：用户名是 **`postgres.<project-ref>`**（连字符·点·ref，不是 `postgres`）、
+   主机 `aws-0-ap-southeast-1.pooler.supabase.com`、端口 **5432**（会话模式）。
+   Supabase Dashboard → Settings → Database → Connection string → **Session pooler** 就是这一段。
+   另一处 `aws-1-ap-southeast-1` 实测报 `tenant/user ... not found`，所以区域要对。
+
+   ⚠️ 顺带：Supabase 文档模板里的 `[YOUR-PASSWORD]` **是占位符不是密码**，原样存会得到 `P1000 Authentication failed`——
+   它与「IPv6 连不上」在构建日志里**长得一模一样**（都是 `could not inspect the database`），两个都修对才行。
+   加完后在 Build Logs 搜 `[schema-sync]`：第一行应是 `database from DIRECT_URL`。
 2. **部署成功后核对一次**：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check` 应输出
    `schema and database agree`（P2 的 AttendanceReview 由那次部署自动建）。
 3. **`fix/job-number-sequence` 必须先 rebase 到 main 再合**：它是在 HRM 之前分出去的，schema 落后一大截。
@@ -71,6 +84,9 @@
 - **地点必须行上可见**（距门店 xx m / 未取到定位），不许只放 title 属性；行与弹窗共用 `locationSummary()`。
 - **一条规则只写一遍**（本轮两次收敛）：门店身份 → `src/lib/branch-info.ts`；权限矩阵 → `src/lib/auth/role-modules.ts`。
 - **生产 schema**：加性变更由构建期 `scripts/sync-prod-schema.mjs` 自动同步；**生产无法验证时必须拦住构建**（失败部署保留上一个可用版本，未验证部署会打挂站点）。
+  ⚠️ **但它在 2026-09-17 之前从未真正生效过**：Supabase 直连主机是 IPv6-only，而 Vercel 构建只有 IPv4，
+  所以构建期永远连不上库、只是 fail-open 地跳过；每次 schema 变更其实都是**人在本地手工补的**。
+  修法 = `DIRECT_URL` 用 **Supavisor 会话池**（`aws-0-ap-southeast-1.pooler.supabase.com:5432` + `postgres.<ref>` 账号），见「下一步」第 1 条。
 - **改动工作流**：feature branch → push → owner 在 GitHub review + merge；不直接 push main、不自行触发 Vercel 部署。
 - 业务日期存 UTC 零点；金额存整数 sen；营收相关开关存 DB（`Organisation.*`）不写源码常量。
 

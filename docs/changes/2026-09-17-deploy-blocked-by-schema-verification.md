@@ -1,74 +1,83 @@
 ---
 date: 2026-09-17
-title: 两次生产部署都失败——护栏在起作用，真正卡住的是 DIRECT_URL
+title: 生产部署全挂——根因是 Supabase 直连主机只有 IPv6，Vercel 构建够不着
 branch: docs/deploy-blocked-by-schema-verification
 ---
 
 ## 改动
 
-**没有改任何代码。** 这是一份事故诊断，记下来是因为它容易被误读成「刚合的分支把部署弄挂了」。
+**没有改应用代码。** 这是一份事故诊断。
 
-2026-09-17 11:02–11:03，owner 合并 PR #29（schema 护栏）与 PR #30（考勤 P2）后，**两次生产部署都 Error**，
-耗时 23s / 24s（正常部署是 1–4 分钟），命令停在
+2026-09-17，owner 合并 PR #29（schema 护栏）与 PR #30（考勤 P2）后，**生产部署连续失败**
+（23s / 24s，正常 1–4 分钟），命令停在
 `prisma generate --schema prisma/schema.pg.prisma && node scripts/sync-prod-schema.mjs && next build`。
 
-## 诊断（每条都是本地实测，不是推断）
+## 根因（一句话）
 
-**1. 先确认线上没事。** 失败的部署不会覆盖线上：`https://d-z-crm.vercel.app/` 仍是 **200**，
-跑的是**上一个可用版本 e86d7f4**（HRM 考勤 P1）。也就是说 **P2 与护栏都还没上线**，main 上有提交 ≠ 线上跑的是它。
+`db.dukbfgqbrprivnzcsrlh.supabase.co` **没有 A 记录，只有 AAAA**（`2406:da18:1248:be01::e7c4`，AWS ap-southeast-1）。
+本机有 IPv6 所以一切正常，**Vercel 的构建环境出站只有 IPv4**，于是连不上库 → 护栏 fail-closed → exit 1。
 
-**2. PR #29（护栏）的 schema 与生产库本来就是 agree。** 把该 commit 的 `schema.pg.prisma` 抽出来跑只读 diff：
+这条同时解释了另外两件一直没被看清的事：
+
+- **为什么"本地全绿"**：我在这台机器上跑的每一次 `migrate diff` / `--check` 都走 IPv6，全部成功——
+  所以本地永远复现不出来，这也是我第一轮把它误判成「DIRECT_URL 没设」的原因。
+- **为什么构建期自动同步其实从来没成功过**：2026-09-15 那次事故是靠**在本地手工执行**
+  `VERCEL_ENV=production DIRECT_URL=$DST_DATABASE_URL node scripts/sync-prod-schema.mjs` 修好的（HANDOFF 有记录），
+  不是构建自己修的。也就是说这个功能自引入起一直是「连不上 → 打印一句 skipping → 继续构建」（fail-open），
+  每一次 schema 变更都是人手工补的。**护栏只是把这份长期存在的静默变成了响亮的失败。**
+
+## 实测证据（每一条都可复现）
+
+1. **线上没事**：失败部署不覆盖线上，`https://d-z-crm.vercel.app/` 仍 **200**，跑的还是 **e86d7f4**。
+   main 上有提交 ≠ 线上跑的是它。
+2. **PR #29 的 schema 与生产库本来就 agree**（只读 diff = **0 条语句**）。所以失败不在「有待应用的变更」，
+   而在**检查本身**——这一点排除了「刚合的分支把 schema 弄脏了」。
+3. **本地复现护栏的失败路径**（假 URL，<1s，输出与线上一致）：
+   `VERCEL_ENV=production DATABASE_URL="postgresql://postgres:x@127.0.0.1:59999/postgres" node scripts/sync-prod-schema.mjs` → exit 1。
+4. **DNS 定性**：`dig A db.<ref>.supabase.co` → **空**；`dig AAAA` → `2406:da18:...`；
+   Python `getaddrinfo(AF_INET)` 直接抛 `nodename nor servname provided`。
+5. **替代路径实测可用**：`aws-0-ap-southeast-1.pooler.supabase.com:5432`（Supavisor **会话模式**）
+   有 IPv4，用 `postgres.<ref>` 账号 + 同密码 `prisma migrate diff` → **exit=0**；
+   再做了一次 DDL 探针（`CREATE TABLE "_dz_probe"` → `DROP TABLE`，都是 exit=0），
+   复验 diff 仍是 13 条纯加性、**探针无残留**。
+   （另一处 `aws-1-ap-southeast-1` 报 `tenant/user postgres.<ref> not found`，所以区域要对。）
+
+## 修复
+
+Vercel → `d-z-crm` → Settings → Environment Variables → **Production**：
 
 ```
-npx prisma migrate diff --from-url "$DST_DATABASE_URL" --to-schema-datamodel <(git show ba995bf:prisma/schema.pg.prisma) --script
-→ statements: 0
+DIRECT_URL = postgresql://postgres.dukbfgqbrprivnzcsrlh:<密码>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres
 ```
 
-**0 条语句。** 这条很关键：如果构建能读到库，脚本会打印"schema and database agree"然后正常结束——
-它**不可能**因为"有待应用的变更"而失败。所以失败发生在**检查本身**。
+三个都要对上：**用户名是 `postgres.<project-ref>`（不是 `postgres`）**、主机 `aws-0-ap-southeast-1.pooler.supabase.com`、端口 **5432**。
+Supabase Dashboard → Settings → Database → Connection string → **Session pooler** 就是这一段。
 
-**3. 复现失败。** 用生产环境变量跑同一条脚本、给一个连不上的库：
-
-```
-VERCEL_ENV=production DATABASE_URL="postgresql://postgres:x@127.0.0.1:59999/postgres" node scripts/sync-prod-schema.mjs
-[schema-sync] database from DATABASE_URL | timeout 120s per command
-[schema-sync] could not inspect the database (…)
-[schema-sync] In production this fails the build on purpose: we could not verify that
-[schema-sync] the database matches the schema …
---- exit code: 1 ; elapsed: 0s ---
-```
-
-**<1 秒就 exit 1**，且第一行是 `database from DATABASE_URL` —— 这正是 Vercel 构建里发生的事：
-`DIRECT_URL` 在 **Production** 环境没生效，于是回落到池化的 `DATABASE_URL`（Supabase :6543 / pgbouncer），
-而 Prisma 的 migrate 命令需要直连，连接失败 → 护栏按设计拦住构建。
-
-**4. PR #30 是同因，不是它的 schema 有问题。** 它的 diff 是 **13 条纯加性语句**（新建 `AttendanceReview` + 3 索引 + 1 外键，
-**0 条 DROP**），本来会被自动应用。它连到"应用"那一步都没走到——检查先挂了。
+⚠️ **另一个坑（与本次无关但会浪费一整轮）**：Supabase 文档模板里写的是
+`postgresql://postgres:[YOUR-PASSWORD]@...`，**`[YOUR-PASSWORD]` 是占位符不是密码**。
+原样存进去会得到 `P1000 Authentication failed`，同样表现为 `could not inspect the database`，
+与 IPv6 连不上在构建日志里**长得一模一样**。两个都修对才行。
 
 ## 影响
 
-- **护栏是对的，它在做自己该做的事。** 以前同样的"连不上"是 **fail-open**（打印一句 skipping 就继续构建），
-  于是构建成功、schema 没验证、上线、整站 500 —— 就是 2026-09-15 那次事故的病因。现在它把这条路堵死了。
-  代价是：**环境配置不对时，生产会完全无法部署**。这个代价是 owner 明确选过的。
-- **生产数据与线上服务都没有受影响**（旧部署继续服务，`/` 200）。
-- **卡点只有一个**：Vercel → `d-z-crm` → Settings → Environment Variables → **Production** 加
-  `DIRECT_URL` = 本地 `.env` 里 `DST_DATABASE_URL` 的值（**5432 直连**，不是 6543 池化），然后 redeploy。
-  加好后 Build Logs 里搜 `[schema-sync]`，第一行应为 `database from DIRECT_URL`。
+- 生产数据与线上服务均未受影响（旧部署继续服务）。
+- **解锁前 main 上任何部署都会失败**（护栏已上线）；解锁后 P2 的 `AttendanceReview` 表由构建期自动建。
+- 顺带暴露：`scripts/sync-prod-schema.mjs` 的 `looksPooled()` 把**会话池**（5432，实测可用）
+  与**事务池**（6543，migrate 会挂）一视同仁，会打印一条「请改用直连地址」的警告——
+  而对这个项目来说直连地址恰恰是连不上的。已另起分支修正（`fix/schema-sync-pooler-warning`）。
 
 ## 交接说明
 
-- **不要再花时间试图在线读 Vercel 构建日志**：`vercel inspect --logs` 与 REST `/v3/deployments/<id>/events` 都是 404，
-  `vercel env ls` 报项目已删除/已转移（`.vercel/project.json` 里的 `orgId` 属于另一个团队）。
-  可行路径只有两条：**本地复现**（脚本本身可以在本地用假 URL 跑出同一条失败路径）+ **让 owner 贴日志**。
-- **一条只读的"这条分支能不能部署"预检**：
-  `git show <branch>:prisma/schema.pg.prisma > /tmp/b.prisma` 然后
-  `npx prisma migrate diff --from-url "$DST_DATABASE_URL" --to-schema-datamodel /tmp/b.prisma --script`，
-  最后数一下破坏性语句。**这条立刻抓出第二个雷**：
-- **⚠️ `fix/job-number-sequence` 在修好 DIRECT_URL 之后照样会失败，而且原因完全不同**：
-  它是在 HRM 之前分出去的（stale），拿它的 schema 去比生产库会得到 **16 条语句、16 条全是 DROP/TRUNCATE**
-  （`ALTER TABLE "AttendancePunch" DROP CONSTRAINT …`、`DROP COLUMN "workedMinutes"`、`DROP TABLE "AttendancePunch"` …）。
-  护栏会拒绝应用并 exit 1。**这不是 bug，是护栏在阻止生产库被清空**；正确做法是**先把它 rebase 到 main**。
-- **看部署耗时能定位失败段**：`prisma generate` 本地只要 1.1s，护栏的失败路径 <1s，而成功的部署要 1–4 分钟。
+- **别再试图在线读 Vercel 构建日志**：`vercel inspect --logs` 与 REST `/v3/deployments/<id>/events` 都 404，
+  `vercel env ls` 报项目已删除/已转移（`.vercel/project.json` 的 `orgId` 属于另一个团队）。
+  可行路径只有「本地复现 + 让 owner 贴日志」。
+- **判断一条分支能不能部署（只读，不用真部署）**：`git show <branch>:prisma/schema.pg.prisma > /tmp/b.prisma`
+  再 `npx prisma migrate diff --from-url "$DST_DATABASE_URL" --to-schema-datamodel /tmp/b.prisma --script`，
+  数一下 `DROP|TRUNCATE`。**这条立刻抓出第二个雷**：
+- **⚠️ `fix/job-number-sequence` 修好 DIRECT_URL 后照样会失败，原因完全不同**：它是 HRM 之前分出去的 stale 分支，
+  拿它的 schema 比生产库 = **16 条语句、16 条全是 DROP/TRUNCATE**（`DROP COLUMN "workedMinutes"`、
+  `DROP TABLE "AttendancePunch"` …）。护栏会拒绝并 exit 1。**这不是 bug，是护栏在阻止生产库被清空**；
+  正确做法是**先 rebase 到 main**。
+- **看部署耗时能定位失败段**：`prisma generate` 本地 1.1s、护栏失败路径 <1s，成功部署要 1–4 分钟。
   20 秒左右失败 = 还没走到 `next build`。
-- **判断顺序建议**：先看「下一步」第 1 条那条阻塞在不在 → 再看部署是否 Ready → 最后才怀疑代码。
-  这次两次失败**一行应用代码都不该改**。
+- **判断顺序**：先看 DIRECT_URL 这条 → 再看部署 Ready 与否 → 最后才怀疑代码。这次两次失败**一行应用代码都不该改**。
