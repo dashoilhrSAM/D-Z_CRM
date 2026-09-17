@@ -11,6 +11,14 @@ import path from "node:path";
 import { businessDayKey, businessDayUtc, safeTimezone } from "@/lib/business-day";
 import { haversineMeters, isValidLatLng } from "@/lib/geo";
 import { decideVerdict, rollupDay, PUNCH_VERDICTS, type AttendancePolicy } from "@/modules/attendance/policy";
+import {
+  MAX_RANGE_DAYS,
+  addDaysKey,
+  endOfMonthKey,
+  parseDayKey,
+  resolveRange,
+} from "@/modules/attendance/range";
+import { buildLedger, latestReviews, REVIEW_DECISIONS } from "@/modules/attendance/ledger";
 
 const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
 const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
@@ -193,6 +201,185 @@ describe("当日汇总", () => {
   });
 });
 
+describe("区间：看哪一段（日期算术最容易悄悄偏一天）", () => {
+  const NOW = new Date("2026-09-17T02:00:00Z"); // 吉隆坡 2026-09-17 10:00（周四）
+
+  it("默认看今天，区间含首尾", () => {
+    const r = resolveRange({ now: NOW });
+    expect(r.preset).toBe("today");
+    expect(r.fromKey).toBe("2026-09-17");
+    expect(r.toKey).toBe("2026-09-17");
+    expect(r.days).toBe(1);
+    expect(r.from.toISOString()).toBe("2026-09-17T00:00:00.000Z");
+  });
+
+  it("时区决定「今天是哪天」：UTC 还是 16 号、吉隆坡已经是 17 号", () => {
+    const late = new Date("2026-09-16T18:00:00Z"); // +8 → 17 日 02:00
+    expect(resolveRange({ now: late, timezone: "Asia/Kuala_Lumpur" }).fromKey).toBe("2026-09-17");
+    expect(resolveRange({ now: late, timezone: "UTC" }).fromKey).toBe("2026-09-16");
+  });
+
+  it("本周从周一算起：周日属于上一个自然周（不是新一周的第一天）", () => {
+    expect(resolveRange({ preset: "week", now: NOW }).fromKey).toBe("2026-09-14"); // 周四 → 周一
+    expect(resolveRange({ preset: "week", now: new Date("2026-09-20T02:00:00Z") }).fromKey).toBe("2026-09-14"); // 周日
+    expect(resolveRange({ preset: "week", now: new Date("2026-09-21T02:00:00Z") }).fromKey).toBe("2026-09-21"); // 周一
+  });
+
+  it("本月从 1 号起，且以今天收尾（未来几天没有数据，多查只是空行）", () => {
+    const r = resolveRange({ preset: "month", now: NOW });
+    expect(r.fromKey).toBe("2026-09-01");
+    expect(r.toKey).toBe("2026-09-17");
+    expect(r.days).toBe(17);
+  });
+
+  it("月末按真实天数算（2 月 28/29、30 天与 31 天）", () => {
+    expect(endOfMonthKey("2026-02-01")).toBe("2026-02-28");
+    expect(endOfMonthKey("2028-02-10")).toBe("2028-02-29"); // 闰年
+    expect(endOfMonthKey("2026-04-15")).toBe("2026-04-30");
+    expect(endOfMonthKey("2026-12-31")).toBe("2026-12-31");
+  });
+
+  it("非法日期必须拒绝，而不是悄悄滚到别的日子", () => {
+    // new Date("2026-02-30T00:00:00Z") 不报错，它会滚成 3 月 2 日 —— 静默换天最危险
+    expect(parseDayKey("2026-02-30")).toBeNull();
+    expect(parseDayKey("2026-13-01")).toBeNull();
+    expect(parseDayKey("26-01-01")).toBeNull();
+    expect(parseDayKey("")).toBeNull();
+    expect(parseDayKey(null)).toBeNull();
+    expect(parseDayKey("2026-02-28")?.toISOString()).toBe("2026-02-28T00:00:00.000Z");
+  });
+
+  it("自定义区间：坏参数退回今天；反着填的两个日期交换而不是给空结果", () => {
+    const fallback = resolveRange({ preset: "custom", from: "oops", to: "2026-02-30", now: NOW });
+    expect(fallback.fromKey).toBe("2026-09-17");
+    expect(fallback.toKey).toBe("2026-09-17");
+
+    const reversed = resolveRange({ preset: "custom", from: "2026-09-10", to: "2026-09-01", now: NOW });
+    expect(reversed.fromKey).toBe("2026-09-01");
+    expect(reversed.toKey).toBe("2026-09-10");
+    expect(reversed.days).toBe(10);
+    expect(reversed.clamped, "交换过就要让界面说清楚，不能静默给另一段数据").toBe(true);
+  });
+
+  it("超长区间被夹到上限并标记 clamped", () => {
+    const r = resolveRange({ preset: "custom", from: "2020-01-01", to: "2026-09-17", now: NOW });
+    expect(r.days).toBe(MAX_RANGE_DAYS);
+    expect(r.toKey).toBe("2026-09-17");
+    expect(r.fromKey).toBe(addDaysKey("2026-09-17", -(MAX_RANGE_DAYS - 1)));
+    expect(r.clamped).toBe(true);
+  });
+
+  it("未知 preset 退回今天（URL 参数是用户可改的）", () => {
+    expect(resolveRange({ preset: "../../etc/passwd", now: NOW }).preset).toBe("today");
+    expect(resolveRange({ preset: null, now: NOW }).preset).toBe("today");
+  });
+});
+
+describe("台账：把多天多人压成一张报表", () => {
+  const at = (day: number, h: number, m = 0) => new Date(Date.UTC(2026, 8, day, h, m));
+  const bizDay = (day: number) => new Date(Date.UTC(2026, 8, day));
+  const punch = (id: string, userId: string, day: number, kind: string, h: number, verdict = "OK") => ({
+    id, userId, kind, at: at(day, h), businessDate: bizDay(day), verdict,
+  });
+
+  it("跨天不串：按天配对，工时等于各天之和", () => {
+    const led = buildLedger([
+      punch("p1", "u1", 15, "IN", 1), punch("p2", "u1", 15, "OUT", 9),
+      punch("p3", "u1", 16, "IN", 2), punch("p4", "u1", 16, "OUT", 6),
+    ], []);
+    expect(led.staff).toHaveLength(1);
+    expect(led.staff[0].presentDays).toBe(2);
+    expect(led.staff[0].workedMinutes).toBe(8 * 60 + 4 * 60);
+    // 15 日 9 点下班不能被当成 16 日那段的结束（那会算出 29 小时）
+    expect(led.staff[0].days.map((x) => x.dateKey)).toEqual(["2026-09-15", "2026-09-16"]);
+    expect(led.staff[0].days[1].workedMinutes).toBe(4 * 60);
+  });
+
+  it("未闭合的那一段不计工时，但算作「今天还在岗」", () => {
+    const led = buildLedger([
+      punch("p1", "u1", 15, "IN", 1), punch("p2", "u1", 15, "OUT", 4),
+      punch("p3", "u1", 15, "IN", 5),
+    ], []);
+    expect(led.staff[0].workedMinutes).toBe(3 * 60);
+    expect(led.staff[0].days[0].open).toBe(true);
+  });
+
+  it("处置过的异常不再「待处置」，但仍计入异常数（事实不能被抹掉）", () => {
+    const punches = [
+      punch("p1", "u1", 15, "IN", 1, "OUT_OF_RANGE"),
+      punch("p2", "u1", 15, "OUT", 9, "SUSPECT_REUSE"),
+      punch("p3", "u1", 16, "IN", 1, "NO_LOCATION"),
+    ];
+    const before = buildLedger(punches, []);
+    expect(before.staff[0].exceptionCount).toBe(3);
+    expect(before.staff[0].pendingCount).toBe(3);
+    expect(before.pendingPunchIds).toEqual(["p3", "p2", "p1"]); // 最新在前
+
+    const after = buildLedger(punches, [
+      { punchId: "p1", decision: "DISMISSED", reviewedBy: "m1", createdAt: at(15, 12) },
+      { punchId: "p2", decision: "CONFIRMED", reviewedBy: "m1", createdAt: at(15, 12) },
+    ]);
+    expect(after.staff[0].exceptionCount, "异常数是系统当时的判定，处置不改它").toBe(3);
+    expect(after.staff[0].pendingCount).toBe(1);
+    expect(after.pendingPunchIds).toEqual(["p3"]);
+  });
+
+  it("同一笔处置两次取最新；同一毫秒的两条与查询顺序无关", () => {
+    const reviews = [
+      { punchId: "p1", decision: "DISMISSED", reviewedBy: "m1", createdAt: at(15, 10) },
+      { punchId: "p1", decision: "CONFIRMED", reviewedBy: "m2", createdAt: at(15, 12) },
+    ];
+    expect(latestReviews(reviews).get("p1")?.decision).toBe("CONFIRMED");
+    // 反过来查一次，结果必须一样
+    expect(latestReviews([...reviews].reverse()).get("p1")?.decision).toBe("CONFIRMED");
+
+    const sameMs = [
+      { punchId: "p1", decision: "CONFIRMED", reviewedBy: "m1", createdAt: at(15, 12) },
+      { punchId: "p1", decision: "DISMISSED", reviewedBy: "m2", createdAt: at(15, 12) },
+    ];
+    const a = latestReviews(sameMs).get("p1")?.decision;
+    const b = latestReviews([...sameMs].reverse()).get("p1")?.decision;
+    expect(a, "同刻并列必须定序，否则结果取决于数据库返回顺序").toBe(b);
+  });
+
+  it("NO_GEOFENCE 不算异常（门店没坐标是配置问题），也不进待处置队列", () => {
+    const led = buildLedger([punch("p1", "u1", 15, "IN", 1, "NO_GEOFENCE")], []);
+    expect(led.staff[0].exceptionCount).toBe(0);
+    expect(led.staff[0].pendingCount).toBe(0);
+    expect(led.pendingPunchIds).toEqual([]);
+  });
+
+  it("没有打卡记录的人不出现在台账里（零行由调用方决定补不补）", () => {
+    const led = buildLedger([punch("p1", "u2", 15, "IN", 1)], []);
+    expect(led.staff.map((s) => s.userId)).toEqual(["u2"]);
+  });
+
+  it("总数是各人之和，不是各自再算一遍", () => {
+    const led = buildLedger([
+      punch("p1", "u1", 15, "IN", 1), punch("p2", "u1", 15, "OUT", 5),
+      punch("p3", "u2", 16, "IN", 1, "LOW_ACCURACY"), punch("p4", "u2", 16, "OUT", 4),
+    ], []);
+    expect(led.totals.presentDays).toBe(2);
+    expect(led.totals.workedMinutes).toBe(7 * 60);
+    expect(led.totals.punchCount).toBe(4);
+    expect(led.totals.exceptionCount).toBe(1);
+    expect(led.totals.pendingCount).toBe(1);
+    // 各人之和 == 总数
+    expect(led.totals.workedMinutes).toBe(led.staff.reduce((n, s) => n + s.workedMinutes, 0));
+  });
+
+  it("乱序输入不影响结果（服务端不该依赖查询顺序）", () => {
+    const input = [
+      punch("p3", "u1", 16, "IN", 2), punch("p1", "u1", 15, "IN", 1),
+      punch("p4", "u1", 16, "OUT", 6), punch("p2", "u1", 15, "OUT", 9),
+    ];
+    const a = buildLedger(input, []);
+    const b = buildLedger([...input].reverse(), []);
+    expect(b.staff[0].workedMinutes).toBe(a.staff[0].workedMinutes);
+    expect(b.staff[0].days.map((d) => d.dateKey)).toEqual(a.staff[0].days.map((d) => d.dateKey));
+  });
+});
+
 describe("源码守卫：证据链靠写法维持", () => {
   it("打卡服务只信服务端时间与自己的判定", () => {
     const svc = strip(read("src/modules/attendance/service.ts"));
@@ -287,6 +474,8 @@ describe("源码守卫：证据链靠写法维持", () => {
       "src/app/mechanic-app/profile/page.tsx",
       "src/app/workshop/settings/page.tsx",
       "src/components/workshop/settings-forms.tsx",
+      "src/components/workshop/attendance-review-queue.tsx",
+      "src/components/workshop/attendance-range-picker.tsx",
     ];
     const used = new Set<string>();
     for (const f of files) {
@@ -308,6 +497,70 @@ describe("源码守卫：证据链靠写法维持", () => {
     for (const v of PUNCH_VERDICTS) {
       const key = "att.verdict-" + v.toLowerCase().replace(/_/g, "-");
       expect(dict.includes('"' + key + '":'), "结论 " + v + " 没有对应文案（" + key + "）").toBe(true);
+    }
+  });
+
+
+  it("处置只追加：原始行与当日汇总都不许被改写（P2）", () => {
+    const report = strip(read("src/modules/attendance/report.ts"));
+    const body = fnBody(report, "export async function reviewPunch");
+    expect(body, "reviewPunch 找不到——断言会空跑").not.toBe("");
+
+    // 只 create，不许 update/delete/upsert：那会篡改证据链
+    expect(body).toContain("attendanceReview.create(");
+    expect(body, "AttendanceReview 只能追加").not.toMatch(/attendanceReview\.(update|delete|upsert)/);
+    expect(body, "AttendancePunch 不许被改写").not.toMatch(/attendancePunch\.(update|delete|upsert)/);
+    expect(body, "Attendance 汇总不许在处置里重算").not.toMatch(/attendance\.(update|upsert)|recomputeDay\(/);
+
+    // 打卡服务（写入路径）不该知道处置的存在
+    const svc = strip(read("src/modules/attendance/service.ts"));
+    expect(svc, "打卡写入不该读处置状态——事实与看法必须分开").not.toContain("attendanceReview");
+  });
+
+  it("处置是「谁、能对哪一行做」：权限 + 分行 + 审计，一个都不能少（P2）", () => {
+    const act = strip(read("src/actions/attendance-review.ts"));
+    expect(act, "动作层必须自己校验权限，不能只靠页面门禁").toContain('"ATTENDANCE"');
+    expect(act).toContain('"edit"');
+    expect(act, "必须从会话取身份，不接受客户端传 actor").toContain("getSessionUser(");
+
+    const report = strip(read("src/modules/attendance/report.ts"));
+    const body = fnBody(report, "export async function reviewPunch");
+    // 跨店处置必须被挡住，否则分行隔离在这个入口破功
+    expect(body, "必须校验这笔打卡的归属分行").toContain("input.actor.branchId");
+    expect(body, "必须校验组织归属").toContain("organisationId");
+    // 只有被标记的才需要判断：否则这个入口就成了给任意打卡贴备注的后门
+    expect(body).toContain("isException(");
+    expect(body, "处置要留痕").toContain("audit(");
+  });
+
+  it("CSV 导出是「带走数据」，门禁比'能看'更严（P2）", () => {
+    const route = strip(read("src/app/api/attendance/export/route.ts"));
+    expect(route, "API 默认必须登录且是员工").toContain("requireStaff(");
+    expect(route, "导出要额外的 export 权限").toContain('"export"');
+    expect(route, "必须按分行收窄").toContain("scopedBranchId(");
+    expect(route, "报表含姓名与行踪，不许有公开缓存").toContain("private, no-store");
+    // 时间要按组织时区渲染：服务器时区在本地(+8)与 Vercel(UTC) 不同，工资表会差 8 小时
+    expect(route, "时间必须显式按时区格式化").toContain("Intl.DateTimeFormat");
+    expect(route).toContain("timeZone");
+  });
+
+  it("异常队列上的每个结论与每个失败码都有人话可显示（P2）", () => {
+    const dict = read("src/lib/i18n.ts");
+    // 动态拼出来的键：删掉一条就会在界面上直接显示 att.review-xxx
+    for (const d of REVIEW_DECISIONS) {
+      expect(dict.includes('"att.review-' + d.toLowerCase() + '":'), "缺少 " + d + " 的展示文案").toBe(true);
+    }
+    for (const code of [
+      "NOT_FOUND", "OUT_OF_SCOPE", "NOT_AN_EXCEPTION", "BAD_DECISION", "NOTE_TOO_LONG",
+      "UNAUTHORIZED", "FORBIDDEN", "UNKNOWN",
+    ]) {
+      const key = "att.review-err-" + code.toLowerCase().replace(/_/g, "-");
+      expect(dict.includes('"' + key + '":'), "失败码 " + code + " 没有对应文案（" + key + "）").toBe(true);
+    }
+    // 动作返回的码必须与界面认得的码一致（少一个就会显示成 unknown）
+    const act = read("src/actions/attendance-review.ts");
+    for (const code of ["NOT_FOUND", "OUT_OF_SCOPE", "NOT_AN_EXCEPTION", "BAD_DECISION", "NOTE_TOO_LONG"]) {
+      expect(act, "动作没有透出失败码 " + code).toContain('"' + code + '"');
     }
   });
 
