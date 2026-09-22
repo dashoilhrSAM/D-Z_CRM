@@ -16,7 +16,7 @@ const read = (p: string) => readFileSync(path.join(root, p), "utf8");
 const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 /** 不需要登录会话的 API —— 必须与 src/middleware.ts 的 API_PUBLIC 保持一致。 */
-const PUBLIC_API_PREFIXES = ["api/webhooks", "api/storage", "api/cron"];
+const PUBLIC_API_PREFIXES = ["api/webhooks", "api/storage", "api/cron", "api/hooks"];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(path.join(root, dir))) {
@@ -64,6 +64,28 @@ describe("每个非公开 API 路由都有自己的门禁", () => {
     expect(cron, "cron 必须用 fail-closed 的密钥校验").toContain("requireCronSecret");
     const hook = read("src/app/api/webhooks/whatsapp/route.ts");
     expect(hook).toContain("timingSafeEqual");
+  });
+
+  it("Supabase SMS hook 靠 Bearer secret 鉴权，且缺密钥即 503", () => {
+    // 这个端点收到的是**明文验证码**，而在 middleware 里是公开路径：
+    // 它唯一的防线就是那段 secret，所以三条都要守住。
+    const smsHook = read("src/app/api/hooks/send-sms/route.ts");
+    const authLib = stripComments(read("src/lib/api-auth.ts"));
+    expect(smsHook, "hook 必须走 fail-closed 的校验函数").toContain("requireSmsHookSecret");
+    // 断言写在定义的**那一侧**：恒定时间比较与 fail-closed 都在 api-auth.ts 里，
+    // 断言在路由里找 timingSafeEqual 会得到一条"看起来在守卫、其实在测实现细节"的空洞断言
+    // （第一版就是这么写的，被自己的测试当场抓出来）。
+    expect(authLib, "要用恒定时间比较，不能裸比较字符串").toContain("timingSafeEqual");
+    expect(authLib, "缺密钥必须 503 而不是放行").toMatch(/SMS_HOOK_SECRET is not configured[\s\S]*?status: 503/);
+    expect(smsHook, "供应商失败必须返回非 2xx，不许假装已发送").toMatch(/result\.ok[\s\S]*?status: 502/);
+  });
+
+  it("验证码不许进日志（它等同于账号本身）", () => {
+    const src = stripComments(read("src/app/api/hooks/send-sms/route.ts"));
+    expect(src).not.toMatch(/console\.(log|error|warn)\([^;]*\botp\b/);
+    // 反面：日志必须存在，否则"客户说没收到"时没有任何现场可查——
+    // 一个把所有日志删掉的实现也能通过上面那条，这不是我们要的。
+    expect(src).toMatch(/console\.(log|error)\(/);
   });
 });
 

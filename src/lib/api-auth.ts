@@ -15,6 +15,7 @@
  */
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { getSessionUser, type SessionUser } from "@/lib/session-user";
 
 export function apiUnauthorized(message = "Unauthorized"): NextResponse {
@@ -45,5 +46,30 @@ export function requireCronSecret(req: NextRequest): NextResponse | null {
     return NextResponse.json({ ok: false, error: "CRON_SECRET is not configured" }, { status: 503 });
   }
   if (req.headers.get("authorization") !== "Bearer " + secret) return apiUnauthorized();
+  return null;
+}
+
+/**
+ * Supabase Auth Hook（Send SMS）的鉴权：与 cron 同一套 fail-closed 口径。
+ *
+ * 为什么不能走 requireStaff()：调用方是 Supabase，不是人，它只会带
+ * `Authorization: Bearer <dashboard 里配置的 secret>`。
+ *
+ * 也正因如此，这个端点必须**假定全世界可打**——它收到的 payload 里有明文验证码，
+ * 参数里有任意手机号。三条硬要求：
+ *  · 没配 secret → 503（显式失败、能被监控看见），绝不"跳过校验照常发短信"；
+ *  · secret 不对 → 401；
+ *  · 用恒定时间比较，避免按字节比较的时序侧信道（与 whatsapp webhook 同口径）。
+ */
+export function requireSmsHookSecret(req: NextRequest): NextResponse | null {
+  const secret = process.env.SMS_HOOK_SECRET;
+  if (!secret) {
+    return NextResponse.json({ ok: false, error: "SMS_HOOK_SECRET is not configured" }, { status: 503 });
+  }
+  const expected = Buffer.from("Bearer " + secret);
+  const provided = Buffer.from(req.headers.get("authorization") ?? "");
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+    return apiUnauthorized("Unauthorized hook caller");
+  }
   return null;
 }

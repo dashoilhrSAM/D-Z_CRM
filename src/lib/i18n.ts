@@ -885,11 +885,23 @@ export const DICT: Dict = {
   "login.email-code": { en: "Email code", zh: "邮箱验证码", ms: "Kod e-mel" },
   "login.otp-code": { en: "OTP code", zh: "验证码", ms: "Kod OTP" },
   "login.new-here": { en: "New here? Create an account", zh: "新用户？创建账号", ms: "Baharu di sini? Cipta akaun" },
+  "login.tab-sms": { en: "SMS code", zh: "短信验证码", ms: "Kod SMS" },
+  "login.send-code": { en: "Send code", zh: "发送验证码", ms: "Hantar kod" },
+  "login.resend-in": { en: "Resend in {s}s", zh: "{s} 秒后可重发", ms: "Hantar semula dalam {s}s" },
+  "login.resend-code": { en: "Resend code", zh: "重新发送验证码", ms: "Hantar semula kod" },
+  "login.verify-and-signin": { en: "Verify & sign in", zh: "验证并登录", ms: "Sahkan & log masuk" },
+  "login.sms-sent": { en: "Code sent to {phone}. It expires in a few minutes.", zh: "验证码已发送至 {phone}，几分钟内有效。", ms: "Kod dihantar ke {phone}. Sah beberapa minit." },
+  "login.sms-hint": { en: "We text a 6-digit code — no password needed.", zh: "我们会发送 6 位验证码，无需密码。", ms: "Kami hantar kod 6 digit — tanpa kata laluan." },
 
   // --- rider notifications list ---
   "rider.notifications-title": { en: "Notifications", zh: "通知", ms: "Pemberitahuan" },
 
   // --- rider signup ---
+  "signup.method-password": { en: "Password", zh: "密码注册", ms: "Kata laluan" },
+  "signup.method-sms": { en: "SMS code", zh: "短信验证码", ms: "Kod SMS" },
+  "signup.send-code": { en: "Send code", zh: "发送验证码", ms: "Hantar kod" },
+  "signup.otp-finish": { en: "Finish sign-up", zh: "完成注册", ms: "Selesaikan pendaftaran" },
+  "signup.otp-hint": { en: "We will text a code to confirm your number.", zh: "我们会发送验证码来确认你的号码。", ms: "Kami akan hantar kod untuk sahkan nombor anda." },
   "signup.title": { en: "Join D&Z Rider", zh: "加入 D&Z 车手", ms: "Sertai D&Z Rider" },
   "signup.sub": { en: "Create your account — your bikes & service in one place", zh: "创建账号——您的爱车与服务尽在一处", ms: "Cipta akaun — motosikal & servis anda di satu tempat" },
   "signup.full-name": { en: "Full name", zh: "全名", ms: "Nama penuh" },
