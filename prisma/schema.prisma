@@ -1628,6 +1628,38 @@ model AuditLog {
   createdAt      DateTime @default(now())
 }
 
+// ---------- Phone OTP ----------
+
+/**
+ * 手机验证码的发送审计 + 频率限制数据源。
+ *
+ * 为什么不复用 Message 表：Message.customerId 是必填外键，而**首次注册时 Customer 还不存在**
+ * （验证码正是用来确认"这个号码归谁"的），所以 OTP 没有客户可挂。硬塞进 Message 会逼出
+ * 一个假的 customerId——那比多一张表糟糕得多。
+ *
+ * 生命周期：action 先写一条 REQUESTED（这就是限流的计数依据），hook 真发出去后把同一行
+ * 更新成 SENT / FAILED，verify 成功再补 verifiedAt。因此这一行同时回答三个问题：
+ * 发了没、发成功没、验过了没。
+ *
+ * ipHash 存的是哈希（AUTH_SECRET 加盐），不是原文：这张表里有手机号，
+ * 位置信息再落原文就成了可以直接画像的数据集，而限流只需要"同一个人"这个等价值。
+ */
+model OtpAttempt {
+  id         String   @id @default(cuid())
+  phoneE164  String
+  purpose    String
+  ipHash     String?
+  provider   String?
+  externalId String?
+  status     String   @default("REQUESTED")
+  error      String?
+  createdAt  DateTime @default(now())
+  verifiedAt DateTime?
+
+  @@index([phoneE164, createdAt])
+  @@index([ipHash, createdAt])
+}
+
 model IntegrationConfig {
   id              String   @id @default(cuid())
   organisationId  String

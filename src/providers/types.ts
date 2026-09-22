@@ -97,3 +97,24 @@ export interface NotificationProvider {
   notify(to: string, title: string, body: string): Promise<MessageSendResult>;
   /** Production: Push notifications. Prototype: LocalNotificationProvider. */
 }
+
+/** SMS 发送结果。与 MessageSendResult 分开：OTP 短信常常发生在 Customer 存在之前（首次注册），
+ *  没有客户可挂账，因此它只回答"这条短信发出去了吗"。 */
+export interface SmsSendResult {
+  ok: boolean;
+  externalId: string | null;
+  status: "QUEUED" | "SENT" | "FAILED";
+  /** 供应商返回的失败原因。**不得包含验证码**——这条会进日志与审计表。 */
+  error?: string;
+}
+
+/**
+ * SMS provider（§11 provider 抽象）。Supabase Auth 的 Send SMS Hook 拿到明文验证码后交给它真发。
+ *
+ * 与 MessagingProvider 的分工：MessagingProvider 服务于"给某个客户发消息"（有 Message 记账、
+ * 有 opt-out 判定）；SmsProvider 只负责"把一段文本发到这个号码"，记账由调用方（OTP 审计表）做。
+ */
+export interface SmsProvider {
+  readonly name: string;
+  send(to: string, body: string): Promise<SmsSendResult>;
+}

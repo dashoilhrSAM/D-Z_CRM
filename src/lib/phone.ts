@@ -18,12 +18,26 @@ export function digitsOnly(input: string): string {
   return input.replace(/[^\d]/g, "");
 }
 
-/** 组合区号 + 本地号 → E.164（如 "+60" + "0123456789" → "+60123456789"）。任一部分为空则 ""。 */
+/**
+ * 组合区号 + 本地号 → E.164。任一部分为空则 ""。
+ *
+ * 三种输入都要正确（2026-09 修正，此前只有第二种是对的）：
+ *  ① 本地习惯写法："+60" + "013-125 2832" → **+60131252832**（马来本地号转国际必须去掉前导 0，
+ *     旧实现给出 "+600131252832"：多一位、不是合法 E.164，Supabase 收不了、也匹配不上任何客户）；
+ *  ② 直接粘贴国际格式："+60" + "+60131252832" / "60131252832" → +60131252832（旧实现给出 "+6060..."）；
+ *  ③ 不含前导 0 的国家号写法："+60" + "12 345 6789" → +60123456789（占位符示范的写法，一直是对的）。
+ */
 export function combinePhone(countryCode: string, local: string): string {
   const cc = digitsOnly(countryCode);
   const l = digitsOnly(local);
   if (!cc || !l) return "";
-  return "+" + cc + l;
+  // ① 输入本身已经是国际格式（带 +）
+  if (local.trim().startsWith("+")) return "+" + l;
+  // ② 输入已经带国家码（不带 +）——只在位数明显超过国家码时才这样认定，
+  //    否则 "+1" + "4155552671" 会被误判成"已带国家码"。
+  if (l.startsWith(cc) && l.length >= cc.length + 7) return "+" + l;
+  // ③ 本地写法：去掉前导 0 再拼国家码
+  return "+" + cc + l.replace(/^0+/, "");
 }
 
 /**

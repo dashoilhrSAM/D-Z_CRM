@@ -15,6 +15,7 @@
  */
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifyStandardWebhook } from "@/lib/standard-webhooks";
 import { getSessionUser, type SessionUser } from "@/lib/session-user";
 
 export function apiUnauthorized(message = "Unauthorized"): NextResponse {
@@ -46,4 +47,36 @@ export function requireCronSecret(req: NextRequest): NextResponse | null {
   }
   if (req.headers.get("authorization") !== "Bearer " + secret) return apiUnauthorized();
   return null;
+}
+
+/**
+ * Supabase Auth Hook（Send SMS）的鉴权：与 cron 同一套 fail-closed 口径，但用的是**签名**而不是 Bearer。
+ *
+ * 依 GoTrue 源码（internal/hooks/hookshttp/hookshttp.go）实测更正：Supabase 的 HTTP hook
+ * 只发 webhook-id / webhook-timestamp / webhook-signature 三个签名头，**不发 Authorization**。
+ * 早先按 `Bearer <secret>` 写的版本会让每一次真实回调都 401 —— 而"本地测试全绿"完全掩盖它，
+ * 因为测试是自己构造的请求头。所以这里改成 Standard Webhooks 的 HMAC 验签（见 lib/standard-webhooks.ts）。
+ *
+ * 这个端点必须**假定全世界可打**（它在 middleware 的公开名单里，payload 里还有明文验证码），
+ * 因此三条硬要求不变：
+ *  · 没配/配错格式 → 503（显式失败、能被监控看见），绝不"跳过校验照常发短信"；
+ *  · 签名缺失/不匹配/时间戳过期 → 401；
+ *  · 全程恒定时间比较，并把原始报文交给验签（必须先 text() 再 json()，否则签名对不上）。
+ */
+export function requireSmsHookSignature(req: NextRequest, rawBody: string): NextResponse | null {
+  const result = verifyStandardWebhook({
+    secret: process.env.SMS_HOOK_SECRET,
+    id: req.headers.get("webhook-id"),
+    timestamp: req.headers.get("webhook-timestamp"),
+    signature: req.headers.get("webhook-signature"),
+    body: rawBody,
+  });
+  if (result.ok) return null;
+  if (result.reason === "not_configured" || result.reason === "malformed_secret") {
+    return NextResponse.json(
+      { ok: false, error: "SMS_HOOK_SECRET is missing or not in v1,whsec_<base64> format (" + result.reason + ")" },
+      { status: 503 },
+    );
+  }
+  return apiUnauthorized("Invalid hook signature: " + result.reason);
 }

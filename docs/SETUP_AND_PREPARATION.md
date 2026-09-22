@@ -67,6 +67,10 @@ plist 文件：`com.dz-platform.server.plist` / `com.dz-platform.e2e.plist`
 | `STORAGE_PRIVATE_BUCKET` | Supabase Storage 私有桶（考勤自拍等个人数据，须在 Supabase 控制台设为 **private**） | Supabase |
 | `SENTRY_DSN` | 错误监控 | Sentry |
 | `NEXTAUTH_SECRET` / `AUTH_SECRET` | 认证加密 | 自生成 |
+| `SMS_HOOK_SECRET` | Supabase Send SMS Hook 的 Bearer secret（**缺它即 503**，见 `requireSmsHookSecret`） | 自生成，与仪表盘 Auth → Hooks 一致 |
+| `TWILIO_ACCOUNT_SID` / `TWILIO_AUTH_TOKEN` / `TWILIO_FROM` | 短信发送（OTP）。未配置时走 mock：本地可测、生产显式失败 | Twilio 控制台 |
+| `OTP_EXPIRE_MINUTES` | 验证码有效期（默认 5），须与仪表盘 SMS OTP Expiry 一致 | 自定 |
+| `OTP_ALLOWED_COUNTRY_CODES` | 允许收验证码的国家码（默认 `+60`，逗号分隔） | 自定 |
 
 > ⚠️ `.env` 不入库（gitignore）。生产 env 在 Vercel/Supabase 配置。
 

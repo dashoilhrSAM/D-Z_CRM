@@ -16,7 +16,7 @@ const read = (p: string) => readFileSync(path.join(root, p), "utf8");
 const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 /** 不需要登录会话的 API —— 必须与 src/middleware.ts 的 API_PUBLIC 保持一致。 */
-const PUBLIC_API_PREFIXES = ["api/webhooks", "api/storage", "api/cron"];
+const PUBLIC_API_PREFIXES = ["api/webhooks", "api/storage", "api/cron", "api/hooks"];
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(path.join(root, dir))) {
@@ -64,6 +64,34 @@ describe("每个非公开 API 路由都有自己的门禁", () => {
     expect(cron, "cron 必须用 fail-closed 的密钥校验").toContain("requireCronSecret");
     const hook = read("src/app/api/webhooks/whatsapp/route.ts");
     expect(hook).toContain("timingSafeEqual");
+  });
+
+  it("Supabase SMS hook 用 Standard Webhooks 签名验签，且缺密钥即 503", () => {
+    // 这个端点收到的是**明文验证码**，而在 middleware 里是公开路径：它唯一的防线就是验签。
+    //
+    // 2026-09-22 依 GoTrue 源码更正：Supabase 的 HTTP hook **不发 Authorization 头**，
+    // 只发 webhook-id / webhook-timestamp / webhook-signature。第一版按 Bearer secret 写的实现
+    // 会让每一次真实回调 401，而本地测试全绿——因为测试是自己构造请求头的。
+    // 这条断言锁住"必须用签名方案"，防止有人再改回 Bearer。
+    const smsHook = read("src/app/api/hooks/send-sms/route.ts");
+    const verifier = stripComments(read("src/lib/standard-webhooks.ts"));
+    expect(smsHook, "hook 必须走签名校验").toContain("requireSmsHookSignature");
+    expect(smsHook, "不许退回 Bearer（GoTrue 不发这个头）").not.toContain("authorization");
+    // 签名是对 body 字节做的：必须先 text() 拿到原始报文再验签，先 json() 就再也对不上。
+    expect(smsHook, "必须先取原始报文再验签").toMatch(/await req\.text\(\)[\s\S]*?requireSmsHookSignature/);
+    expect(verifier, "要用恒定时间比较").toContain("timingSafeEqual");
+    expect(verifier, "要有时间戳容差，否则合法请求可被无限重放").toContain("stale_timestamp");
+    expect(stripComments(read("src/lib/api-auth.ts")), "缺密钥/格式不对必须 503 而不是放行")
+      .toMatch(/SMS_HOOK_SECRET is missing or not in[\s\S]*?status: 503/);
+    expect(smsHook, "供应商失败必须返回非 2xx，不许假装已发送").toMatch(/result\.ok[\s\S]*?status: 503/);
+  });
+
+  it("验证码不许进日志（它等同于账号本身）", () => {
+    const src = stripComments(read("src/app/api/hooks/send-sms/route.ts"));
+    expect(src).not.toMatch(/console\.(log|error|warn)\([^;]*\botp\b/);
+    // 反面：日志必须存在，否则"客户说没收到"时没有任何现场可查——
+    // 一个把所有日志删掉的实现也能通过上面那条，这不是我们要的。
+    expect(src).toMatch(/console\.(log|error)\(/);
   });
 });
 
