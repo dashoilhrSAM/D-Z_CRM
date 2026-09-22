@@ -42,9 +42,56 @@ import {
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+/**
+ * GoTrue 实际发出的结构（读 supabase/auth 源码 internal/hooks/v0hooks/v0hooks.go 确认）：
+ *   { metadata, user: {…models.User…}, sms: { otp, sms_type, phone } }
+ *
+ * **两处都带号码**：`sms.phone` 是本次投递的目标号码，`user.phone` 是 models.User 上的字段。
+ * 优先用 sms.phone —— 第一版只读 user.phone，结果被线上第一次真实回调打回 400
+ * （Supabase 那边只显示一句 "Invalid payload sent to hook"，什么都没有留下）。
+ */
 interface SendSmsHookPayload {
-  user?: { id?: string; phone?: string };
-  sms?: { otp?: string };
+  user?: { id?: string; phone?: string | null };
+  sms?: { otp?: string; sms_type?: string; phone?: string };
+}
+
+/** 目标号码：sms.phone 优先，退回 user.phone；非字符串一律当作没有。 */
+function targetPhone(p: SendSmsHookPayload): string {
+  const fromSms = p.sms?.phone;
+  if (typeof fromSms === "string" && fromSms) return fromSms;
+  const fromUser = p.user?.phone;
+  if (typeof fromUser === "string" && fromUser) return fromUser;
+  return "";
+}
+
+/** 验证码：只接受字符串（数字型说明结构又变了，宁可拒绝也不要猜）。 */
+function otpOf(p: SendSmsHookPayload): string {
+  return typeof p.sms?.otp === "string" ? p.sms.otp : "";
+}
+
+/**
+ * 拒绝原因的形状快照。**绝不含验证码本身**：只记录"哪些键存在、类型是什么、验证码有几位"。
+ *
+ * 为什么需要它：这类拒绝发生在写审计之前，于是线上只表现为 Supabase 的一句
+ * "Invalid payload sent to hook"，我们这边没有日志、没有痕迹——只能靠读源码猜字段形状
+ * （这一轮就是这么耗掉的）。有了它，下一次拒绝会直接在 OtpAttempt 里留下一行可读的原因。
+ */
+function payloadShape(payload: unknown): string {
+  const asRecord = (v: unknown): Record<string, unknown> =>
+    v && typeof v === "object" ? (v as Record<string, unknown>) : {};
+  const type = (v: unknown) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+  const top = asRecord(payload);
+  const sms = asRecord(top.sms);
+  const user = asRecord(top.user);
+  const otp = sms.otp;
+  return [
+    "top=" + Object.keys(top).sort().join("|"),
+    "sms=" + Object.keys(sms).sort().join("|"),
+    "otp=" + type(otp) + (typeof otp === "string" ? "(" + otp.length + ")" : ""),
+    "sms.phone=" + type(sms.phone),
+    "user=" + Object.keys(user).sort().join("|"),
+    "user.phone=" + type(user.phone),
+  ].join(" ");
 }
 
 /**
@@ -63,7 +110,7 @@ async function findLatestAttempt(phoneE164: string) {
       // 拒绝类事件（BLOCKED/THROTTLED）不参与"挂载"：它们是独立的拒绝记录，
       // 若允许挂载，一次滥用尝试会把之前那条成功的投递记录改写成拒绝，审计就失真了
       // （第一版就是这么写的，被测试当场抓出来）。
-      status: { notIn: ["BLOCKED", "THROTTLED"] },
+      status: { notIn: ["BLOCKED", "THROTTLED", "REJECTED"] },
       createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
     },
     orderBy: { createdAt: "desc" },
@@ -71,7 +118,7 @@ async function findLatestAttempt(phoneE164: string) {
 }
 
 /** 拒绝类事件一律**新起一行**：它们回答的是"这次请求为什么没发"，与投递结果不是同一件事。 */
-async function recordRejection(phoneE164: string, status: "BLOCKED" | "THROTTLED", reason: string) {
+async function recordRejection(phoneE164: string, status: "BLOCKED" | "THROTTLED" | "REJECTED", reason: string) {
   try {
     await db.otpAttempt.create({ data: { phoneE164, purpose: "HOOK", status, error: reason } });
   } catch (e) {
@@ -92,12 +139,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
-  const phone = payload.user?.phone ?? "";
-  const otp = payload.sms?.otp ?? "";
+  const phone = targetPhone(payload);
+  const otp = otpOf(payload);
   if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+    // 先落审计再拒绝。GoTrue 只会把 400 变成一句 "Invalid payload sent to hook"，
+    // 我们这边若什么都不记，故障现场就等于消失了。
+    await recordRejection(phone || "unknown", "REJECTED", "invalid phone; " + payloadShape(payload));
     return NextResponse.json({ ok: false, error: "invalid phone" }, { status: 400 });
   }
   if (!/^\d{4,8}$/.test(otp)) {
+    await recordRejection(phone, "REJECTED", "invalid otp; " + payloadShape(payload));
     return NextResponse.json({ ok: false, error: "invalid otp" }, { status: 400 });
   }
 
