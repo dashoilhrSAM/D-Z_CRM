@@ -2,7 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireSmsHookSignature } from "@/lib/api-auth";
 import { smsProvider } from "@/providers";
-import { allowedCountryCodes, buildOtpSms, isAllowedPhone, maskPhone, otpExpireMinutes } from "@/lib/otp";
+import {
+  OTP_LIMITS,
+  allowedCountryCodes,
+  buildOtpSms,
+  isAllowedPhone,
+  maskPhone,
+  otpDailyBudget,
+  otpExpireMinutes,
+  utcDayStart,
+} from "@/lib/otp";
 
 /**
  * Supabase Auth Hook —— Send SMS。
@@ -49,9 +58,25 @@ interface SendSmsHookPayload {
  */
 async function findLatestAttempt(phoneE164: string) {
   return db.otpAttempt.findFirst({
-    where: { phoneE164, status: { not: "BLOCKED" }, createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) } },
+    where: {
+      phoneE164,
+      // 拒绝类事件（BLOCKED/THROTTLED）不参与"挂载"：它们是独立的拒绝记录，
+      // 若允许挂载，一次滥用尝试会把之前那条成功的投递记录改写成拒绝，审计就失真了
+      // （第一版就是这么写的，被测试当场抓出来）。
+      status: { notIn: ["BLOCKED", "THROTTLED"] },
+      createdAt: { gte: new Date(Date.now() - 10 * 60 * 1000) },
+    },
     orderBy: { createdAt: "desc" },
   });
+}
+
+/** 拒绝类事件一律**新起一行**：它们回答的是"这次请求为什么没发"，与投递结果不是同一件事。 */
+async function recordRejection(phoneE164: string, status: "BLOCKED" | "THROTTLED", reason: string) {
+  try {
+    await db.otpAttempt.create({ data: { phoneE164, purpose: "HOOK", status, error: reason } });
+  } catch (e) {
+    console.error("[send-sms-hook] rejection write failed: " + (e instanceof Error ? e.message : String(e)));
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -79,8 +104,41 @@ export async function POST(req: NextRequest) {
   // 第二道号段防线：action 已经拦过一次，这里再拦一次。
   // 单靠 action 不够——hook 是独立的公开入口，而短信是按条计费的（SMS pumping）。
   if (!isAllowedPhone(phone)) {
-    await recordAttempt(phone, null, "BLOCKED", "country not allowed: " + allowedCountryCodes().join(","));
+    await recordRejection(phone, "BLOCKED", "country not allowed: " + allowedCountryCodes().join(","));
     return NextResponse.json({ ok: false, error: "country not allowed" }, { status: 403 });
+  }
+
+  // 总额度闸门（见 lib/otp.ts 的 otpDailyBudget）：换号刷量在经济上被截断。
+  const sentToday = await db.otpAttempt.count({
+    where: { status: "SENT", createdAt: { gte: utcDayStart() } },
+  });
+  if (sentToday >= otpDailyBudget()) {
+    await recordRejection(phone, "BLOCKED", "daily OTP budget exhausted (" + sentToday + ")");
+    console.error("[send-sms-hook] daily OTP budget exhausted: " + sentToday);
+    return NextResponse.json({ ok: false, error: "daily OTP budget exhausted" }, { status: 503 });
+  }
+
+  // 第三道防线：**针对绕过我们 action 的直连调用**。
+  //
+  // anon key 是设计上公开的（它就在浏览器 bundle 里），所以任何人都能直接打
+  // Supabase 的 /auth/v1/otp，跳过 src/actions 里的限流，用我们的 Twilio 账号刷短信。
+  // hook 是每条验证码的必经之路，因此把"同一号码 60 秒内已成功发过"挡在这里，
+  // 才是真正拦得住的那一层（号段白名单同理，已经在这一层）。
+  //
+  // 只在**成功发送**过的情况下拦：GoTrue 失败时会重试 3 次，若把失败行也算进去，
+  // 重试会被自己挡住。且**故意不带 retry-after 头**——带上的话 GoTrue 会立刻重试三次
+  // （源码里是 continue，不 sleep），那只是三次无用功。
+  const recentSent = await db.otpAttempt.findFirst({
+    where: {
+      phoneE164: phone,
+      status: "SENT",
+      createdAt: { gte: new Date(Date.now() - OTP_LIMITS.minIntervalSec * 1000) },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (recentSent) {
+    await recordRejection(phone, "THROTTLED", "hook-level min interval");
+    return NextResponse.json({ ok: false, error: "code already sent moments ago" }, { status: 429 });
   }
 
   const expireMinutes = otpExpireMinutes();

@@ -80,6 +80,23 @@ export const OTP_LIMITS = {
   maxPerIpPerHour: 10,
 } as const;
 
+/**
+ * 全局每日投递预算。**这是防「换号刷短信」的那道闸门**：
+ * 直连攻击的杠杆不是重复打同一个号码（Supabase 自己有 per-phone 间隔），
+ * 而是拿几千个不同的 +60 号码各发一次 —— 那种模式 per-phone 限制完全看不见。
+ * 超过预算就整条链路停发（宁可挡下真实用户并报警，也不要一夜之间账单失控）。
+ */
+export function otpDailyBudget(): number {
+  const raw = Number(process.env.OTP_DAILY_BUDGET);
+  if (!Number.isFinite(raw) || raw < 0) return 300;
+  return Math.floor(raw);
+}
+
+/** UTC 当天零点（与项目其它业务时间口径一致，避免服务器时区漂移）。 */
+export function utcDayStart(now: Date = new Date()): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 export interface OtpRateSnapshot {
   /** 同一号码最近 minIntervalSec 秒内的请求数 */
   phoneLastMinute: number;

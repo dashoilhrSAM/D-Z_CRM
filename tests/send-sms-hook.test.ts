@@ -140,15 +140,56 @@ describe("发送与记账", () => {
     expect(rows[0].purpose).toBe("SIGNUP"); // 保留发起方写入的用途，便于区分注册/登录成本
   });
 
-  it("GoTrue 重试 3 次（同一个验证码）时审计表仍只有一行", async () => {
+  it("已成功发送后的重复回调被 60 秒退避挡下，不会重复发同一条验证码", async () => {
+    // GoTrue 只在**失败**时重试（源码：网络错误/超时/429/503 才 continue）。
+    // 但有一种竞态：我们这边其实已经发出去了，只是响应没在 5 秒内回到 GoTrue，
+    // 于是它重试。此时正确行为是**不重复发送**——用户手里已经有那条验证码，
+    // 再发一条同样的码只是多花一次钱。所以第二条回调走 429。
     await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
-    for (let i = 0; i < 3; i++) {
-      const res = await call(payload());
-      expect(res.status).toBe(200);
-    }
+    expect((await call(payload())).status).toBe(200);
+    expect((await call(payload())).status).toBe(429);
+
     const rows = await db.otpAttempt.findMany({ where: { phoneE164: TEST_PHONE } });
-    expect(rows).toHaveLength(1);
-    expect(rows[0].status).toBe("SENT");
+    expect(rows.filter((r) => r.status === "SENT")).toHaveLength(1);
+    expect(rows.filter((r) => r.status === "THROTTLED")).toHaveLength(1);
+  });
+
+  it("每日预算用尽 → 503（换号刷量在经济上被截断，且留痕）", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    const savedBudget = process.env.OTP_DAILY_BUDGET;
+    process.env.OTP_DAILY_BUDGET = "0";
+    const res = await call(payload());
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toContain("budget");
+    const row = await db.otpAttempt.findFirst({ where: { phoneE164: TEST_PHONE }, orderBy: { createdAt: "desc" } });
+    expect(row?.error).toContain("budget");
+    if (savedBudget === undefined) delete process.env.OTP_DAILY_BUDGET;
+    else process.env.OTP_DAILY_BUDGET = savedBudget;
+  });
+
+  it("同一号码 60 秒内已成功发过 → 429（这是挡住「拿公开 anon key 直连 Supabase 刷短信」的那一层）", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    await db.otpAttempt.create({ data: { phoneE164: TEST_PHONE, purpose: "LOGIN", status: "SENT" } });
+
+    const res = await call(payload());
+    expect(res.status).toBe(429);
+    expect(res.headers.get("retry-after")).toBeNull(); // 带上它会触发 GoTrue 立刻重试三次
+    const rows = await db.otpAttempt.findMany({ where: { phoneE164: TEST_PHONE }, orderBy: { createdAt: "asc" } });
+    expect(rows.map((r) => r.status)).toEqual(["SENT", "THROTTLED"]);
+  });
+
+  it("只有过**失败**的发送时不受限（否则 GoTrue 的重试会被自己挡住）", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    await db.otpAttempt.create({ data: { phoneE164: TEST_PHONE, purpose: "LOGIN", status: "FAILED" } });
+    expect((await call(payload())).status).toBe(200);
+  });
+
+  it("已成功发过但已超过 60 秒 → 允许重发", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    await db.otpAttempt.create({
+      data: { phoneE164: TEST_PHONE, purpose: "LOGIN", status: "SENT", createdAt: new Date(Date.now() - 70 * 1000) },
+    });
+    expect((await call(payload())).status).toBe(200);
   });
 
   it("没有对应 action 记录时（如仪表盘手动触发）也会留一条痕", async () => {
