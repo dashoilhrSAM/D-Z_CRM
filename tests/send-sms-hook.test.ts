@@ -49,7 +49,9 @@ const payload = (phone = TEST_PHONE, otp = OTP) => ({ user: { id: "u1", phone },
 
 beforeAll(async () => {
   process.env.DATABASE_URL = saved.databaseUrl ?? "file:./dev.db";
-  delete process.env.TWILIO_AUTH_TOKEN; // 强制走 mock provider：测试绝不真发短信
+  // 强制走 mock provider：测试绝不真发短信（新增 provider 时这里也要一起加）
+  delete process.env.TWILIO_AUTH_TOKEN;
+  delete process.env.TEXTBEE_API_KEY;
   ({ db } = await import("@/lib/db"));
   ({ POST } = await import("@/app/api/hooks/send-sms/route"));
   await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
