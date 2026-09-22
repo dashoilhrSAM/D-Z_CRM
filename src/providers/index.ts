@@ -5,6 +5,7 @@ import { messagingProvider as mockMessaging } from "./messaging/mock-whatsapp";
 import { messagingProvider as whatsappBusiness } from "./messaging/whatsapp-business";
 import { smsProvider as mockSms } from "./sms/mock-sms";
 import { smsProvider as twilioSms } from "./sms/twilio";
+import { smsProvider as textbeeSms } from "./sms/textbee";
 import { aiProvider as mockAi } from "./ai/mock-ai";
 import { aiProvider as openai } from "./ai/openai";
 import { paymentProvider } from "./payment/mock-payment";
@@ -32,10 +33,16 @@ export const storageProvider =
 export const messagingProvider =
   process.env.WHATSAPP_API_TOKEN ? whatsappBusiness : mockMessaging;
 
-// SMS: real Twilio when TWILIO_AUTH_TOKEN configured, else mock.
-// 注意与上面两条不同：那个 mock 在 production 会**主动失败**（见 mock-sms.ts）——
-// OTP 走 mock 等于"发送成功但没人收到"，不许静默发生。
-export const smsProvider = process.env.TWILIO_AUTH_TOKEN ? twilioSms : mockSms;
+// SMS 选型顺序（先免平台费的后按条计费的）：
+//   1. TextBee —— 用自己的安卓手机 + SIM 卡发（免费档 50 条/天、300 条/月），见 sms/textbee.ts
+//   2. Twilio  —— 有凭据时（按条计费）
+//   3. mock    —— 本地开发用；注意 mock 在 production 会**主动失败**（见 mock-sms.ts）：
+//      OTP 走 mock 等于"发送成功但没人收到"，这种静默失败在本项目不许发生。
+export const smsProvider = process.env.TEXTBEE_API_KEY
+  ? textbeeSms
+  : process.env.TWILIO_AUTH_TOKEN
+    ? twilioSms
+    : mockSms;
 
 // AI: real OpenAI when OPENAI_API_KEY configured, else mock (canned text).
 export const aiProvider =
