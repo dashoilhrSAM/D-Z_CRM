@@ -32,7 +32,7 @@ const API_PUBLIC = [
   "/api/webhooks", // Meta 回调：靠 x-hub-signature-256 校验（见 webhooks/whatsapp/route.ts）
   "/api/storage",  // 资源托管：产品图/海报的 <img src>，公开页也会引用
   "/api/cron",     // Vercel Cron：靠 CRON_SECRET Bearer，且**缺密钥即拒绝**（fail-closed）
-  "/api/hooks",    // Supabase Auth Hook：靠 SMS_HOOK_SECRET Bearer（requireSmsHookSecret，同样 fail-closed）
+  "/api/hooks",    // Supabase Auth Hook：靠 Standard Webhooks HMAC 签名（requireSmsHookSignature，fail-closed）
 ];
 function isApiPublic(pathname: string): boolean {
   return API_PUBLIC.some((p) => matchesPrefix(pathname, p));

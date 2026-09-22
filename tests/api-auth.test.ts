@@ -66,18 +66,24 @@ describe("每个非公开 API 路由都有自己的门禁", () => {
     expect(hook).toContain("timingSafeEqual");
   });
 
-  it("Supabase SMS hook 靠 Bearer secret 鉴权，且缺密钥即 503", () => {
-    // 这个端点收到的是**明文验证码**，而在 middleware 里是公开路径：
-    // 它唯一的防线就是那段 secret，所以三条都要守住。
+  it("Supabase SMS hook 用 Standard Webhooks 签名验签，且缺密钥即 503", () => {
+    // 这个端点收到的是**明文验证码**，而在 middleware 里是公开路径：它唯一的防线就是验签。
+    //
+    // 2026-09-22 依 GoTrue 源码更正：Supabase 的 HTTP hook **不发 Authorization 头**，
+    // 只发 webhook-id / webhook-timestamp / webhook-signature。第一版按 Bearer secret 写的实现
+    // 会让每一次真实回调 401，而本地测试全绿——因为测试是自己构造请求头的。
+    // 这条断言锁住"必须用签名方案"，防止有人再改回 Bearer。
     const smsHook = read("src/app/api/hooks/send-sms/route.ts");
-    const authLib = stripComments(read("src/lib/api-auth.ts"));
-    expect(smsHook, "hook 必须走 fail-closed 的校验函数").toContain("requireSmsHookSecret");
-    // 断言写在定义的**那一侧**：恒定时间比较与 fail-closed 都在 api-auth.ts 里，
-    // 断言在路由里找 timingSafeEqual 会得到一条"看起来在守卫、其实在测实现细节"的空洞断言
-    // （第一版就是这么写的，被自己的测试当场抓出来）。
-    expect(authLib, "要用恒定时间比较，不能裸比较字符串").toContain("timingSafeEqual");
-    expect(authLib, "缺密钥必须 503 而不是放行").toMatch(/SMS_HOOK_SECRET is not configured[\s\S]*?status: 503/);
-    expect(smsHook, "供应商失败必须返回非 2xx，不许假装已发送").toMatch(/result\.ok[\s\S]*?status: 502/);
+    const verifier = stripComments(read("src/lib/standard-webhooks.ts"));
+    expect(smsHook, "hook 必须走签名校验").toContain("requireSmsHookSignature");
+    expect(smsHook, "不许退回 Bearer（GoTrue 不发这个头）").not.toContain("authorization");
+    // 签名是对 body 字节做的：必须先 text() 拿到原始报文再验签，先 json() 就再也对不上。
+    expect(smsHook, "必须先取原始报文再验签").toMatch(/await req\.text\(\)[\s\S]*?requireSmsHookSignature/);
+    expect(verifier, "要用恒定时间比较").toContain("timingSafeEqual");
+    expect(verifier, "要有时间戳容差，否则合法请求可被无限重放").toContain("stale_timestamp");
+    expect(stripComments(read("src/lib/api-auth.ts")), "缺密钥/格式不对必须 503 而不是放行")
+      .toMatch(/SMS_HOOK_SECRET is missing or not in[\s\S]*?status: 503/);
+    expect(smsHook, "供应商失败必须返回非 2xx，不许假装已发送").toMatch(/result\.ok[\s\S]*?status: 503/);
   });
 
   it("验证码不许进日志（它等同于账号本身）", () => {

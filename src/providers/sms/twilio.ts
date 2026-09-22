@@ -11,8 +11,9 @@ import type { SmsProvider, SmsSendResult } from "../types";
  * 两个刻意的选择：
  *  1. **未配置凭据时返回 FAILED，绝不回落 mock**。回落 mock 会让生产"发送成功、没人收到"，
  *     是 OTP 链路最危险的一种失败（用户看不到任何错误，只会一直点重发）。
- *  2. **8 秒超时**。这个函数是被 Supabase 的 Send SMS Hook 同步调用的：挂着不返回，
- *     整个 signInWithOtp 请求就一起挂着。快速失败 + 让用户重试，比慢慢等更好。
+ *  2. **3 秒超时**。这个函数是被 Supabase 的 Send SMS Hook 同步调用的，而 GoTrue 侧
+ *     默认只给 5 秒（defaultHTTPHookTimeout）——超时它就先失败了，我们这边还挂着没有任何意义。
+ *     留 2 秒给网络与响应处理，宁可快速失败让用户重试。
  *
  * 失败原因会写进 OtpAttempt.error 与日志，因此**只保留供应商的技术信息**，
  * 绝不把短信正文或验证码带进去。
@@ -35,7 +36,7 @@ export class TwilioSmsProvider implements SmsProvider {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: new URLSearchParams({ To: to, From: from, Body: body }).toString(),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(3000),
       });
       const data = (await res.json()) as { sid?: string; status?: string; message?: string; code?: number };
       if (!res.ok) {
