@@ -205,3 +205,65 @@ describe("发送与记账", () => {
     expect(rows[1].purpose).toBe("HOOK");
   });
 });
+
+describe("GoTrue 的真实 payload 结构（线上第一次回调就死在这里）", () => {
+  // 依据 supabase/auth 源码 internal/hooks/v0hooks/v0hooks.go：
+  //   { metadata, user: {…}, sms: { otp, sms_type, phone } }
+  // 第一版只读 user.phone、且只认 sms.otp，被线上真实回调打回 400；
+  // Supabase 那边只显示一句 "Invalid payload sent to hook"，我们这边什么痕迹都没有。
+  // 这组用例锁住"两处号码都认"，以及"拒绝必须留下可读痕迹"。
+  const realShape = (opts: { otp?: string; phone?: string; userPhone?: string | null } = {}) => ({
+    metadata: { uuid: "m-1", time: new Date().toISOString(), name: "send-sms", ip_address: "1.2.3.4" },
+    user: {
+      id: "a1b2c3",
+      aud: "authenticated",
+      role: "authenticated",
+      phone: opts.userPhone === undefined ? opts.phone ?? TEST_PHONE : opts.userPhone,
+      app_metadata: { provider: "phone" },
+      user_metadata: {},
+    },
+    sms: { otp: opts.otp ?? OTP, sms_type: "confirmation", phone: opts.phone ?? TEST_PHONE },
+  });
+
+  it("完整结构（带 metadata / sms_type / sms.phone）→ 200", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    const res = await call(realShape());
+    expect(res.status).toBe(200);
+    const row = await db.otpAttempt.findFirst({ where: { phoneE164: TEST_PHONE }, orderBy: { createdAt: "desc" } });
+    expect(row?.status).toBe("SENT");
+  });
+
+  it("user.phone 缺失、只有 sms.phone 时也要能发（这正是线上那次 400 的形态）", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    const res = await call(realShape({ userPhone: null }));
+    expect(res.status).toBe(200);
+  });
+
+  it("sms 里没有 otp → 400，但必须在审计表留下**可读**原因", async () => {
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    const bad = realShape({ otp: "" });
+    delete (bad.sms as { otp?: string }).otp;
+
+    const res = await call(bad);
+    expect(res.status).toBe(400);
+    const row = await db.otpAttempt.findFirst({ where: { phoneE164: TEST_PHONE }, orderBy: { createdAt: "desc" } });
+    expect(row, "拒绝必须留痕，否则线上只能靠读源码猜").toBeTruthy();
+    expect(row?.status).toBe("REJECTED");
+    expect(row?.error).toContain("otp=");
+    expect(row?.error).toContain("sms.phone=string");
+  });
+
+  it("形状诊断里绝不出现验证码本身", async () => {
+    const secretOtp = "999888";
+    const badPhone = "12345";
+    await db.otpAttempt.deleteMany({ where: { phoneE164: badPhone } });
+    const res = await call({ user: { id: "u9", phone: badPhone }, sms: { otp: secretOtp } });
+    expect(res.status).toBe(400);
+    // 号码非空就按原样记（便于看清是谁在发垃圾），只有完全取不到号码时才写 unknown
+    const row = await db.otpAttempt.findFirst({ where: { phoneE164: badPhone }, orderBy: { createdAt: "desc" } });
+    expect(row, "被拒的请求也必须留痕").toBeTruthy();
+    expect(row?.error).toContain("invalid phone");
+    expect(row?.error, "诊断只描述形状，不复制内容").not.toContain(secretOtp);
+    await db.otpAttempt.deleteMany({ where: { phoneE164: badPhone } });
+  });
+});
