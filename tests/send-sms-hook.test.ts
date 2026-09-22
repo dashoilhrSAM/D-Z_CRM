@@ -233,10 +233,21 @@ describe("GoTrue 的真实 payload 结构（线上第一次回调就死在这里
     expect(row?.status).toBe("SENT");
   });
 
-  it("user.phone 缺失、只有 sms.phone 时也要能发（这正是线上那次 400 的形态）", async () => {
+  it("user.phone 缺失、只有 sms.phone 时也要能发", async () => {
     await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
     const res = await call(realShape({ userPhone: null }));
     expect(res.status).toBe(200);
+  });
+
+  it("号码**不带 +** 时也要能发（线上真实的 400 就是这个原因）", async () => {
+    // 审计行的形状摘要给出的事实：GoTrue 传的 sms.phone / user.phone 都是 "60111111111"，
+    // 而白名单与 Twilio 都要求 "+60111111111"。这条用例锁住"补前缀"这一步。
+    await db.otpAttempt.deleteMany({ where: { phoneE164: TEST_PHONE } });
+    const res = await call(realShape({ phone: "60111111111" }));
+    expect(res.status).toBe(200);
+    const row = await db.otpAttempt.findFirst({ where: { phoneE164: TEST_PHONE }, orderBy: { createdAt: "desc" } });
+    expect(row?.status).toBe("SENT");
+    expect(row?.phoneE164, "落库的必须是规范化后的 E.164").toBe(TEST_PHONE);
   });
 
   it("sms 里没有 otp → 400，但必须在审计表留下**可读**原因", async () => {

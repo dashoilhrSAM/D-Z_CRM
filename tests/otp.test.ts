@@ -15,6 +15,7 @@ import {
   maskPhone,
   normalizeToE164,
   snapshotOtpUse,
+  toE164FromHook,
 } from "@/lib/otp";
 
 describe("号段白名单（SMS pumping 的第一道防线）", () => {
@@ -64,6 +65,29 @@ describe("输入归一化（身份键：错了就会绑错客户）", () => {
     expect(normalizeToE164("+60", "123")).toBe("");
     expect(normalizeToE164("+60", "1234567890123456789")).toBe("");
     expect(normalizeToE164("", "0131252832")).toBe("");
+  });
+});
+
+describe("hook payload 的号码归一化（GoTrue 不带 + 这件事）", () => {
+  it("不带 + 的形态必须补上（线上实测就是这种）", () => {
+    // 依审计行的形状摘要：sms.phone 与 user.phone 都是 "60111111111" 这种形态，
+    // 第一版直接拿原值过白名单 → 被判非法号码 → 400 → Supabase 只回一句笼统文案。
+    expect(toE164FromHook("60111111111")).toBe("+60111111111");
+    expect(toE164FromHook("+60111111111")).toBe("+60111111111");
+    expect(toE164FromHook("60 11 111 1111")).toBe("+60111111111");
+    expect(toE164FromHook("+65 9123 4567")).toBe("+6591234567");
+  });
+
+  it("位数不合理一律返回空串（宁可不发，也不要发到错的号码上）", () => {
+    expect(toE164FromHook("")).toBe("");
+    expect(toE164FromHook(null)).toBe("");
+    expect(toE164FromHook("12345")).toBe("");
+    expect(toE164FromHook("1234567890123456789")).toBe("");
+  });
+
+  it("归一化后的号码必须能通过白名单（两步是配套的，不能只改一步）", () => {
+    expect(isAllowedPhone(toE164FromHook("60111111111"))).toBe(true);
+    expect(isAllowedPhone(toE164FromHook("8613800138000"))).toBe(false);
   });
 });
 
