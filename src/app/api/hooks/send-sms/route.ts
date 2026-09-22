@@ -10,6 +10,7 @@ import {
   maskPhone,
   otpDailyBudget,
   otpExpireMinutes,
+  toE164FromHook,
   utcDayStart,
 } from "@/lib/otp";
 
@@ -88,9 +89,9 @@ function payloadShape(payload: unknown): string {
     "top=" + Object.keys(top).sort().join("|"),
     "sms=" + Object.keys(sms).sort().join("|"),
     "otp=" + type(otp) + (typeof otp === "string" ? "(" + otp.length + ")" : ""),
-    "sms.phone=" + type(sms.phone),
+    "sms.phone=" + type(sms.phone) + (typeof sms.phone === "string" ? (sms.phone.trim().startsWith("+") ? "+" : "no+") : ""),
     "user=" + Object.keys(user).sort().join("|"),
-    "user.phone=" + type(user.phone),
+    "user.phone=" + type(user.phone) + (typeof user.phone === "string" ? (user.phone.trim().startsWith("+") ? "+" : "no+") : ""),
   ].join(" ");
 }
 
@@ -139,12 +140,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "invalid json" }, { status: 400 });
   }
 
-  const phone = targetPhone(payload);
+  // GoTrue 传来的号码没有 "+"（线上实测），这里统一补成 E.164 再进入白名单校验。
+  const rawPhone = targetPhone(payload);
+  const phone = toE164FromHook(rawPhone);
   const otp = otpOf(payload);
-  if (!/^\+[1-9]\d{6,14}$/.test(phone)) {
+  if (!phone) {
     // 先落审计再拒绝。GoTrue 只会把 400 变成一句 "Invalid payload sent to hook"，
     // 我们这边若什么都不记，故障现场就等于消失了。
-    await recordRejection(phone || "unknown", "REJECTED", "invalid phone; " + payloadShape(payload));
+    await recordRejection(rawPhone || "unknown", "REJECTED", "invalid phone; " + payloadShape(payload));
     return NextResponse.json({ ok: false, error: "invalid phone" }, { status: 400 });
   }
   if (!/^\d{4,8}$/.test(otp)) {

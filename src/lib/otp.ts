@@ -46,6 +46,23 @@ export function normalizeToE164(countryCode: string, local: string): string {
   return e164;
 }
 
+/**
+ * hook payload 里的号码 → E.164。
+ *
+ * **GoTrue 传进来的号码没有 `+`**（线上实测：sms.phone 与 user.phone 都是 `60111111111` 这种形态，
+ * 而官方文档示例里写的是带 + 的样子）。Twilio 与我们的号段白名单都要求带 `+` 的 E.164，
+ * 第一版直接拿原值去过白名单 → 每次都被判"非法号码" → 400 → Supabase 只回一句
+ * "Invalid payload sent to hook"，线上没有任何细节可查。
+ *
+ * 这里只补齐前缀并校验位数：号码本身已经是国家级（含国家码）的形态，不做任何"猜国家"的处理。
+ */
+export function toE164FromHook(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const digits = raw.replace(/[^\d]/g, "");
+  if (digits.length < 7 || digits.length > 15) return "";
+  return "+" + digits;
+}
+
 /** 日志/审计里用的脱敏号码：+60131252832 → +6013****832（保留可追溯的国家码与尾号）。 */
 export function maskPhone(e164: string | null | undefined): string {
   if (!e164) return "";
