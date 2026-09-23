@@ -1,5 +1,5 @@
 import ExcelJS from "exceljs";
-import { META_SHEET, PRODUCTS_SHEET, WORKBOOK_VERSION, type SheetDef } from "./sheets";
+import { META_SHEET, SHEETS, WORKBOOK_VERSION, type SheetDef } from "./sheets";
 import { ACTION_COLUMN, type IncomingRow } from "./diff";
 
 /**
@@ -22,6 +22,9 @@ export interface ParsedSheet {
 export interface ParsedWorkbook {
   version: number | null;
   versionOk: boolean;
+  /** 文件属于哪个分店（套餐/促销按分店存 —— 以**文件里写的**为准，不信调用方传的） */
+  branchId: string | null;
+  branchName: string | null;
   sheets: ParsedSheet[];
   warnings: string[];
 }
@@ -76,11 +79,15 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
   const warnings: string[] = [];
 
   let version: number | null = null;
+  let branchId: string | null = null;
+  let branchName: string | null = null;
   const meta = wb.getWorksheet(META_SHEET);
   if (meta) {
     meta.eachRow((row) => {
-      const [k, v] = [cellScalar(row.getCell(1).value), cellScalar(row.getCell(2).value)];
-      if (String(k) === "version") version = Number(v);
+      const [k, v] = [String(cellScalar(row.getCell(1).value) ?? ""), String(cellScalar(row.getCell(2).value) ?? "")];
+      if (k === "version") version = Number(v);
+      if (k === "branchId") branchId = v || null;
+      if (k === "branchName") branchName = v || null;
     });
   } else {
     warnings.push("No version marker in this file (it may be one of your own templates)");
@@ -91,7 +98,7 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
   }
 
   const sheets: ParsedSheet[] = [];
-  for (const def of [PRODUCTS_SHEET]) {
+  for (const def of SHEETS) {
     // sheet 名按前缀匹配（老板可能在后面加字，例如「产品目录 Products (2026)」）
     const prefix = def.title.split(" ")[0];
     // exceljs 的工作表属性叫 name（不是 title）
@@ -133,5 +140,5 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
     sheets.push({ key: def.key, title: def.title, found: true, headerRowNumber: header.rowNumber, rows, warnings: sheetWarnings });
   }
 
-  return { version, versionOk, sheets, warnings };
+  return { version, versionOk, branchId, branchName, sheets, warnings };
 }
