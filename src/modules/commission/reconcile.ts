@@ -33,6 +33,35 @@ export interface PayoutDrift {
   kind: "MATCH" | "DRIFT" | "LEGACY";
 }
 
+/**
+ * 单个窗口的统计（佣金 / 营业额 / 占比）。
+ *
+ * 抽出来的原因（生产上实际踩到）：原来这个统计只对**台账里出现过的窗口**算，
+ * 于是"这个月一张台账都没有"时，佣金配置页的成本卡片**根本不渲染** ——
+ * 老板打开页面看不到任何变化，会以为功能没上线。
+ * 有没有台账都要能回答"这个窗口花了多少佣金、占营业额多少"，所以它必须独立于台账存在。
+ */
+export async function windowStatFor(args: { organisationId?: string | null; windowKey: string }): Promise<WindowStat> {
+  const orgId = args.organisationId ?? null;
+  const w = args.windowKey;
+  const ledger = await db.commissionLedger.findMany({ where: { windowKey: w, ...(orgId ? { organisationId: orgId } : {}) } });
+  const baseSen = ledger.filter((r) => r.kind === "BASE").reduce((s, r) => s + r.amountSen, 0);
+  const adjustSen = ledger.filter((r) => r.kind === "ADJUSTMENT" || r.kind === "REVERSAL").reduce((s, r) => s + r.amountSen, 0);
+  const [y, m] = w.split("-").map(Number);
+  const from = new Date(Date.UTC(y, m - 1, 1));
+  const to = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
+  const inv = await db.invoice.aggregate({
+    where: { issuedAt: { gte: from, lt: to }, ...(orgId ? { branch: { organisationId: orgId } } : {}) },
+    _sum: { totalSen: true },
+    _count: true,
+  });
+  const revenueSen = inv._sum.totalSen ?? 0;
+  return {
+    windowKey: w, baseSen, adjustSen, revenueSen, invoiceCount: inv._count,
+    ratioPct: revenueSen > 0 ? (baseSen / revenueSen) * 100 : null,
+  };
+}
+
 export interface ReconciliationResult {
   ok: boolean;
   hardFailures: string[];
@@ -115,23 +144,10 @@ export async function runCommissionReconciliation(
   const windowKeys = [...new Set(ledger.map((r) => r.windowKey))].sort();
   for (const w of windowKeys) {
     if (opts.windowKey && w !== opts.windowKey) continue;
-    const baseSen = ledger.filter((r) => r.windowKey === w && r.kind === "BASE").reduce((s, r) => s + r.amountSen, 0);
-    const adjustSen = ledger.filter((r) => r.windowKey === w && (r.kind === "ADJUSTMENT" || r.kind === "REVERSAL")).reduce((s, r) => s + r.amountSen, 0);
-    const [y, m] = w.split("-").map(Number);
-    const from = new Date(Date.UTC(y, m - 1, 1));
-    const to = new Date(Date.UTC(m === 12 ? y + 1 : y, m === 12 ? 0 : m, 1));
-    const inv = await db.invoice.aggregate({
-      where: { issuedAt: { gte: from, lt: to }, ...(orgId ? { branch: { organisationId: orgId } } : {}) },
-      _sum: { totalSen: true },
-      _count: true,
-    });
-    const revenueSen = inv._sum.totalSen ?? 0;
-    windows.push({
-      windowKey: w, baseSen, adjustSen, revenueSen, invoiceCount: inv._count,
-      ratioPct: revenueSen > 0 ? (baseSen / revenueSen) * 100 : null,
-    });
-    if (revenueSen > 0 && baseSen > revenueSen) {
-      hardFailures.push(w + " 的佣金（" + rm(baseSen) + "）超过了该窗口发票收入（" + rm(revenueSen) + "）");
+    const stat = await windowStatFor({ organisationId: orgId, windowKey: w });
+    windows.push(stat);
+    if (stat.revenueSen > 0 && stat.baseSen > stat.revenueSen) {
+      hardFailures.push(w + " 的佣金（" + rm(stat.baseSen) + "）超过了该窗口发票收入（" + rm(stat.revenueSen) + "）");
     }
   }
 

@@ -127,6 +127,7 @@ export const DICT: Dict = {
   // P3：阶梯组合的管理界面（/workshop/commission）
   "comm.cost-title": { en: "Commission cost this month ({window})", zh: "本月佣金成本（{window}）", ms: "Kos komisen bulan ini ({window})" },
   "comm.cost-line": { en: "{commission} commission on {revenue} revenue", zh: "{commission} 佣金 / {revenue} 营业额", ms: "{commission} komisen atas {revenue} hasil" },
+  "comm.cost-none": { en: "No commission has accrued this month yet — jobs completed from now on are counted automatically. Jobs finished before the ledger existed stay on the old per-staff scheme.", zh: "本月还没有计提佣金 —— 之后完工的工单会自动计入。台账上线前完工的历史工单仍按旧的人员级口径发放。", ms: "Belum ada komisen diakru bulan ini." },
   "ledger.title": { en: "Why this number — {window}", zh: "这个数是怎么来的 —— {window}", ms: "Kenapa angka ini — {window}" },
   "ledger.empty": { en: "Nothing has been accrued for you in this period yet.", zh: "这个周期还没有给你计提过佣金。", ms: "Belum ada akruan untuk anda dalam tempoh ini." },
   "ledger.kind-base": { en: "Base commission", zh: "基础佣金", ms: "Komisen asas" },
