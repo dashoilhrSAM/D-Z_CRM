@@ -286,10 +286,13 @@ export async function correctMileage(input: { jobId: string; newMileage: number;
   return { ok: true, changed: true };
 }
 
-/** Add priced service lines to a job (additional services from the market catalogue). */
+/** Add priced service lines to a job (additional services from the market catalogue).
+ *  serviceTypeId 可选：柜台选的是**源码目录**（lib/service-catalog）里的条目，暂时没有对应的
+ *  ServiceType 行，所以先允许留空（佣金侧按 LEGACY 处理）；等目录统一（P0b）之后这里会填上，
+ *  那一行才能真正按服务配佣金。 */
 export async function addJobServiceItems(input: {
   jobId: string;
-  items: { description: string; priceSen: number }[];
+  items: { description: string; priceSen: number; serviceTypeId?: string | null; productId?: string | null }[];
 }) {
   if (input.items.length === 0) return { ok: true };
   await db.serviceJobItem.createMany({
@@ -302,6 +305,8 @@ export async function addJobServiceItems(input: {
       lineTotalSen: it.priceSen,
       status: "INCLUDED",
       source: "COUNTER",
+      serviceTypeId: it.serviceTypeId ?? null,
+      productId: it.productId ?? null,
     })),
   });
   revalidatePath("/", "layout");

@@ -582,7 +582,20 @@ model ServiceJobItem {
   lineTotalSen Int
   status       ItemStatus @default(INCLUDED)
   source       ItemSource @default(PACKAGE)
+  // P0：让工单行带上"目录身份"（佣金按 SKU / 服务 / 套餐配置的前提）。
+  // 三个都可空而且**有意**可空：历史行与柜台自由文本行必须能存。
+  // 未链接的行在佣金侧按 LEGACY 处理，并出现在"无法归因"报告里——不假装准确。
+  productId     String?
+  product       Product?        @relation(fields: [productId], references: [id])
+  serviceTypeId String?
+  serviceType   ServiceType?    @relation(fields: [serviceTypeId], references: [id])
+  packageId     String?
+  package       ServicePackage? @relation(fields: [packageId], references: [id])
   createdAt    DateTime   @default(now())
+
+  @@index([productId])
+  @@index([serviceTypeId])
+  @@index([packageId])
 }
 
 model ServiceJobPart {
@@ -712,6 +725,7 @@ model ServicePackage {
   items        ServicePackageItem[]
   jobs         ServiceJob[]
   bookings     Booking[]
+  jobItems     ServiceJobItem[] // P0：工单行可指回套餐（套餐行是工单里最大的一笔钱）
 }
 
 model ServicePackageItem {
@@ -750,6 +764,7 @@ model Product {
   active         Boolean  @default(true)
   compatibleModels String? // JSON array of motorcycle-type keys
   createdAt      DateTime @default(now())
+  jobItems       ServiceJobItem[] // P0：工单行可指回商品（佣金按 SKU 配置用）
   inventories    Inventory[]
   stockMovements StockMovement[]
   jobParts       ServiceJobPart[]
@@ -1435,6 +1450,7 @@ model ServiceType {
   priceSen       Int?
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
+  jobItems       ServiceJobItem[] // P0：工单行可指回服务类型（佣金按服务配置用）
 }
 
 model JobStatusHistory {
