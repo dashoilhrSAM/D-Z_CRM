@@ -22,7 +22,8 @@ export interface ClaimableItemView {
   progressPct: number;
   remaining: number;
   nextTier: { tierId: string; thresholdQty: number; rewardValue: number } | null;
-  tiers: { tierId: string; thresholdQty: number; rewardValue: number; amountSen: number; claimed: boolean; claimable: boolean; triggerRowId: string | null }[];
+  /** amountSen 只有在**可领取**时才有值（那是实际会发的数）；未达标时看 rewardValue（配置值） */
+  tiers: { tierId: string; thresholdQty: number; rewardValue: number; amountSen: number | null; claimed: boolean; claimable: boolean; triggerRowId: string | null }[];
   /** 与该组合配套的基础规则（设计稿要求展示：让技师看到"这单本来拿多少 + 阶梯再加多少"） */
   baseRuleLabel: string | null;
 }
@@ -117,9 +118,14 @@ export async function tierPanelFor(organisationId: string, userId: string, now =
       tiers: ownTiers.map((t) => {
         const hit = claimable.find((c) => c.tierSet.id === set.id && c.tier.id === t.id);
         const achieved = progress.achievements.find((a) => a.tier.id === t.id);
+        // 金额分两种口径，别混：
+        //  · claimable → 领取时**实际会发**的数（含平均单件佣金等推导）；
+        //  · 未达标 → **配置里写着多少**，界面上照原样展示。
+        // 之前这里一律回落成 0，于是面板上写着「满 10 件 · RM0」—— 技师会以为这奖励一文不值。
+        // 这个 bug 单测看不见（可领取路径是对的），只有真的在页面上看一眼才会发现。
         return {
           tierId: t.id, thresholdQty: t.thresholdQty, rewardValue: t.rewardValue,
-          amountSen: hit?.amountSen ?? 0,
+          amountSen: hit ? hit.amountSen : null,
           claimed: claimedTierIds.includes(t.id),
           claimable: !!hit,
           triggerRowId: achieved?.triggerRowId ?? null,

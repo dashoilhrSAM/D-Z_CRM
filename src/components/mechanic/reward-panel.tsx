@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { Check, Gift, Sparkles, Trophy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/components/shared/language-context";
-import { t, tpl } from "@/lib/i18n";
+import { t, tpl, type Lang } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 import { claimTier } from "@/actions/commission-claims";
 
@@ -36,7 +36,8 @@ export interface RewardPanelData {
     remaining: number;
     nextTier: { thresholdQty: number } | null;
     baseRuleLabel: string | null;
-    tiers: { tierId: string; thresholdQty: number; amountSen: number; claimed: boolean; claimable: boolean }[];
+    /** amountSen 只有可领取时才有值；未达标时界面显示配置里的奖励值（见 tierRewardLabel） */
+    tiers: { tierId: string; thresholdQty: number; rewardValue: number; amountSen: number | null; claimed: boolean; claimable: boolean }[];
   }[];
   history: { id: string; tierSetName: string; windowKey: string; claimedQty: number; amountSen: number; claimedAt: string }[];
 }
@@ -53,6 +54,19 @@ const SCOPE_KEY: Record<string, string> = {
   SERVICE: "reward.scope-service",
   CATEGORY: "reward.scope-category",
 };
+
+/**
+ * 一档的奖励怎么显示。
+ * **未达标时显示配置值**（"满 10 件 · RM50"），可领取时显示实际会发的数 —— 两者口径不同，
+ * 但都必须让技师看懂"这一档值多少"。之前未达标一律回落成 RM0，技师会以为奖励一文不值
+ * （这是在生产页面上看出来的，单测看不见：可领取那条路径本来是对的）。
+ */
+function tierRewardLabel(kind: string, rewardValue: number, amountSen: number | null, lang: Lang): string {
+  if (amountSen !== null) return formatRM(amountSen);
+  if (kind === "EXTRA_PER_UNIT_FIXED") return tpl("reward.per-unit", lang, { amount: formatRM(rewardValue) });
+  if (kind === "FREE_UNIT_COMMISSION") return tpl("reward.free-units", lang, { n: rewardValue });
+  return formatRM(rewardValue);
+}
 
 export function RewardPanel({ panel }: { panel: RewardPanelData }) {
   const lang = useLang();
@@ -128,7 +142,7 @@ export function RewardPanel({ panel }: { panel: RewardPanelData }) {
                   <div className="flex items-center gap-2 text-sm">
                     <Trophy className={"h-4 w-4 " + (claimed ? "text-emerald-600" : tier.claimable ? "text-amber-500" : "text-muted-foreground/50")} />
                     <span>{tpl("reward.tier", lang, { qty: tier.thresholdQty })}</span>
-                    <span className="font-semibold">{formatRM(tier.amountSen)}</span>
+                    <span className="font-semibold">{tierRewardLabel(set.rewardKind, tier.rewardValue, tier.amountSen, lang)}</span>
                   </div>
                   {claimed ? (
                     <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600">

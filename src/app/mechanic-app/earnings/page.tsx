@@ -55,7 +55,7 @@ export default async function EarningsPage() {
             rewardKind: s.rewardKind, units: s.units, progressPct: s.progressPct, remaining: s.remaining,
             nextTier: s.nextTier ? { thresholdQty: s.nextTier.thresholdQty } : null,
             baseRuleLabel: s.baseRuleLabel,
-            tiers: s.tiers.map((x) => ({ tierId: x.tierId, thresholdQty: x.thresholdQty, amountSen: x.amountSen, claimed: x.claimed, claimable: x.claimable })),
+            tiers: s.tiers.map((x) => ({ tierId: x.tierId, thresholdQty: x.thresholdQty, rewardValue: x.rewardValue, amountSen: x.amountSen, claimed: x.claimed, claimable: x.claimable })),
           })),
           history: panel.history.map((h) => ({
             id: h.id, tierSetName: h.tierSetName, windowKey: h.windowKey,
