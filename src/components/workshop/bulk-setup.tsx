@@ -84,9 +84,22 @@ export function BulkSetup({ canDelete, branches }: { canDelete: boolean; branche
       }
     });
 
-  const summary = preview?.sheets[0]?.summary;
-  const blocking = (summary?.error ?? 0) > 0;
-  const ready = (summary?.create ?? 0) + (summary?.update ?? 0) + (summary?.delete ?? 0) > 0;
+  // **按 sheet 汇总**，不能只看第一张：只改了套餐/促销时，零件表是零改动 ——
+  // 那时候"应用"按钮若按 sheets[0] 判断就会是灰的，等于那两张表根本改不了。
+  // 错误同理：套餐表里的错误也必须挡住应用（服务端会拒绝，但界面不能骗人）。
+  const sheetSummaries = preview?.sheets ?? [];
+  const totals = sheetSummaries.reduce(
+    (acc, s) => ({
+      create: acc.create + s.summary.create,
+      update: acc.update + s.summary.update,
+      delete: acc.delete + s.summary.delete,
+      skip: acc.skip + s.summary.skip,
+      error: acc.error + s.summary.error,
+    }),
+    { create: 0, update: 0, delete: 0, skip: 0, error: 0 },
+  );
+  const blocking = totals.error > 0;
+  const ready = totals.create + totals.update + totals.delete > 0;
   const flagged = (preview?.plans ?? []).filter((p) => p.action === "error" || p.action === "create" || p.action === "update" || p.action === "delete");
 
   return (
@@ -138,19 +151,39 @@ export function BulkSetup({ canDelete, branches }: { canDelete: boolean; branche
         </div>
       </div>
 
-      {preview && summary && (
+      {preview && (
         <div className="rounded-2xl border bg-card p-5 space-y-3">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="font-semibold">{t("bulk.step3", lang)}</h2>
-            <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700">+{summary.create} {t("bulk.create", lang)}</span>
-            <span className="rounded bg-sky-500/10 px-2 py-0.5 text-xs text-sky-700">~{summary.update} {t("bulk.update", lang)}</span>
-            <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">-{summary.delete} {t("bulk.delete", lang)}</span>
-            <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{summary.skip} {t("bulk.nochange", lang)}</span>
-            {summary.error > 0 && (
+            <span className="rounded bg-emerald-500/10 px-2 py-0.5 text-xs text-emerald-700">+{totals.create} {t("bulk.create", lang)}</span>
+            <span className="rounded bg-sky-500/10 px-2 py-0.5 text-xs text-sky-700">~{totals.update} {t("bulk.update", lang)}</span>
+            <span className="rounded bg-destructive/10 px-2 py-0.5 text-xs text-destructive">-{totals.delete} {t("bulk.delete", lang)}</span>
+            <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">{totals.skip} {t("bulk.nochange", lang)}</span>
+            {totals.error > 0 && (
               <span className="rounded bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
-                {summary.error} {t("bulk.rowerror", lang)}
+                {totals.error} {t("bulk.rowerror", lang)}
               </span>
             )}
+          </div>
+
+          {/* 每张 sheet 各自的读数：老板要能一眼看出"哪张表要动、哪张没读进来" */}
+          <div className="rounded-xl border divide-y text-xs">
+            {sheetSummaries.map((s) => (
+              <div key={s.key} className="flex flex-wrap items-center gap-3 px-3 py-1.5">
+                <span className="min-w-[140px] font-medium">{s.title}</span>
+                {!s.found ? (
+                  <span className="text-muted-foreground">{t("bulk.sheet-missing", lang)}</span>
+                ) : (
+                  <>
+                    <span className="text-emerald-700">+{s.summary.create}</span>
+                    <span className="text-sky-700">~{s.summary.update}</span>
+                    <span className="text-destructive">-{s.summary.delete}</span>
+                    <span className="text-muted-foreground">{s.summary.skip} {t("bulk.nochange", lang)}</span>
+                    {s.summary.error > 0 && <span className="font-medium text-destructive">{s.summary.error} {t("bulk.rowerror", lang)}</span>}
+                  </>
+                )}
+              </div>
+            ))}
           </div>
 
           {preview.warnings.length > 0 && (

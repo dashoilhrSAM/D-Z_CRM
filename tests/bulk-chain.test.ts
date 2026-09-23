@@ -103,6 +103,9 @@ describe("往返一致：导出的文件原样导入 = 零改动", () => {
     const { parsed, plans } = await planFromFile();
     expect(parsed.branchId).toBe(branchId);
     expect(parsed.versionOk).toBe(true);
+    // **先证明四张表都被读进来了** —— 否则"零改动"可能只是"根本没读到"（探针假阳性）
+    expect([...plans.keys()].sort()).toEqual(["campaigns", "packageItems", "packages", "products"]);
+    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(4);
 
     for (const [sheet, res] of plans.entries()) {
       const changes = res.plans.filter((p) => p.action === "create" || p.action === "update" || p.action === "delete");
