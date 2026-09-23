@@ -80,7 +80,7 @@ export default async function CustomerPassportPage({ params }: { params: Promise
               </div>
             )}
           </div>
-          <CustomerActions customerId={customer.id} motorcycleId={motorcycles[0]?.id ?? ""} nextServiceMileage={stats.nextServiceMileage} />
+          <CustomerActions customerId={customer.id} motorcycleId={motorcycles[0]?.id ?? ""} nextServiceMileage={stats.nextServiceMileage} hasLogin={!!customer.authId} />
         </div>
       </div>
 

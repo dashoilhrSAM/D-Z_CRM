@@ -26,7 +26,7 @@ export function ProfileForm({ initial }: { customerId?: string; initial: RiderPr
   const lang = useLang();
   const [pending, start] = useTransition();
   const [name, setName] = useState(initial.name);
-  const [phone, setPhone] = useState(initial.phone);
+  const [phone] = useState(initial.phone); // 只读：改号走验证流程
   const [email, setEmail] = useState(initial.email);
   const [gender, setGender] = useState(initial.gender);
   const [address, setAddress] = useState(initial.address);
@@ -48,9 +48,12 @@ export function ProfileForm({ initial }: { customerId?: string; initial: RiderPr
         <Label>{t("common.name", lang)}</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} className="mt-1.5" placeholder={t("profile.name-placeholder", lang)} />
       </div>
+      {/* 手机号在这里**只读**：它是登录标识，改号要先验证新号码（Settings → 手机号码）。
+          服务端 updateRiderProfile 也会拒绝直接改号，UI 只是不让人白填一遍。 */}
       <div>
         <Label>{t("common.phone", lang)}</Label>
-        <Input value={phone} onChange={(e) => setPhone(e.target.value)} className="mt-1.5" placeholder={t("settings.phone-placeholder", lang)} inputMode="tel" />
+        <Input value={phone} readOnly disabled className="mt-1.5" inputMode="tel" />
+        <p className="mt-1 text-xs text-muted-foreground">{t("settings.phone-readonly-hint", lang)}</p>
       </div>
       <div>
         <Label>{t("common.email", lang)}</Label>

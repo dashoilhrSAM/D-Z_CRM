@@ -67,7 +67,8 @@ export class CustomerService {
       .filter((j) => j.items.some((i) => /tyre|tayar/i.test(i.description)))
       .map((j) => ({ at: j.completedAt ?? j.createdAt, mileage: j.mileage }));
     return {
-      customer: { id: c.id, name: c.name, phone: c.phone, email: c.email, joinedAt: c.joinedAt, notes: c.notes, internalNotes: c.internalNotes, tags: c.tags },
+      // authId 一并带出：客户详情页要据此决定能不能"重置登录密码"（没有登录账号的客户不显示该动作）。
+      customer: { id: c.id, name: c.name, phone: c.phone, email: c.email, authId: c.authId, joinedAt: c.joinedAt, notes: c.notes, internalNotes: c.internalNotes, tags: c.tags },
       motorcycles: c.motorcycles,
       stats: {
         visits,
