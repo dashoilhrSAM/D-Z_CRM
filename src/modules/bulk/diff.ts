@@ -136,6 +136,22 @@ export function parseIncomingRow(
   return { values, errors };
 }
 
+/**
+ * 日期按**天**比较。
+ *
+ * 为什么必须这样：数据库里的促销起止时间带时刻（生产实测全是 10:00:58Z），
+ * 而工作簿里这一列是**日期**。按时刻比较 → 每条促销都被判成"改了"，
+ * 而一旦点应用，那个时刻会被写成 UTC 零点 —— **静默抹掉**。
+ * 日期列本来就是天精度，所以比较也按天；只有真的换了日期才算改动。
+ */
+function sameDay(a: unknown, b: unknown): boolean {
+  if (a === null || a === undefined || a === "" || b === null || b === undefined || b === "") return a === b;
+  const da = a instanceof Date ? a : new Date(String(a));
+  const db = b instanceof Date ? b : new Date(String(b));
+  if (Number.isNaN(da.getTime()) || Number.isNaN(db.getTime())) return false;
+  return da.toISOString().slice(0, 10) === db.toISOString().slice(0, 10);
+}
+
 function sameValue(a: unknown, b: unknown): boolean {
   if (a === undefined || b === undefined || a === null || b === null) return a === b;
   if (typeof a === "number" || typeof b === "number") return Number(a) === Number(b);
@@ -217,7 +233,9 @@ export function planSheet(input: {
     const changes: { field: string; from: unknown; to: unknown }[] = [];
     const next: Record<string, unknown> = {};
     for (const [field, value] of Object.entries(values)) {
-      if (!sameValue(current[field], value)) {
+      const col = def.columns.find((c) => c.field === field);
+      const equal = col?.type === "date" ? sameDay(current[field], value) : sameValue(current[field], value);
+      if (!equal) {
         changes.push({ field, from: current[field] ?? null, to: value });
         next[field] = value;
       }
