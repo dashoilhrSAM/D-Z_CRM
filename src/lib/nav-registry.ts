@@ -8,7 +8,7 @@ import { ROLE_MODULES } from "@/lib/auth/role-modules";
 import {
   LayoutDashboard, Users, UserCheck, BellRing, CalendarClock, Wrench, ClipboardList, ListChecks, Package,
   Store, Megaphone, MessageSquare, Star, Users2, Gauge, Boxes, AlertTriangle, Archive, RefreshCw,
-  ShoppingCart, Truck, Wallet, Sparkles, Settings, Filter, Kanban, Timer, ListTodo, Bike, Bell, Upload, Plug, ShieldCheck, ReceiptText, Clock,
+  ShoppingCart, Truck, Wallet, Sparkles, Settings, Filter, Kanban, Timer, ListTodo, Bike, Bell, Upload, Plug, ShieldCheck, ReceiptText, Clock, Percent,
 } from "lucide-react";
 // 工作台导航分组（从真实 Role 映射，生产权限模型——非 demo）。
 export type WorkshopPersona = "OWNER" | "COUNTER_STAFF" | "MECHANIC" | "CUSTOMER";
@@ -108,6 +108,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { key: "staff", label: "Staff", labelKey: "nav.staff", href: "/workshop/staff", icon: Users2, module: "USERS", access: ["OWNER", "MECHANIC"] },
       { key: "kpi", label: "KPI Board", labelKey: "nav.kpi", href: "/workshop/staff/kpi", icon: Gauge, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
       { key: "settlements", label: "Settlements", labelKey: "nav.settlements", href: "/workshop/settlements", icon: Wallet, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
+      // P1：佣金规则配置。与结算同一批人可见（OWNER persona = owner/manager；MECHANIC persona 含
+      // 服务经理与服务顾问），但**能不能改**由矩阵 TECHNICIANS/edit 决定 —— 技师与服务顾问只读。
+      { key: "commission", label: "Commission Rules", labelKey: "nav.commission", href: "/workshop/commission", icon: Percent, module: "TECHNICIANS", access: ["OWNER", "MECHANIC"] },
       // HRM: 考勤不再挂在 TECHNICIANS 下（那是技师技能口径），也不只给技师看——
       // 柜台/销售/行政都要打卡，而 MECHANIC 实际走 /mechanic-app（workshop layout 会把他们重定向过去）。
       { key: "attendance", label: "Attendance", labelKey: "nav.attendance", href: "/workshop/attendance", icon: Clock, module: "ATTENDANCE", access: ["OWNER", "COUNTER_STAFF"] },
