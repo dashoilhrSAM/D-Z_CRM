@@ -2287,6 +2287,7 @@ export const DICT: Dict = {
   "bulk.apply": { en: "Apply changes", zh: "应用改动", ms: "Guna perubahan" },
   "bulk.applied": { en: "Applied", zh: "已应用", ms: "Digunakan" },
   "bulk.deactivated": { en: "deactivated (used by jobs/stock)", zh: "改为停用（已被工单/库存引用）", ms: "dinonaktifkan" },
+  "bulk.sheet-missing": { en: "not in this file", zh: "文件里没有这张表", ms: "tiada dalam fail" },
   "bulk.branch-note": { en: "Packages and campaigns belong to a branch - the file records which one, and importing only touches that branch.", zh: "套餐与促销属于某个分店 —— 文件里会写明是哪个，导入时只动那个分店。", ms: "Pakej dan kempen milik cawangan tertentu." },
   "bulk.apply-hint": { en: "Rows missing from the file are never deleted - deletion needs delete in the _action column.", zh: "文件里没有的行永远不会被删除 —— 要删必须在 _action 列写 delete。", ms: "Baris tiada dalam fail tidak akan dipadam." },
   "bulk.apply-hint-noDelete": { en: "Rows missing from the file are never deleted; only the owner can delete rows.", zh: "文件里没有的行不会被删除；只有老板可以删除行。", ms: "Hanya pemilik boleh memadam baris." },
