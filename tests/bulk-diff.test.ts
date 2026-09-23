@@ -4,7 +4,7 @@
 // 而其中三条规则一旦被"简化"掉，事故是静默的（数据没了、或者价格被清零，没人会发现）。
 import { describe, expect, it } from "vitest";
 import { planSheet, parseMoney, cellToValue, type IncomingRow } from "@/modules/bulk/diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET } from "@/modules/bulk/sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET } from "@/modules/bulk/sheets";
 
 function row(rowNumber: number, cells: Record<string, unknown>, action?: IncomingRow["action"]): IncomingRow {
   return { rowNumber, cells, action };
@@ -138,5 +138,31 @@ describe("出错就挡下来（第三条：宁可再传一次，也不要半对�
     });
     expect(plans[0].action).toBe("error");
     expect(plans[0].errors.join(" ")).toContain("Sell Price");
+  });
+});
+
+describe("**真实数据的形状**（生产实测暴露的两类问题）", () => {
+  it("Kind 认得出生产在用的 GIFT（只写 SERVICE/PART 会把整份导入挡下来）", () => {
+    const kind = PACKAGE_ITEMS_SHEET.columns.find((c) => c.field === "kind")!;
+    expect(cellToValue(kind, "GIFT")).toEqual({ ok: true, value: "GIFT" });
+    expect(cellToValue(kind, "赠品")).toEqual({ ok: true, value: "GIFT" });
+    expect(cellToValue(kind, "LABOUR")).toEqual({ ok: true, value: "LABOUR" });
+    expect(cellToValue(kind, "SERVICE")).toEqual({ ok: true, value: "SERVICE" });
+  });
+
+  it("**日期按天比较**：库里带时刻（生产的促销全是 10:00:58Z），工作簿只有日期 → 不算改动", () => {
+    const existing = [{ name: "Raya", type: "PROMO", status: "ACTIVE", startDate: new Date("2026-08-17T10:00:58Z"), endDate: new Date("2026-09-03T10:00:58Z"), discountPercent: 10 }];
+    const sameDayInput = [{ rowNumber: 2, cells: { name: "Raya", type: "PROMO", status: "ACTIVE", startDate: "2026-08-17", endDate: "2026-09-03", discountPercent: 10 } }];
+    const { plans } = planSheet({ def: CAMPAIGNS_SHEET, incoming: sameDayInput, existing });
+    expect(plans[0].action).toBe("skip");
+  });
+
+  it("但真的换了日期仍然算改动（别把改动也一起吞掉）", () => {
+    const existing = [{ name: "Raya", type: "PROMO", status: "ACTIVE", startDate: new Date("2026-08-17T10:00:58Z") }];
+    const input = [{ rowNumber: 2, cells: { name: "Raya", type: "PROMO", status: "ACTIVE", startDate: "2026-08-18" } }];
+    const { plans } = planSheet({ def: CAMPAIGNS_SHEET, incoming: input, existing });
+    expect(plans[0].action).toBe("update");
+    expect(plans[0].values.startDate).toBeInstanceOf(Date);
+    expect((plans[0].values.startDate as Date).toISOString()).toBe("2026-08-18T00:00:00.000Z");
   });
 });

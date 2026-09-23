@@ -37,11 +37,20 @@ beforeAll(async () => {
   await db.servicePackage.create({
     data: {
       branchId, name: "Basic " + tag, tier: "GOOD", priceSen: 6000,
-      items: { create: [{ name: "Oil change", kind: "SERVICE", defaultQty: 1, priceSen: 4000 }] },
+      // 夹具按**生产的形状**造：生产里有 kind=GIFT 的赠品行（写测试时没想到，
+      // 结果生产往返时才炸出"未知取值"）—— 见 2026-09-23 的实测记录
+      items: {
+        create: [
+          { name: "Oil change", kind: "SERVICE", defaultQty: 1, priceSen: 4000 },
+          { name: "Free keychain", kind: "GIFT", defaultQty: 1, priceSen: 0 },
+        ],
+      },
     },
   });
   await db.campaign.create({
-    data: { branchId, name: "Raya " + tag, type: "PROMO", status: "ACTIVE", startDate: new Date("2026-10-01T00:00:00Z"), discountPercent: 10 },
+    // 生产里的促销起止时间**带时刻**（实测全 10:00:58Z）—— 夹具也必须带，
+    // 否则"导出只写日期 → 传回来变成零点"这个假改动永远是绿的
+    data: { branchId, name: "Raya " + tag, type: "PROMO", status: "ACTIVE", startDate: new Date("2026-10-01T10:00:58Z"), endDate: new Date("2026-10-31T10:00:58Z"), discountPercent: 10 },
   });
 });
 
@@ -101,7 +110,7 @@ describe("往返一致：导出的文件原样导入 = 零改动", () => {
       expect(res.summary.error).toBe(0);
     }
     expect(plans.get("products")!.summary.skip).toBe(2);
-    expect(plans.get("packageItems")!.summary.skip).toBe(1);
+    expect(plans.get("packageItems")!.summary.skip).toBe(2);
   });
 });
 

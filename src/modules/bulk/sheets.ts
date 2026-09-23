@@ -121,7 +121,12 @@ export const PACKAGE_ITEMS_SHEET: SheetDef = {
     { header: "Item Name", zh: "项目名称", field: "itemName", type: "text", required: true },
     {
       header: "Kind", zh: "类型", field: "kind", type: "enum", required: true,
-      enumMap: { service: "SERVICE", part: "PART", "服务": "SERVICE", "配件": "PART" },
+      // **按代码里的真实词汇表**（quotation 页的 KIND_LABEL + 套餐页的 GIFT 徽章）补全。
+      // 只写 SERVICE/PART 是不够的：生产的赠品行 kind=GIFT，往返会因为"未知取值"整份被挡下来。
+      enumMap: {
+        service: "SERVICE", part: "PART", gift: "GIFT", labour: "LABOUR", addon: "ADDON", fee: "FEE",
+        "服务": "SERVICE", "配件": "PART", "赠品": "GIFT", "工时": "LABOUR", "加项": "ADDON", "费用": "FEE",
+      },
     },
     { header: "Product SKU", zh: "产品SKU", field: "productSku", type: "text", note: "Kind=Part 时必填" },
     { header: "Qty", zh: "默认数量", field: "defaultQty", type: "int" },
