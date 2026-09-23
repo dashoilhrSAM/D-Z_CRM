@@ -71,11 +71,14 @@ export interface ReconciliationResult {
   payoutDrift: PayoutDrift[];
   stats: {
     billableLines: number;
+    /** P4b：参与检查的**有价格零件行**数（只在零件开关打开的组织里统计） */
+    billablePartLines: number;
     historicalLines: number;
     historicalJobs: string[];
     duplicated: string[];
     pending: string[];
     uncovered: string[];
+    uncoveredParts: string[];
     ambiguousCount: number;
     adjustmentCount: number;
   };
@@ -96,23 +99,33 @@ export async function runCommissionReconciliation(
 
   const jobs = await db.serviceJob.findMany({
     where: { status: "COMPLETED", ...(orgId ? { branch: { organisationId: orgId } } : {}) },
-    include: { items: true, invoice: true, mechanic: { select: { name: true } } },
+    include: { items: true, parts: true, branch: { select: { organisationId: true } }, invoice: true, mechanic: { select: { name: true } } },
     orderBy: { completedAt: "desc" },
   });
   const ledger = await db.commissionLedger.findMany({ where: orgId ? { organisationId: orgId } : {} });
+  // 零件计佣开关（P4b）：只有**打开**的组织才检查零件行覆盖 —— 关掉的组织零件本来就不该有台账，
+  // 报它就是误报，而误报会让真报告失效（这条原则在本文件里已经用过两次）。
+  const orgSwitch = await db.organisation.findMany({
+    where: orgId ? { id: orgId } : {},
+    select: { id: true, commissionOnParts: true },
+  });
+  const partsOn = new Set(orgSwitch.filter((o) => o.commissionOnParts).map((o) => o.id));
 
   // ── 不变量 2：每条计费行有且只有一条 BASE（或有明确的豁免原因）─────────────────
   const byItem = new Map<string, typeof ledger>();
+  const byPart = new Map<string, typeof ledger>();
   for (const row of ledger) {
-    if (!row.jobItemId) continue;
-    byItem.set(row.jobItemId, [...(byItem.get(row.jobItemId) ?? []), row]);
+    if (row.jobItemId) byItem.set(row.jobItemId, [...(byItem.get(row.jobItemId) ?? []), row]);
+    if (row.jobPartId) byPart.set(row.jobPartId, [...(byPart.get(row.jobPartId) ?? []), row]);
   }
   let billableLines = 0;
+  let billablePartLines = 0;
   let historicalLines = 0;
   const historicalJobs: string[] = [];
   const duplicated: string[] = [];
   const pending: string[] = [];
   const uncovered: string[] = [];
+  const uncoveredParts: string[] = [];
   const jobHasLedger = new Set(ledger.map((r) => r.jobId).filter((v): v is string => !!v));
   for (const job of jobs) {
     // **历史工单**（这单在台账里一行都没有）与"配置缺口"是两件事：P2 之前完工的单子本来没有台账，
@@ -130,6 +143,18 @@ export async function runCommissionReconciliation(
       if (bases.length > 1) duplicated.push(job.jobNumber + " / " + item.description + " (" + bases.length + " 条 BASE)");
       if (rows.some((r) => r.kind === "PENDING")) pending.push(job.jobNumber + " / " + item.description + " → " + rm(item.lineTotalSen));
       else if (bases.length === 0) uncovered.push(job.jobNumber + " / " + item.description + " (" + rm(item.lineTotalSen) + ")");
+    }
+    // P4b：**零件行也要覆盖**（零件计佣上线后，这道网如果只看服务行，缺口正好在新功能上）。
+    // 只在开关打开的组织里检查；判红口径与服务行一致（重复计提算硬错误，未覆盖进清单）。
+    if (partsOn.has(job.branch.organisationId)) {
+      for (const part of job.parts.filter(isBillableLine)) {
+        billablePartLines += 1;
+        const rows = byPart.get(part.id) ?? [];
+        const bases = rows.filter((r) => r.kind === "BASE");
+        if (bases.length > 1) duplicated.push(job.jobNumber + " / 零件 " + part.id.slice(-6) + " (" + bases.length + " 条 BASE)");
+        if (rows.some((r) => r.kind === "PENDING")) pending.push(job.jobNumber + " / 零件 " + part.id.slice(-6) + " → " + rm(part.lineTotalSen));
+        else if (bases.length === 0) uncoveredParts.push(job.jobNumber + " / 零件 " + part.id.slice(-6) + " (" + rm(part.lineTotalSen) + ")");
+      }
     }
   }
   if (duplicated.length) {
@@ -197,6 +222,6 @@ export async function runCommissionReconciliation(
     notes,
     windows,
     payoutDrift,
-    stats: { billableLines, historicalLines, historicalJobs, duplicated, pending, uncovered, ambiguousCount, adjustmentCount },
+    stats: { billableLines, billablePartLines, historicalLines, historicalJobs, duplicated, pending, uncovered, uncoveredParts, ambiguousCount, adjustmentCount },
   };
 }
