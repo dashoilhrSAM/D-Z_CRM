@@ -48,7 +48,10 @@ model Organisation {
   lostReasons    String? // JSON array of configurable closed-lost reasons (PIPE-013)
   // Foreman salary rules: { baseSen, commissionType: "per_job"|"percent_sales"|"flat", commissionValue, addonBonusSen? }
   salaryRules    Json?
-  commissionRules CommissionRule[] // P1：佣金规则（SKU / 服务 / 分类 / 套餐 / 默认）
+  commissionRules CommissionRule[]
+  /// 佣金基数口径：false（默认）= 客户实付（发票折扣按行分摊后）；
+  /// true = 按原价算，不看折扣。业务方在页面决定，不写死源码常量。
+  commissionOnGross Boolean @default(false) // P1：佣金规则（SKU / 服务 / 分类 / 套餐 / 默认）
   enableMotorcycleQr Boolean @default(true)
   enableRiderProfileQr Boolean @default(true)
   enableWorkshopQr   Boolean  @default(true)
@@ -1728,4 +1731,44 @@ model CommissionRule {
 
   @@index([organisationId, scope, active])
   @@index([organisationId, scope, targetKey])
+}
+
+/// 佣金台账（P2）：**唯一真相，只追加**。
+///
+/// 为什么是"只追加、永不 UPDATE 金额"：佣金会被拿计算器核对，也会进工资单。
+/// 改错应当是**追加一条 ADJUSTMENT（带 reason）**，而不是把原值改掉——
+/// 否则"上个月他到底拿了多少"就再也说不清（历史工资单与银行流水会对不上）。
+///
+/// @@unique([jobItemId, kind]) 是幂等的核心：同一行同一类型只能有一条，
+/// 于是"完工流程被重跑两次"在**数据库层**就不可能产生第二条（不是靠代码自觉）。
+/// jobItemId 可空（调整/冲正行没有对应的工单行），而 SQL 里唯一索引把 NULL 视为互不相同，
+/// 所以多条无行的调整不会互相顶掉 —— 这是有意利用的行为。
+model CommissionLedger {
+  id             String   @id @default(cuid())
+  organisationId String
+  branchId       String?
+  userId         String   // 受益人（技师）
+  jobId          String?
+  jobItemId      String?
+  invoiceId      String?
+  kind           String   // BASE | PENDING | LEGACY | TIER_BONUS | ADJUSTMENT | REVERSAL
+  amountSen      Int      // 可为负（冲正/调整）
+  basis          String   // PERCENT | FIXED | COMBO | LEGACY | MANUAL
+  baseSen        Int      @default(0) // 计算基数（该行折后净额），用来解释"为什么是这个数"
+  qty            Int      @default(1)
+  ruleId         String?
+  ruleSnapshot   String?  // 规则内容快照：事后改规则不影响历史
+  tierSetId      String?
+  tierSnapshot   String?
+  reason         String?  // 人工调整/冲正/PENDING 的原因
+  actorUserId    String?
+  reversalOfId   String?  // 冲正指向的原台账行
+  earnedAt       DateTime // 计提时点（业务口径：决定落在哪个结算窗口）
+  windowKey      String   // 冗余窗口键，如 "2026-09"
+  createdAt      DateTime @default(now())
+
+  @@unique([jobItemId, kind])
+  @@index([organisationId, userId, windowKey])
+  @@index([jobId])
+  @@index([invoiceId])
 }
