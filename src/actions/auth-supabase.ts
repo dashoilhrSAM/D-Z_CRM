@@ -7,6 +7,7 @@ import { generateQrToken } from "@/lib/qr-token";
 import { normalizePhoneLoose, combinePhone, digitsOnly, matchKey, phoneDigits, toE164, fmtStoredPhone } from "@/lib/phone";
 import { evaluateOtpRate, isAllowedPhone, normalizeToE164, snapshotOtpUse } from "@/lib/otp";
 import { planPhoneLogin, sameMsisdn } from "@/lib/auth/phone-login";
+import { markOtpVerified } from "@/lib/otp-attempt";
 import type { Customer } from "@prisma/client";
 
 /** 业务身份（JWT claims）——A2 RLS 读取 request.jwt.claims 依赖这些字段。 */
@@ -448,10 +449,9 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
   if (error) return { ok: false as const, error: error.message };
   if (!data.user) return { ok: false as const, error: "No user returned." };
 
-  await db.otpAttempt.updateMany({
-    where: { phoneE164: e164, verifiedAt: null },
-    data: { verifiedAt: new Date() },
-  });
+  // 标注"这次验证对应的是哪一条投递"——规则见 lib/otp-attempt.ts：
+  // 只有确实投递出去的那一行（SENT/REQUESTED）才配被标注，FAILED 与拒绝类都不配。
+  await markOtpVerified(e164);
 
   const matches = await customersByPhone(normalizePhoneLoose(e164));
   if (matches.length > 1) {
