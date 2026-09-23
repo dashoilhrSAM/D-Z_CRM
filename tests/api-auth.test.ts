@@ -96,7 +96,9 @@ describe("每个非公开 API 路由都有自己的门禁", () => {
 });
 
 describe("cron 端点 fail-closed", () => {
-  for (const f of ["src/app/api/cron/reminders/route.ts", "src/app/api/cron/marketing-calendar/route.ts"]) {
+  // **扫描目录而不是写死清单**：写死时新加的 cron 会悄悄不被覆盖（本项目一条老教训：
+  // "同一规则两份实现"最危险的形态就是清单忘更新）。cron 一律在 src/app/api/cron 下。
+  for (const f of walk("src/app/api/cron")) {
     it(f + " 不会在密钥缺失时放行", () => {
       // 断言必须只看**代码**：注释里会引用旧写法（"旧的 if (secret) 写法……"），
       // 不剥注释的话这条会匹配到自己的说明文字——第一版就是这么误报的。
