@@ -217,6 +217,14 @@ export function planSheet(input: {
     }
 
     if (!current) {
+      // 这一张表不允许新建（服务目录由代码定义）→ 明确报错，而不是悄悄造一行
+      if (def.createAllowed === false) {
+        plans.push({
+          sheet: def.key, rowNumber: row.rowNumber, key, action: "error", values: {}, changes: [],
+          errors: ["This sheet only edits rows that already exist — new entries are added inside the app"],
+        });
+        continue;
+      }
       // 新增：必填项必须在文件里给出（修改时留空=不动，所以只有这里检查）
       const missing = def.columns.filter((c) => c.required && values[c.field] === undefined).map((c) => c.header);
       if (missing.length) {

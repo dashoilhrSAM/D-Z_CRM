@@ -47,6 +47,9 @@ beforeAll(async () => {
       },
     },
   });
+  await db.serviceType.create({
+    data: { organisationId: org.id, name: "Engine Oil Change", code: "ENGINE_OIL-" + tag, category: "ENGINE", durationMin: 30, priceSen: 8000, active: true },
+  });
   await db.campaign.create({
     // 生产里的促销起止时间**带时刻**（实测全 10:00:58Z）—— 夹具也必须带，
     // 否则"导出只写日期 → 传回来变成零点"这个假改动永远是绿的
@@ -56,6 +59,8 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.auditLog.deleteMany({ where: { organisationId: orgId } });
+  // 服务目录行挂着 organisation 外键 —— 不先删就删不掉组织
+  await db.serviceType.deleteMany({ where: { organisationId: orgId } });
   await db.servicePackageItem.deleteMany({ where: { package: { branchId } } });
   await db.servicePackage.deleteMany({ where: { branchId } });
   await db.campaign.deleteMany({ where: { branchId } });
@@ -74,21 +79,28 @@ async function currentProducts() {
 
 async function planFromFile() {
   const { planSheet } = await import("@/modules/bulk/diff");
-  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET } = await import("@/modules/bulk/sheets");
+  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET } = await import("@/modules/bulk/sheets");
 
   const parsed = await parse(await build({ organisationId: orgId, branchId }));
   const products = (await currentProducts()).map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" }));
   const packages = await db.servicePackage.findMany({ where: { branchId } });
   const items = await db.servicePackageItem.findMany({ where: { package: { branchId } }, include: { package: { select: { name: true } }, product: { select: { sku: true } } } });
   const campaigns = await db.campaign.findMany({ where: { branchId } });
+  const suppliers = await db.supplier.findMany({ where: { organisationId: orgId } });
+  const serviceTypes = await db.serviceType.findMany({ where: { organisationId: orgId, code: { not: null } } });
 
   const existingBySheet: Record<string, Record<string, unknown>[]> = {
     products,
     packages: packages as unknown as Record<string, unknown>[],
     packageItems: items.map((i) => ({ packageName: i.package.name, itemName: i.name, kind: i.kind, productSku: i.product?.sku ?? "", defaultQty: i.defaultQty, priceSen: i.priceSen })),
     campaigns: campaigns as unknown as Record<string, unknown>[],
+    suppliers: suppliers as unknown as Record<string, unknown>[],
+    serviceTypes: serviceTypes as unknown as Record<string, unknown>[],
   };
-  const defs: Record<string, typeof PRODUCTS_SHEET> = { products: PRODUCTS_SHEET, packages: PACKAGES_SHEET, packageItems: PACKAGE_ITEMS_SHEET, campaigns: CAMPAIGNS_SHEET };
+  const defs: Record<string, typeof PRODUCTS_SHEET> = {
+    products: PRODUCTS_SHEET, packages: PACKAGES_SHEET, packageItems: PACKAGE_ITEMS_SHEET,
+    campaigns: CAMPAIGNS_SHEET, suppliers: SUPPLIERS_SHEET, serviceTypes: SERVICE_TYPES_SHEET,
+  };
 
   const out = new Map<string, ReturnType<typeof planSheet>>();
   for (const s of parsed.sheets) {
@@ -104,8 +116,11 @@ describe("往返一致：导出的文件原样导入 = 零改动", () => {
     expect(parsed.branchId).toBe(branchId);
     expect(parsed.versionOk).toBe(true);
     // **先证明四张表都被读进来了** —— 否则"零改动"可能只是"根本没读到"（探针假阳性）
-    expect([...plans.keys()].sort()).toEqual(["campaigns", "packageItems", "packages", "products"]);
-    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(4);
+    expect([...plans.keys()].sort()).toEqual(["campaigns", "packageItems", "packages", "products", "serviceTypes", "suppliers"]);
+    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(6);
+    // 每张表都要有真实读数 —— 只断言"存在"可能掩盖"零行"
+    expect(plans.get("suppliers")!.summary.skip).toBe(1);
+    expect(plans.get("serviceTypes")!.summary.skip).toBe(1);
 
     for (const [sheet, res] of plans.entries()) {
       const changes = res.plans.filter((p) => p.action === "create" || p.action === "update" || p.action === "delete");
@@ -228,5 +243,74 @@ describe("套餐与促销（按分店 + 组合键）", () => {
       await db.servicePackage.deleteMany({ where: { branchId: other.id } });
       await db.branch.delete({ where: { id: other.id } });
     }
+  });
+});
+
+describe("供应商与服务项目（P3）", () => {
+  it("供应商：改交期、加一家新的", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { SUPPLIERS_SHEET } = await import("@/modules/bulk/sheets");
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const { parsed } = await planFromFile();
+
+    const sheet = parsed.sheets.find((s) => s.key === "suppliers")!;
+    const rows = sheet.rows.map((r) => ({ ...r, cells: { ...r.cells, leadTimeDays: 7 } as Record<string, unknown> }));
+    rows.push({ rowNumber: 60, cells: { name: "New Supplier " + tag, contactName: "Ali", phone: "0123456789", leadTimeDays: 2 }, action: "upsert" as const });
+
+    const existing = await db.supplier.findMany({ where: { organisationId: orgId } });
+    const { plans, summary } = planSheet({ def: SUPPLIERS_SHEET, incoming: rows, existing });
+    expect(summary).toMatchObject({ create: 1, update: 1, error: 0 });
+
+    const res = await applyPlans({ organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null, plans });
+    expect(res.ok, res.ok ? "" : res.error).toBe(true);
+    if (!res.ok) return;
+    const created = await db.supplier.findFirst({ where: { organisationId: orgId, name: "New Supplier " + tag } });
+    expect(created).not.toBeNull();
+    expect(created!.leadTimeDays).toBe(2);
+    const updated = await db.supplier.findFirst({ where: { organisationId: orgId, name: "Sup " + tag } });
+    expect(updated!.leadTimeDays).toBe(7);
+  });
+
+  it("**被零件引用的供应商不能删**（先查引用再决定，不靠外键异常）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null,
+      plans: [{ sheet: "suppliers", rowNumber: 2, key: "Sup " + tag, action: "delete", values: {}, changes: [], errors: [] }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("cannot be deleted");
+    // 还在（一条都没写）
+    expect(await db.supplier.findFirst({ where: { organisationId: orgId, name: "Sup " + tag } })).not.toBeNull();
+  });
+
+  it("**服务目录不能新建 code**（凭空造一个柜台看不到的服务）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { SERVICE_TYPES_SHEET } = await import("@/modules/bulk/sheets");
+    const existing = await db.serviceType.findMany({ where: { organisationId: orgId, code: { not: null } } });
+    const { plans, summary } = planSheet({
+      def: SERVICE_TYPES_SHEET,
+      incoming: [{ rowNumber: 2, cells: { code: "BRAND_NEW_" + tag, name: "Made up service", priceSen: 50 } }],
+      existing,
+    });
+    expect(summary.error).toBe(1);
+    expect(plans[0].errors.join(" ")).toContain("only edits rows that already exist");
+  });
+
+  it("服务目录**可以改价/工时**（存在的 code）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { SERVICE_TYPES_SHEET } = await import("@/modules/bulk/sheets");
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const existing = await db.serviceType.findMany({ where: { organisationId: orgId, code: { not: null } } });
+    const { plans } = planSheet({
+      def: SERVICE_TYPES_SHEET,
+      incoming: [{ rowNumber: 2, cells: { code: "ENGINE_OIL-" + tag, priceSen: 95, durationMin: 45 } }],
+      existing,
+    });
+    expect(plans[0].action).toBe("update");
+    const res = await applyPlans({ organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null, plans });
+    expect(res.ok, res.ok ? "" : res.error).toBe(true);
+    const after = await db.serviceType.findFirst({ where: { organisationId: orgId, code: "ENGINE_OIL-" + tag } });
+    expect(after!.priceSen).toBe(9500);
+    expect(after!.durationMin).toBe(45);
   });
 });

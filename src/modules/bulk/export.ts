@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import {
   META_SHEET, SHEETS, PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET,
-  WORKBOOK_VERSION, type SheetDef,
+  SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, WORKBOOK_VERSION, type SheetDef,
 } from "./sheets";
 
 /**
@@ -83,7 +83,7 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   meta.addRow(["branchId", scope.branchId]);
   meta.addRow(["branchName", branch.name]);
 
-  const [products, packages, packageItems, campaigns] = await Promise.all([
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes] = await Promise.all([
     db.product.findMany({
       where: { organisationId: scope.organisationId },
       include: { supplier: { select: { name: true } } },
@@ -96,6 +96,9 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
       orderBy: { name: "asc" },
     }),
     db.campaign.findMany({ where: { branchId: scope.branchId }, orderBy: { name: "asc" } }),
+    db.supplier.findMany({ where: { organisationId: scope.organisationId }, orderBy: { name: "asc" } }),
+    // 服务目录由代码同步进库；没有 code 的行无法作为键，导出时跳过（它们也不该被 Excel 改）
+    db.serviceType.findMany({ where: { organisationId: scope.organisationId, code: { not: null } }, orderBy: { code: "asc" } }),
   ]);
 
   addDataSheet(wb, PRODUCTS_SHEET, products.map((p) => ({
@@ -117,6 +120,16 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   addDataSheet(wb, CAMPAIGNS_SHEET, campaigns.map((c) => ({
     name: c.name, type: c.type, status: c.status, startDate: c.startDate, endDate: c.endDate,
     discountPercent: c.discountPercent ?? "", pointsBonus: c.pointsBonus ?? "", audience: c.audience ?? "",
+  })));
+
+  addDataSheet(wb, SUPPLIERS_SHEET, suppliers.map((s) => ({
+    name: s.name, contactName: s.contactName ?? "", phone: s.phone ?? "", email: s.email ?? "",
+    address: s.address ?? "", leadTimeDays: s.leadTimeDays,
+  })));
+
+  addDataSheet(wb, SERVICE_TYPES_SHEET, serviceTypes.map((s) => ({
+    code: s.code, name: s.name, category: s.category ?? "", durationMin: s.durationMin ?? "",
+    priceSen: s.priceSen ?? "", active: s.active,
   })));
 
   addMappingSheet(wb);

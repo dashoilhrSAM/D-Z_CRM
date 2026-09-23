@@ -38,6 +38,11 @@ export interface SheetDef {
   columns: ColumnDef[];
   /** 是否允许整行删除（明细类不允许独立删，只能随主表走） */
   allowDelete: boolean;
+  /**
+   * 是否允许新建行（默认允许）。服务目录是**代码定义**的（src/lib/service-catalog.ts 同步进库），
+   * 所以那张表只能改价/工时 —— 凭空造一个 code 会得到一个"柜台看不到的服务"。
+   */
+  createAllowed?: boolean;
   /** 这一张 sheet 是否按分店（套餐/促销是；零件不是） */
   branchScoped?: boolean;
 }
@@ -159,7 +164,45 @@ export const CAMPAIGNS_SHEET: SheetDef = {
   ],
 };
 
-export const SHEETS: SheetDef[] = [PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET];
+export const SUPPLIERS_SHEET: SheetDef = {
+  key: "suppliers",
+  title: "供应商 Suppliers",
+  keyField: "name",
+  keyHeader: "Supplier Name",
+  allowDelete: true,
+  branchScoped: false, // 供应商是组织级（与零件一样，跨分店共用）
+  columns: [
+    { header: "Supplier Name", zh: "供应商名称", field: "name", type: "text", required: true },
+    { header: "Contact", zh: "联系人", field: "contactName", type: "text" },
+    { header: "Phone", zh: "电话", field: "phone", type: "text" },
+    { header: "Email", zh: "邮箱", field: "email", type: "text" },
+    { header: "Address", zh: "地址", field: "address", type: "text" },
+    { header: "Lead Time", zh: "交期(天)", field: "leadTimeDays", type: "int" },
+  ],
+};
+
+export const SERVICE_TYPES_SHEET: SheetDef = {
+  key: "serviceTypes",
+  title: "服务项目 Service Types",
+  // **键是 code**（稳定、由源码目录给出），不是名称 —— 名称改了不该变成"新建一项"
+  keyField: "code",
+  keyHeader: "Code",
+  allowDelete: false, // 服务由代码目录管理，不从 Excel 删
+  createAllowed: false, // 也不能新建：新建的 code 柜台看不到（见 createAllowed 的说明）
+  branchScoped: false,
+  columns: [
+    { header: "Code", zh: "代码", field: "code", type: "text", required: true },
+    { header: "Service Name", zh: "服务名称", field: "name", type: "text" },
+    { header: "Category", zh: "分类", field: "category", type: "text" },
+    { header: "Duration (min)", zh: "工时(分钟)", field: "durationMin", type: "int" },
+    { header: "Price (RM)", zh: "标准价(RM)", field: "priceSen", type: "money" },
+    { header: "Active", zh: "启用", field: "active", type: "bool", enumMap: { yes: "true", no: "false", "是": "true", "否": "false" } },
+  ],
+};
+
+export const SHEETS: SheetDef[] = [
+  PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET,
+];
 
 export function sheetByKey(key: string): SheetDef | undefined {
   return SHEETS.find((s) => s.key === key);
