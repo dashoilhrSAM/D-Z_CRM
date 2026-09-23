@@ -190,6 +190,89 @@ export async function softDeleteDocument(input: {
   return { ok: true };
 }
 
+/**
+ * 到期处理（P1，由每日 cron 调用）。
+ *
+ * 只做两件事：把到期的标成 EXPIRED、给 org 级账号发一条通知。
+ * **不做硬删** —— 方案里写的是"到期 → 归档 → 宽限期 → 硬删"，硬删是 P4 的事，
+ * 而且它需要人在场（这一步错了就再也回不来）。
+ */
+export async function expireDueDocuments(input: {
+  organisationId: string;
+  now?: Date;
+}): Promise<{ expired: number; notified: number }> {
+  const now = input.now ?? new Date();
+  const candidates = await db.document.findMany({
+    where: {
+      organisationId: input.organisationId,
+      deletedAt: null,
+      legalHold: false,
+      retainUntil: { lte: now },
+      status: { notIn: ["EXPIRED", "ARCHIVED", "DELETED"] },
+    },
+    select: { id: true, branchId: true, fileName: true, kind: true, retainUntil: true, status: true },
+  });
+  if (candidates.length === 0) return { expired: 0, notified: 0 };
+
+  await db.document.updateMany({
+    where: { id: { in: candidates.map((c) => c.id) } },
+    data: { status: "EXPIRED" },
+  });
+
+  // 通知 org 级账号（不逐条发给所有人：一个晚上到期 50 份文件就会变成 50 条通知）
+  const admins = await db.user.findMany({
+    where: { organisationId: input.organisationId, role: { in: ["OWNER", "SUPER_ADMIN", "HEAD_OFFICE_ADMIN"] }, active: true },
+    select: { id: true },
+  });
+  let notified = 0;
+  if (admins.length) {
+    await db.notification.createMany({
+      data: admins.map((a) => ({
+        userId: a.id,
+        branchId: candidates[0].branchId,
+        title: candidates.length + " document(s) reached their retention date",
+        body: candidates.slice(0, 5).map((c) => c.fileName).join(", ") + (candidates.length > 5 ? " …" : ""),
+        type: "DOCUMENT_EXPIRED",
+        link: "/workshop/documents?status=expired",
+      })),
+    });
+    notified = admins.length;
+  }
+
+  await audit({
+    organisationId: input.organisationId,
+    userId: null,
+    action: "DOCUMENT_EXPIRE_SWEEP",
+    entity: "Document",
+    after: { expired: candidates.length, notified, ids: candidates.slice(0, 20).map((c) => c.id) },
+  });
+  return { expired: candidates.length, notified };
+}
+
+/** 全局文档页用的清单：待审核 + 即将到期（默认视图＝要人动手的东西，不是报表）。 */
+export async function documentAttentionList(input: {
+  organisationId: string;
+  includeExpired?: boolean;
+  warnDays?: number;
+  now?: Date;
+}) {
+  const now = input.now ?? new Date();
+  const warnUntil = new Date(now.getTime() + (input.warnDays ?? 30) * 24 * 60 * 60 * 1000);
+  return db.document.findMany({
+    where: {
+      organisationId: input.organisationId,
+      deletedAt: null,
+      OR: [
+        { status: "UPLOADED" },
+        { retainUntil: { lte: warnUntil } },
+        ...(input.includeExpired ? [{ status: "EXPIRED" }] : []),
+      ],
+    },
+    orderBy: [{ retainUntil: "asc" }, { uploadedAt: "desc" }],
+    take: 200,
+  });
+}
+
 /** 读取内容（下载路由用）。这里**不做**权限判定 —— 由调用方先 canAccessDocument，避免两套规则。 */
 export async function readDocumentBytes(doc: { id: string; storageKey: string }) {
   if (!isPrivateObjectKey(doc.storageKey)) return null;
