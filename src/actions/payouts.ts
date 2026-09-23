@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { scopedBranchId } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
+import { commissionFromLedger, resolvePayoutCommission } from "@/modules/commission/settlement";
 
 /**
  * 发薪写入门禁：沿用**同文件 agreePayout 已经定过的规则**（员工、且不是机修 = 老板/经理），
@@ -54,31 +55,62 @@ export async function settlePayouts(items: PayoutDraft[]) {
   }
 
   let settled = 0;
+  let locked = 0;
+  let ledgerUsed = 0;
+  let legacyUsed = 0;
+  let driftSen = 0;
   for (const it of list) {
     const existing = await db.staffPayout.findUnique({
       where: { userId_period_periodStart: { userId: it.userId, period: it.period, periodStart: it.periodStart } },
-      include: { payments: { select: { amountSen: true } } },
     });
-    const paidSen = existing?.payments.reduce((s, p) => s + p.amountSen, 0) ?? 0;
-    if (existing?.status === "PAID") continue; // 已确认完成
+    if (existing?.status === "PAID") {
+      // **期间锁**：已付款的工资单绝不改写（否则历史工资单与银行流水对不上）。
+      // 锁定之后新产生的台账会落到当前窗口（见 commissionFromLedger 按 earnedAt 取数）。
+      locked++;
+      continue;
+    }
+
+    // P4：佣金以**台账**为准，而不是调用方传来的数字。
+    const ledger = await commissionFromLedger({
+      organisationId: authz.session.orgId, userId: it.userId, period: it.period, periodStart: it.periodStart,
+    });
+    const decision = resolvePayoutCommission({ ledger, requestedSen: it.commissionSen, alreadyPaid: false });
+    if (decision.source === "LEDGER") ledgerUsed++;
+    else legacyUsed++;
+    driftSen += Math.abs(decision.driftSen);
+
+    const commissionSen = decision.commissionSen;
+    const bonusSen = it.bonusSen ?? 0;
+    const totalSen = it.baseSen + commissionSen + it.addonBonusSen + bonusSen;
     await db.staffPayout.upsert({
       where: { userId_period_periodStart: { userId: it.userId, period: it.period, periodStart: it.periodStart } },
       create: {
         userId: it.userId, period: it.period, periodStart: it.periodStart,
-        baseSen: it.baseSen, commissionSen: it.commissionSen, addonBonusSen: it.addonBonusSen, bonusSen: it.bonusSen ?? 0, totalSen: it.totalSen,
+        baseSen: it.baseSen, commissionSen, addonBonusSen: it.addonBonusSen, bonusSen, totalSen,
         status: "PENDING", // 已发起，待出粮
       },
-      update: { baseSen: it.baseSen, commissionSen: it.commissionSen, addonBonusSen: it.addonBonusSen, bonusSen: it.bonusSen ?? 0, totalSen: it.totalSen },
+      update: { baseSen: it.baseSen, commissionSen, addonBonusSen: it.addonBonusSen, bonusSen, totalSen },
     });
     settled++;
     await audit({
       organisationId: authz.session.orgId, branchId: branchOf.get(it.userId) ?? null, userId: authz.session.user!.id,
       action: "PAYOUT_SETTLED", entity: "StaffPayout", entityId: [it.userId, it.period, it.periodStart.toISOString()].join("|"),
-      after: { totalSen: it.totalSen, period: it.period },
+      after: {
+        totalSen, period: it.period,
+        // 留痕：这次佣金是从哪来的、与提交数差多少、有没有跨期调整（"为什么这个月数字变了"的答案）
+        commissionSource: decision.source,
+        commissionSen,
+        driftSen: decision.driftSen,
+        ledgerWindowKey: ledger.windowKey,
+        ledgerRows: ledger.rowCount,
+        lateSen: ledger.lateSen,
+        lateWindowKeys: ledger.lateWindowKeys,
+        note: decision.note,
+      },
     });
   }
   revalidatePath("/workshop/settlements");
-  return { ok: true as const, settled };
+  return { ok: true as const, settled, locked, ledgerUsed, legacyUsed, driftSen };
 }
 
 /** Workshop 出粮（记录付款）：PENDING/PARTIAL → AWAITING_CONFIRM（已付款，待 mechanic 确认收款才算完成）。 */
