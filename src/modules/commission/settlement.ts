@@ -22,7 +22,18 @@ export type LedgerKindSum = {
   adjustmentSen: number;
   reversalSen: number;
   totalSen: number;
+  /** 台账行总数（含 PENDING / LEGACY 这类 0 元痕迹） */
   rowCount: number;
+  /**
+   * **带金额**的行数（BASE / TIER_BONUS / ADJUSTMENT / REVERSAL）。
+   *
+   * 为什么要单独数它（2026-09-23 在**准备生产实跑时**发现的真 bug）：
+   * 判定"这个周期该不该用台账数字"原来用的是 rowCount，而 LEGACY 行（没人配规则时的 0 元痕迹）
+   * 也算行 —— 于是"有规则外的一行"会让引擎以为"台账里有数"，把结算的佣金覆盖成 **0**，
+   * 而设计稿明确 LEGACY 的意思是"**钱仍由旧的人员级结算付**"。
+   * 结果就是：配了规则还好，**没配规则时跑一单反而把技师的佣金清零**。
+   */
+  amountRowCount: number;
 };
 
 export interface WindowCommission extends LedgerKindSum {
@@ -37,7 +48,7 @@ export interface WindowCommission extends LedgerKindSum {
 }
 
 function emptySum(): LedgerKindSum {
-  return { baseSen: 0, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 0, rowCount: 0 };
+  return { baseSen: 0, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 0, rowCount: 0, amountRowCount: 0 };
 }
 
 /**
@@ -66,10 +77,10 @@ export async function commissionFromLedger(args: {
   const lateWindowKeys = new Set<string>();
   for (const r of rows) {
     sum.rowCount += 1;
-    if (r.kind === "BASE") sum.baseSen += r.amountSen;
-    else if (r.kind === "TIER_BONUS") sum.tierBonusSen += r.amountSen;
-    else if (r.kind === "ADJUSTMENT") sum.adjustmentSen += r.amountSen;
-    else if (r.kind === "REVERSAL") sum.reversalSen += r.amountSen;
+    if (r.kind === "BASE") { sum.baseSen += r.amountSen; sum.amountRowCount += 1; }
+    else if (r.kind === "TIER_BONUS") { sum.tierBonusSen += r.amountSen; sum.amountRowCount += 1; }
+    else if (r.kind === "ADJUSTMENT") { sum.adjustmentSen += r.amountSen; sum.amountRowCount += 1; }
+    else if (r.kind === "REVERSAL") { sum.reversalSen += r.amountSen; sum.amountRowCount += 1; }
     // PENDING / LEGACY 是 0 元痕迹，参与不了金额（但计入 rowCount，用于判断"有没有台账"）
     if (r.windowKey !== windowKey && (r.kind === "BASE" || r.kind === "TIER_BONUS" || r.kind === "ADJUSTMENT" || r.kind === "REVERSAL")) {
       lateSen += r.kind === "REVERSAL" ? -r.amountSen : r.amountSen;
@@ -178,12 +189,14 @@ export function resolvePayoutCommission(args: {
   if (args.alreadyPaid) {
     return { commissionSen: args.requestedSen, source: "LOCKED", driftSen: 0, note: "period is paid; the amount is frozen" };
   }
-  if (args.ledger.rowCount === 0) {
+  if (args.ledger.amountRowCount === 0) {
     return {
       commissionSen: args.requestedSen,
       source: "LEGACY",
       driftSen: 0,
-      note: "no ledger rows in this period — legacy per-staff figure kept (not zeroed)",
+      note: args.ledger.rowCount === 0
+        ? "no ledger rows in this period — legacy per-staff figure kept (not zeroed)"
+        : "ledger rows exist but none carries money (no rule covered those lines) — legacy per-staff figure kept (not zeroed)",
     };
   }
   const drift = args.ledger.totalSen - args.requestedSen;

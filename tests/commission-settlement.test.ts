@@ -119,7 +119,7 @@ describe("「为什么是这个数」的逐行明细", () => {
 });
 
 describe("用哪个数字发薪（纯函数）", () => {
-  const ledgerSum = { baseSen: 2000, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 2000, rowCount: 3 };
+  const ledgerSum = { baseSen: 2000, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 2000, rowCount: 3, amountRowCount: 3 };
 
   it("有台账 → 以台账为准，并把差额留痕", () => {
     const d = resolvePayoutCommission({ ledger: ledgerSum, requestedSen: 1500, alreadyPaid: false });
@@ -130,11 +130,22 @@ describe("用哪个数字发薪（纯函数）", () => {
   });
 
   it("**没有台账 → 保留提交的数，绝不当成 0**（否则会把历史工资清零）", () => {
-    const empty = { baseSen: 0, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 0, rowCount: 0 };
+    const empty = { baseSen: 0, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 0, rowCount: 0, amountRowCount: 0 };
     const d = resolvePayoutCommission({ ledger: empty, requestedSen: 1234, alreadyPaid: false });
     expect(d.source).toBe("LEGACY");
     expect(d.commissionSen).toBe(1234);
     expect(d.note).toContain("not zeroed");
+  });
+
+  it("**只有 0 元痕迹（没配规则）→ 也必须保留旧口径**：这是「跑一单反而清零」的那个 bug", () => {
+    // 生产现状：CommissionRule 0 条 → 完工只留 LEGACY（0 元）行。
+    // 若按「有没有行」判定，rowCount>0 会让引擎以为台账里有数，把结算佣金覆盖成 0 ——
+    // 而 LEGACY 的含义恰恰是"钱仍由旧的人员级结算付"。
+    const onlyTraces = { baseSen: 0, tierBonusSen: 0, adjustmentSen: 0, reversalSen: 0, totalSen: 0, rowCount: 3, amountRowCount: 0 };
+    const d = resolvePayoutCommission({ ledger: onlyTraces, requestedSen: 1500, alreadyPaid: false });
+    expect(d.source).toBe("LEGACY");
+    expect(d.commissionSen).toBe(1500);
+    expect(d.note).toContain("none carries money");
   });
 
   it("已付款 → 冻结（source = LOCKED）", () => {
