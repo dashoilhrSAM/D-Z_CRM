@@ -318,7 +318,24 @@ async function main() {
       console.error("[schema-sync] direct (non-pooled) connection and run: node scripts/sync-prod-schema.mjs");
       process.exit(1);
     }
-    console.error("[schema-sync] db push failed: " + String(e.stderr ?? e.message).split("\n").slice(0, 20).join("\n"));
+    const raw = String(e.stderr ?? e.message);
+    console.error("[schema-sync] db push failed: " + raw.split("\n").slice(0, 20).join("\n"));
+    // 2026-09-23 事故：P0b 给 ServiceType 加了 @@unique([organisationId, code])，于是每一次生产构建
+    // 都在这里失败（42、43 两个 PR 的部署全红），而**本地构建完全正常** —— 因为本地连不上生产库、
+    // 根本走不到 push。prisma 无法证明"已有数据里没有重复"，就把加唯一约束当成潜在数据丢失。
+    // 这个提示让人一眼知道该干什么，而不是把 --accept-data-loss 加上去蒙过去。
+    if (/--accept-data-loss/.test(raw)) {
+      console.error("");
+      console.error("[schema-sync] That message means prisma found a change it cannot prove safe — most often a");
+      console.error("[schema-sync] UNIQUE constraint (or a required column) being added to a table that already has");
+      console.error("[schema-sync] rows, because it cannot know whether the existing data satisfies it.");
+      console.error("[schema-sync] This script deliberately does NOT pass --accept-data-loss. Decide deliberately:");
+      console.error("[schema-sync]   1. verify the data, e.g.  SELECT organisationId, code, count(*) FROM \"ServiceType\"");
+      console.error("[schema-sync]      GROUP BY 1,2 HAVING count(*) > 1;   (NULLs count as distinct, so NULL rows are fine)");
+      console.error("[schema-sync]   2. create that one index by hand (idempotent DDL), then re-run this script — it will");
+      console.error("[schema-sync]      then apply the remaining additive changes and verify the result.");
+      console.error("[schema-sync] See docs/changes/2026-09-23-schema-sync-data-loss-warning.md");
+    }
     process.exit(1);
   }
 
