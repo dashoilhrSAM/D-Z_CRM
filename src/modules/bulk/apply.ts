@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/auth/audit";
 import type { RowPlan } from "./diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET } from "./sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET } from "./sheets";
 
 /**
  * 应用已确认的差异（P2）。
@@ -72,6 +72,8 @@ export async function applyPlans(input: {
         else if (plan.sheet === PACKAGES_SHEET.key) await applyPackage(tx, plan, input, bucket(plan.sheet));
         else if (plan.sheet === PACKAGE_ITEMS_SHEET.key) await applyPackageItem(tx, plan, input, productIdBySku, packageIdByName, bucket(plan.sheet));
         else if (plan.sheet === CAMPAIGNS_SHEET.key) await applyCampaign(tx, plan, input, bucket(plan.sheet));
+        else if (plan.sheet === SUPPLIERS_SHEET.key) await applySupplier(tx, plan, input, bucket(plan.sheet));
+        else if (plan.sheet === SERVICE_TYPES_SHEET.key) await applyServiceType(tx, plan, input, bucket(plan.sheet));
         else throw new Error("Unknown sheet: " + plan.sheet);
       }
     });
@@ -245,6 +247,60 @@ async function applyPackageItem(
     await tx.servicePackageItem.update({ where: { id: existing.id }, data: data as never });
     out.updated += 1;
   }
+}
+
+async function applySupplier(
+  tx: Tx,
+  plan: RowPlan,
+  input: { organisationId: string; branchId: string },
+  out: ApplySummary,
+) {
+  const data: Record<string, unknown> = { ...plan.values };
+  delete data.name;
+  if (plan.action === "create") {
+    await tx.supplier.create({ data: { organisationId: input.organisationId, name: plan.key, ...data } as never });
+    out.created += 1;
+  } else if (plan.action === "update") {
+    const found = await tx.supplier.findFirst({ where: { organisationId: input.organisationId, name: plan.key }, select: { id: true } });
+    if (!found) throw new Error("Supplier no longer exists: " + plan.key);
+    await tx.supplier.update({ where: { id: found.id }, data: data as never });
+    out.updated += 1;
+  } else if (plan.action === "delete") {
+    const found = await tx.supplier.findFirst({ where: { organisationId: input.organisationId, name: plan.key }, select: { id: true } });
+    if (!found) {
+      out.skipped += 1;
+      return;
+    }
+    // 供应商没有"停用"字段，被引用时不能删 —— 先查引用再决定（见文件头 ②）
+    const used = await tx.product.count({ where: { supplierId: found.id } })
+      + await tx.purchaseOrder.count({ where: { supplierId: found.id } });
+    if (used > 0) throw new Error("Supplier is used by " + used + " part(s) or purchase order(s) and cannot be deleted: " + plan.key);
+    await tx.supplier.delete({ where: { id: found.id } });
+    out.deleted += 1;
+  }
+}
+
+/**
+ * 服务目录：**只改，不建、不删**。
+ * 服务是代码定义的（src/lib/service-catalog.ts 同步进库）；从 Excel 造一个新 code
+ * 会得到一个柜台根本看不到的服务 —— 那种"数据库里有、前台没有"的东西最难查。
+ */
+async function applyServiceType(
+  tx: Tx,
+  plan: RowPlan,
+  input: { organisationId: string },
+  out: ApplySummary,
+) {
+  const found = await tx.serviceType.findFirst({ where: { organisationId: input.organisationId, code: plan.key }, select: { id: true } });
+  if (!found) throw new Error("Unknown service code: " + plan.key + " (services come from the app catalogue)");
+  if (plan.action === "delete") throw new Error("Services cannot be deleted from a workbook: " + plan.key);
+  const data: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(plan.values)) {
+    if (field === "code") continue;
+    data[field] = value;
+  }
+  await tx.serviceType.update({ where: { id: found.id }, data: data as never });
+  out.updated += 1;
 }
 
 async function applyCampaign(
