@@ -7,6 +7,7 @@ import { messagingModule } from "@/modules/messaging/service";
 import { promoDiscountForBill, readPromoSnapshot } from "@/modules/marketing/promo-resolve";
 import { completionMessage } from "@/modules/messaging/completion-message";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
+import { accrueForJob } from "@/modules/commission/engine";
 
 export interface CompletionResult {
   jobId: string;
@@ -17,6 +18,8 @@ export interface CompletionResult {
   invoiceNumber: string;
   nextServiceMileage: number;
   nextServiceEstDate: Date;
+  /** P2：本次完工计提的佣金合计（sen）。技师未指派时为 0，但台账会留下 PENDING 行。 */
+  commissionAccruedSen: number;
 }
 
 /**
@@ -48,6 +51,12 @@ export class CompletionService {
       if (job.status === "COMPLETED") {
         if (!job.invoice) throw new Error("Completed job has no invoice — data error");
         // idempotent: return existing result (no notification for an already-completed job)
+        // 佣金也一样："已完成"的工单不再计提，而是**读回台账里的实际数字**（不重算，
+        // 否则重试路径会给出与台账不一致的金额）。
+        const alreadyAccrued = await tx.commissionLedger.aggregate({
+          where: { jobId: job.id, kind: "BASE" },
+          _sum: { amountSen: true },
+        });
         return {
           result: {
             jobId: job.id, jobNumber: job.jobNumber,
@@ -55,6 +64,7 @@ export class CompletionService {
             invoiceNumber: job.invoice.invoiceNumber,
             nextServiceMileage: job.motorcycle.nextServiceMileage ?? 0,
             nextServiceEstDate: job.motorcycle.nextServiceEstDate ?? new Date(),
+            commissionAccruedSen: alreadyAccrued._sum.amountSen ?? 0,
           },
           notify: null,
         };
@@ -118,6 +128,11 @@ export class CompletionService {
       }
       // 应收记录（PAY_LATER PENDING）：由 workshop 在 invoices 页确认结清
       await tx.payment.create({ data: { invoiceId: invoice.id, amountSen: totalSen, method: "PAY_LATER", status: "PENDING", paidAt: new Date() } });
+
+      // P2：佣金计提。必须在**同一个事务**里 —— 活干完、账单、佣金三者要么一起成立，
+      // 要么都不成立，否则会出现"活干完了但佣金没计"的中间态（钱少给了还没人知道）。
+      // 幂等由台账唯一键 (jobItemId, kind) 兜住：完工流程被重试时第二条插不进去。
+      const accrual = await accrueForJob(tx, job.id, { at: invoice.issuedAt });
 
       // 3. Update motorcycle snapshot
       const nextMileage = job.mileage + DEFAULT_SERVICE_INTERVAL_KM;
@@ -236,6 +251,7 @@ export class CompletionService {
         result: {
           jobId: job.id, jobNumber: job.jobNumber, revenueSen: totalSen, cogsSen: cogs, grossProfitSen: grossProfit,
           invoiceNumber, nextServiceMileage: nextMileage, nextServiceEstDate: nextDate,
+          commissionAccruedSen: accrual.totalSen,
         },
         notify,
       };
