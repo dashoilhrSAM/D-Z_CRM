@@ -8,7 +8,10 @@ import { Money } from "@/components/shared/money";
 import { CustomerActions } from "@/components/workshop/customer-actions";
 import { customerService } from "@/modules/customers/service";
 import { customerTimeline } from "@/modules/customers/timeline";
-import { AttachmentUpload } from "@/components/workshop/attachment-upload";
+import { DocumentPanel } from "@/components/documents/document-panel";
+import { listDocuments } from "@/modules/documents/service";
+import { getSessionUser } from "@/lib/session-user";
+import { can } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { fmtDate, fmtKM, fmtDateTime } from "@/lib/format";
 import { formatRM } from "@/lib/money";
@@ -21,13 +24,20 @@ export default async function CustomerPassportPage({ params }: { params: Promise
   const passport = await customerService.getPassport(id);
   if (!passport) notFound();
   const { customer, motorcycles, stats, jobs, oilHistory, tyres, messages, reminders } = passport;
-  const [timeline, loyalty, consent, attachments, referralCount] = await Promise.all([
+  const session = await getSessionUser();
+  const [timeline, loyalty, consent, documents, referralCount] = await Promise.all([
     customerTimeline(id),
     db.loyaltyAccount.findUnique({ where: { customerId: id }, include: { tier: true } }),
     db.customerConsent.findUnique({ where: { customerId: id } }),
-    db.attachment.findMany({ where: { relatedType: "CUSTOMER", relatedId: id }, orderBy: { createdAt: "desc" }, take: 20 }),
+    // 文档走新表（私有存储 + 状态 + 保留期）；旧的 Attachment（公开 URL）在本期被它取代
+    listDocuments({ organisationId: session.orgId, link: { customerId: id } }),
     db.referral.count({ where: { referringCustomerId: id } }),
   ]);
+  // 权限：写 = CUSTOMERS:edit；审核 = 该权限 + 非机修（老板：manager 也可以）；删除 = 只有 OWNER/SUPER_ADMIN
+  const actor = session.user ? { id: session.user.id, role: session.role as never, organisationId: session.orgId } : null;
+  const canWriteDocs = actor ? await can(actor, "CUSTOMERS", "edit") : false;
+  const canVerifyDocs = canWriteDocs && session.role !== "MECHANIC";
+  const canDeleteDocs = session.role === "OWNER" || session.role === "SUPER_ADMIN";
 
   return (
     <div>
@@ -112,24 +122,18 @@ export default async function CustomerPassportPage({ params }: { params: Promise
         ))}
       </div>
 
-      {/* FILE-001..010: attachments */}
-      <div className="mt-5 rounded-2xl border bg-card p-4">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-sm">{t("ws.cust.attachments", lang)}</h3>
-          <AttachmentUpload customerId={id} />
-        </div>
-        {attachments.length === 0 ? (
-          <p className="text-xs text-muted-foreground">{t("ws.cust.no-attachments", lang)}</p>
-        ) : (
-          <ul className="space-y-1.5">
-            {attachments.map((a) => (
-              <li key={a.id} className="flex items-center justify-between text-xs">
-                <a href={a.url} target="_blank" rel="noreferrer" className="text-primary hover:underline">{a.fileName}</a>
-                <span className="text-muted-foreground/60">{a.mimeType ?? ""} · {a.sizeBytes ? Math.round(a.sizeBytes / 1024) + " KB" : ""}</span>
-              </li>
-            ))}
-          </ul>
-        )}
+      {/* 文档（P0）：私有存储 + 审核状态 + 到期 —— 取代旧的公开 URL 附件 */}
+      <div className="mt-5">
+        <DocumentPanel
+          link={{ customerId: id }}
+          rows={documents.map((d) => ({
+            id: d.id, kind: d.kind, status: d.status, fileName: d.fileName, mimeType: d.mimeType,
+            sizeBytes: d.sizeBytes, uploadedAt: d.uploadedAt.toISOString(), verifyNote: d.verifyNote,
+          }))}
+          canWrite={canWriteDocs}
+          canVerify={canVerifyDocs}
+          canDelete={canDeleteDocs}
+        />
       </div>
 
       {/* tabs */}

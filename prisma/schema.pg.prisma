@@ -1630,6 +1630,11 @@ model Referral {
   createdAt           DateTime  @default(now())
 }
 
+/// **已弃用（2026-09-23）**：改用 Document 表（私有存储 + 状态 + 保留期）。
+///
+/// 为什么还留着：这张表存的是**公开 URL**，而它已经被 Document 取代（客户页已切换）。
+/// 但**不能现在删** —— 构建期的 schema 同步脚本刻意拒绝 DROP（防止误删生产数据），
+/// 删模型会让每次部署直接失败。等确认线上 0 行且无引用后，再单独走一次带备份的清理。
 model Attachment {
   id             String   @id @default(cuid())
   organisationId String
@@ -1854,4 +1859,58 @@ model InvoiceCounter {
   year  Int @id
   /// 已发出的最后一个号码（不是「下一个」）—— 语义写清楚才不会在边界上出错
   value Int
+}
+
+/// 文档（文档通路 P0）：客户证件、保险单、发票、采购单、供应商文件、员工证件……
+///
+/// 三条刻意的设计：
+///  ① **只存 storageKey，绝不存 URL** —— 上一版 Attachment 存的是公开 URL，
+///     客户身份证走那条路等于「知道链接就能看」。读取一律经 /api/documents/[id]/file 鉴权。
+///  ② 关联用**显式字符串外键**（与台账表同一风格）：一次要连八种对象，加 Prisma relation 得改八个模型。
+///  ③ 状态与保留期都在数据里：上传 ≠ 有效（保险到期要能自动 EXPIRED），到期要能自动归档。
+model Document {
+  id             String    @id @default(cuid())
+  organisationId String
+  branchId       String?
+  /// CUSTOMER_ID | INSURANCE | WARRANTY | INVOICE | QUOTE | PURCHASE_ORDER | SUPPLIER_DOC | STAFF_DOC | PHOTO | OTHER
+  kind           String
+  /// UPLOADED | VERIFIED | REJECTED | ARCHIVED | EXPIRED | DELETED
+  status         String    @default("UPLOADED")
+  /// 私有桶对象键（private/ 前缀），**不是 URL**
+  storageKey     String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  /// 内容哈希：去重与完整性校验（同一份证件重复上传可识别）
+  sha256         String
+
+  customerId      String?
+  motorcycleId    String?
+  leadId          String?
+  bookingId       String?
+  jobId           String?
+  invoiceId       String?
+  purchaseOrderId String?
+  supplierId      String?
+
+  uploadedById String?
+  uploadedAt   DateTime  @default(now())
+  /// 审核留痕：谁看的、什么时候、什么结论
+  verifiedById String?
+  verifiedAt   DateTime?
+  verifyNote   String?
+
+  /// 到期日（按类型算，见 lib/documents/validate.ts）；legalHold 为真则永不自动删
+  retainUntil DateTime?
+  legalHold   Boolean   @default(false)
+  /// 软删：默认查不到，但审计要留得下来
+  deletedAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([organisationId, branchId, status])
+  @@index([customerId])
+  @@index([jobId])
+  @@index([invoiceId])
+  @@index([retainUntil])
 }
