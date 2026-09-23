@@ -6,7 +6,7 @@ import { listCommissionConfig } from "@/actions/commission";
 import { CommissionConfigView } from "@/components/workshop/commission-config";
 import { TierSetConfig } from "@/components/workshop/tier-set-config";
 import { listCommissionTierSets } from "@/actions/commission-tiers";
-import { runCommissionReconciliation } from "@/modules/commission/reconcile";
+import { windowStatFor } from "@/modules/commission/reconcile";
 import { windowKeyOf } from "@/lib/commission/apportion";
 import { formatRM } from "@/lib/money";
 
@@ -27,14 +27,13 @@ export default async function CommissionPage() {
       ? await can({ id: session.user.id, role: session.role as never, organisationId: session.orgId }, "TECHNICIANS", "edit")
       : false;
 
-  const [data, tierData, recon] = await Promise.all([
+  const [data, tierData, costWindow] = await Promise.all([
     listCommissionConfig(),
     listCommissionTierSets(),
-    // 成本占比：佣金 ÷ 同期营收。数字其实早就被对账算出来了，这里只是把它摆到老板眼前 ——
-    // "佣金花了多少"是老板看佣金配置时第一个会问的问题。
-    runCommissionReconciliation({ organisationId: session.orgId }).catch(() => null),
+    // 成本占比：佣金 ÷ 同期营收。**无台账也要显示**（生产上就是这么发现问题的：
+    // 原来只在有台账时渲染，于是老板打开页面看不到任何变化）。
+    windowStatFor({ organisationId: session.orgId, windowKey: windowKeyOf(new Date()) }).catch(() => null),
   ]);
-  const costWindow = recon?.windows.find((w) => w.windowKey === windowKeyOf(new Date())) ?? null;
 
   return (
     <div className="space-y-5">
@@ -54,6 +53,9 @@ export default async function CommissionPage() {
               {tpl("comm.cost-line", lang, { commission: formatRM(costWindow.baseSen), revenue: formatRM(costWindow.revenueSen) })}
             </span>
           </div>
+          {costWindow.baseSen === 0 && (
+            <p className="mt-1 text-xs text-muted-foreground">{t("comm.cost-none", lang)}</p>
+          )}
         </div>
       )}
       {!data.ok ? (
