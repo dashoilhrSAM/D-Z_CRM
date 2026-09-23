@@ -6,6 +6,8 @@ import { listCommissionConfig } from "@/actions/commission";
 import { CommissionConfigView } from "@/components/workshop/commission-config";
 import { TierSetConfig } from "@/components/workshop/tier-set-config";
 import { listCommissionTierSets } from "@/actions/commission-tiers";
+import { listCommissionSwitches } from "@/actions/commission";
+import { CommissionSwitches } from "@/components/workshop/commission-switches";
 import { windowStatFor } from "@/modules/commission/reconcile";
 import { windowKeyOf } from "@/lib/commission/apportion";
 import { formatRM } from "@/lib/money";
@@ -27,12 +29,14 @@ export default async function CommissionPage() {
       ? await can({ id: session.user.id, role: session.role as never, organisationId: session.orgId }, "TECHNICIANS", "edit")
       : false;
 
-  const [data, tierData, costWindow] = await Promise.all([
+  const [data, tierData, costWindow, switches] = await Promise.all([
     listCommissionConfig(),
     listCommissionTierSets(),
     // 成本占比：佣金 ÷ 同期营收。**无台账也要显示**（生产上就是这么发现问题的：
     // 原来只在有台账时渲染，于是老板打开页面看不到任何变化）。
     windowStatFor({ organisationId: session.orgId, windowKey: windowKeyOf(new Date()) }).catch(() => null),
+    // 两个业务开关（零件是否计佣 / 按原价还是实付）—— 钱怎么算由业务方决定，不写死代码
+    listCommissionSwitches(),
   ]);
 
   return (
@@ -41,6 +45,8 @@ export default async function CommissionPage() {
         <h1 className="text-2xl font-bold tracking-tight">{t("comm.title", lang)}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t("comm.subtitle", lang)}</p>
       </div>
+
+      {switches.ok && canEdit && <CommissionSwitches initial={switches.switches} />}
 
       {costWindow && (
         <div className="rounded-2xl border bg-card p-4">

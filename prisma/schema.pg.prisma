@@ -52,6 +52,9 @@ model Organisation {
   /// 佣金基数口径：false（默认）= 客户实付（发票折扣按行分摊后）；
   /// true = 按原价算，不看折扣。业务方在页面决定，不写死源码常量。
   commissionOnGross Boolean @default(false) // P1：佣金规则（SKU / 服务 / 分类 / 套餐 / 默认）
+  /// 零件（ServiceJobPart）是否计佣：**由 workshop 在佣金配置页开关**（默认开）。
+  /// 关掉后零件行完全不计提（与 P2 之前的行为一致）。
+  commissionOnParts Boolean @default(true)
   enableMotorcycleQr Boolean @default(true)
   enableRiderProfileQr Boolean @default(true)
   enableWorkshopQr   Boolean  @default(true)
@@ -1750,6 +1753,8 @@ model CommissionLedger {
   userId         String   // 受益人（技师）
   jobId          String?
   jobItemId      String?
+  /// P4b：零件行（ServiceJobPart）的计提也走台账，用独立的 id 保证幂等（唯一键见文件尾）
+  jobPartId      String?
   invoiceId      String?
   kind           String   // BASE | PENDING | LEGACY | TIER_BONUS | ADJUSTMENT | REVERSAL
   amountSen      Int      // 可为负（冲正/调整）
@@ -1774,6 +1779,9 @@ model CommissionLedger {
   createdAt      DateTime @default(now())
 
   @@unique([jobItemId, kind])
+  /// 零件行（P4b）的幂等键：与 jobItemId 同理 —— NULL 在唯一索引里互不相同，
+  /// 所以服务行的多条 NULL 不会互顶，零件行也能各自只写一条。
+  @@unique([jobPartId, kind])
   @@index([organisationId, userId, windowKey])
   @@index([jobId])
   @@index([invoiceId])
