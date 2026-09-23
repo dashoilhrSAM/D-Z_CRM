@@ -7,6 +7,20 @@ import { db } from "@/lib/db";
 
 export type JobStatusInput = JobStatus;
 
+/**
+ * 柜台加项（attachPackage 的 addons）。productId / serviceTypeId 可选：
+ * 旧调用方不传就照旧（那一行按 LEGACY 处理并出现在"无法归因"报告里），
+ * 但**能传就必须传**——佣金按 SKU / 服务配置依赖这两个字段。
+ */
+export interface AddonInput {
+  description: string;
+  kind: string;
+  quantity: number;
+  unitPriceSen: number;
+  productId?: string | null;
+  serviceTypeId?: string | null;
+}
+
 export class JobService {
   constructor(private repo: IJobRepository = new PrismaJobRepository()) {}
 
@@ -87,18 +101,20 @@ export class JobService {
   }
 
   /** Attach package line items + counter add-ons to a job (INCLUDED). */
-  async attachPackage(jobId: string, packageId?: string, addons?: { description: string; kind: string; quantity: number; unitPriceSen: number }[], client?: DbLike) {
+  async attachPackage(jobId: string, packageId?: string, addons?: AddonInput[], client?: DbLike) {
     if (client) return this.attachPackageTx(jobId, packageId, addons, client);
     return db.$transaction(async (tx: DbLike) => this.attachPackageTx(jobId, packageId, addons, tx));
   }
 
-  private async attachPackageTx(jobId: string, packageId: string | undefined, addons: { description: string; kind: string; quantity: number; unitPriceSen: number }[] | undefined, tx: DbLike) {
+  private async attachPackageTx(jobId: string, packageId: string | undefined, addons: AddonInput[] | undefined, tx: DbLike) {
     if (packageId) {
       const pkg = await (tx as PrismaClient).servicePackage.findUnique({ where: { id: packageId }, include: { items: true } });
       if (pkg) {
         // one priced line for the package (§48: "Standard Service RM120")
         await (tx as PrismaClient).serviceJobItem.create({
-          data: { jobId, description: pkg.name, kind: "SERVICE", quantity: 1, unitPriceSen: pkg.priceSen, lineTotalSen: pkg.priceSen, status: "INCLUDED", source: "PACKAGE" },
+          // packageId：工单里最大的一笔钱通常是套餐行（不对应任何 SKU/服务），
+          // 佣金侧因此需要"套餐"这一档作用域，否则它只能落到默认规则。
+          data: { jobId, description: pkg.name, kind: "SERVICE", quantity: 1, unitPriceSen: pkg.priceSen, lineTotalSen: pkg.priceSen, status: "INCLUDED", source: "PACKAGE", packageId: pkg.id },
         });
         // verified component lines (zero price) + packaged parts (for COGS + stock)
         for (const it of pkg.items) {
@@ -109,7 +125,8 @@ export class JobService {
             });
           } else {
             await (tx as PrismaClient).serviceJobItem.create({
-              data: { jobId, description: it.name, kind: "SERVICE", quantity: it.defaultQty, unitPriceSen: it.priceSen, lineTotalSen: it.priceSen * it.defaultQty, status: "INCLUDED", source: "PACKAGE" },
+              // 组件行若指向某个商品（如机油），就把 productId 记下来——它让"按 SKU 配佣金"能落到这一行。
+              data: { jobId, description: it.name, kind: "SERVICE", quantity: it.defaultQty, unitPriceSen: it.priceSen, lineTotalSen: it.priceSen * it.defaultQty, status: "INCLUDED", source: "PACKAGE", productId: it.productId ?? null },
             });
           }
         }
@@ -118,7 +135,7 @@ export class JobService {
     }
     for (const a of addons ?? []) {
       await (tx as PrismaClient).serviceJobItem.create({
-        data: { jobId, description: a.description, kind: a.kind, quantity: a.quantity, unitPriceSen: a.unitPriceSen, lineTotalSen: a.unitPriceSen * a.quantity, status: "INCLUDED", source: "COUNTER" },
+        data: { jobId, description: a.description, kind: a.kind, quantity: a.quantity, unitPriceSen: a.unitPriceSen, lineTotalSen: a.unitPriceSen * a.quantity, status: "INCLUDED", source: "COUNTER", productId: a.productId ?? null, serviceTypeId: a.serviceTypeId ?? null },
       });
     }
   }
@@ -126,7 +143,7 @@ export class JobService {
   /** Add a recommended item/part to the job. Returns RECOMMENDED unless accepted. */
   async addRecommendation(input: {
     jobId: string; description: string; kind: string; quantity: number; unitPriceSen: number; source: "COUNTER" | "APPROVAL" | "MANUAL";
-    productId?: string; unitCostSen?: number; accept?: boolean;
+    productId?: string; serviceTypeId?: string; unitCostSen?: number; accept?: boolean;
   }) {
     const status = input.accept ? "ACCEPTED" : "RECOMMENDED";
     if (input.kind.toUpperCase() === "PART" && input.productId) {
@@ -142,6 +159,8 @@ export class JobService {
       data: {
         jobId: input.jobId, description: input.description, kind: input.kind, quantity: input.quantity,
         unitPriceSen: input.unitPriceSen, lineTotalSen: input.unitPriceSen * input.quantity, status, source: input.source,
+        // 注意：旧版本只在 PART 分支用了 productId，服务行把它丢掉了——佣金侧因此看不到这条线是什么。
+        productId: input.productId ?? null, serviceTypeId: input.serviceTypeId ?? null,
       },
     });
   }

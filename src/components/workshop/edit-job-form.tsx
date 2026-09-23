@@ -50,9 +50,13 @@ export function EditJobForm({ data, mechanics }: { data: EditJobData; mechanics:
           customerRequest: request || undefined,
           mechanicId: mechanicId === "none" ? null : mechanicId,
         });
-        const added = Object.values(extra);
+        const added = Object.entries(extra);
         if (added.length > 0) {
-          await addJobServiceItems({ jobId: data.jobId, items: added.map((x) => ({ description: x.label, priceSen: x.priceSen })) });
+          // catalogKey 必须带上：服务端要靠它解析出 serviceTypeId（佣金按服务配置的锚点）。
+          await addJobServiceItems({
+            jobId: data.jobId,
+            items: added.map(([key, x]) => ({ description: x.label, priceSen: x.priceSen, catalogKey: key })),
+          });
         }
         setOpen(false);
         router.refresh();
