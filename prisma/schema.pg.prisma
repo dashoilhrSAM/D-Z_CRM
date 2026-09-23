@@ -48,6 +48,7 @@ model Organisation {
   lostReasons    String? // JSON array of configurable closed-lost reasons (PIPE-013)
   // Foreman salary rules: { baseSen, commissionType: "per_job"|"percent_sales"|"flat", commissionValue, addonBonusSen? }
   salaryRules    Json?
+  commissionRules CommissionRule[] // P1：佣金规则（SKU / 服务 / 分类 / 套餐 / 默认）
   enableMotorcycleQr Boolean @default(true)
   enableRiderProfileQr Boolean @default(true)
   enableWorkshopQr   Boolean  @default(true)
@@ -1697,3 +1698,34 @@ model IntegrationConfig {
   @@unique([organisationId, provider])
 }
 
+/// 佣金规则（P1）：一条规则 = 一个作用域 + 一种算法。
+///
+/// 为什么 basis 是**枚举而不是"百分比和固定额两个字段都填"**：两个字段都存在时，
+/// "都设置了怎么办"就成了运行时猜谜，而金额算错是会计事故。改成枚举后"同时设置"在数据层
+/// 无法表达；真要"5% + 每件 RM2"就显式用 COMBO。
+///
+/// targetKey 是**查找键**而不是外键（有意）：PRODUCT/SERVICE/PACKAGE 存对应行的 id，
+/// CATEGORY 存分类名，DEFAULT 为 null。四个多态外键会带来"哪个为空就用哪个"的模糊判断，
+/// 而解析器只需要按 (scope, targetKey) 精确查。
+model CommissionRule {
+  id             String   @id @default(cuid())
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  scope          String   // PRODUCT | SERVICE | CATEGORY | PACKAGE | DEFAULT
+  targetKey      String?  // 见上（DEFAULT 为 null）
+  basis          String   // PERCENT | FIXED | COMBO
+  value          Int      @default(0) // PERCENT → 百分点×100（5.25% = 525）；FIXED → sen；COMBO → 不用
+  valuePercent   Int?     // 仅 COMBO
+  valueFixedSen  Int?     // 仅 COMBO：每件固定额（sen）
+  effectiveFrom  DateTime @default(now())
+  effectiveTo    DateTime?
+  priority       Int      @default(0) // 同层冲突时的兜底（越大越优先）
+  active         Boolean  @default(true)
+  note           String?
+  createdBy      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([organisationId, scope, active])
+  @@index([organisationId, scope, targetKey])
+}
