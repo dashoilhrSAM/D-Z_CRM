@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { generateQrToken } from "@/lib/qr-token";
 import { normalizePhoneLoose, combinePhone, digitsOnly, matchKey, phoneDigits, toE164, fmtStoredPhone } from "@/lib/phone";
 import { evaluateOtpRate, isAllowedPhone, normalizeToE164, snapshotOtpUse } from "@/lib/otp";
+import { planPhoneLogin, sameMsisdn } from "@/lib/auth/phone-login";
 import type { Customer } from "@prisma/client";
 
 /** 业务身份（JWT claims）——A2 RLS 读取 request.jwt.claims 依赖这些字段。 */
@@ -270,8 +271,10 @@ export async function getSupabaseUser() {
 //     等于"手机号从未被验证"就允许用它登录；OTP 之后 CustomerAuthProfile.phoneVerified 才第一次有真值。
 //  ② **老客认领**：Customer.authId 为空的历史客户（seed 出来的那批），验证手机号即可把档案绑定到
 //     自己的账号——这是 OTP 顺带解决的一个真实问题（他们今天没有任何登录方式）。
-//  ③ 已有**邮箱账号**的客户不能用 OTP 登录：Supabase 的手机验证码会新建一个 auth 用户而不是合并身份，
-//     那样同一个客户会同时存在两个账号。这种情况明确拒绝并引导用邮箱登录，不做静默合并。
+//  ③ **已有账号的客户也能用 OTP 登录**（2026-09-23 调整）。Supabase 的手机验证码默认会给新号码
+//     建一个独立身份，所以最初我选择"已有邮箱账号就拒绝"——线上实测这直接把 3 个真实客户挡在门外。
+//     现在改成：发码之前先把号码挂到他**已有的**账号上（preparePhoneIdentity，
+//     见 lib/auth/phone-login.ts 的纯判定），验证码因此命中他本人，邮箱/密码登录照旧可用。
 
 /** 来源 IP 的哈希（加盐）。审计表里存哈希不存原文：那张表已经有手机号，
  *  再落一份原始 IP 就能直接拼出可画像的数据集，而限流只需要"是不是同一个人"。 */
@@ -297,10 +300,77 @@ async function otpRateCheck(phoneE164: string, ipHash: string | null) {
   return evaluateOtpRate(snapshotOtpUse(phoneRows.map((r) => r.createdAt), ipRows.map((r) => r.createdAt), now));
 }
 
+/** 同一号码命中的**全部**客户档案。Customer.phone 没有唯一约束，重复号会造成"登进哪一个"的歧义，
+ *  所以宁可显式拒绝（让人去后台合并），也不要静默挑第一个。 */
+async function customersByPhone(local: string) {
+  const key = matchKey(normalizePhoneLoose(local));
+  if (!key) return [];
+  const candidates = await db.customer.findMany({
+    where: { phone: { not: null } },
+    // 字段要够"补全资料"那一步用（email/gender 会被回填到老客档案上），否则调用方还得再查一次。
+    select: { id: true, phone: true, authId: true, name: true, email: true, gender: true },
+  });
+  return candidates.filter((c) => matchKey(c.phone) === key);
+}
+
 /**
- * 请求验证码。purpose 区分注册与登录，因为二者的前置条件不同：
- *  · LOGIN  —— 必须已存在这个号码的客户档案；且若该客户已有邮箱账号，直接拒绝（见文件头 ③）。
- *  · SIGNUP —— 号码已绑定账号时拒绝（提示去登录），否则允许建号。
+ * 在 Supabase 里按手机号找 auth 用户。
+ *
+ * GoTrue 的 admin API 没有"按手机号查用户"的接口（只吃 id），只能列出来本地比对。
+ * 当前客户规模（几十个）完全够用；等用户量上千，应改成维护一张 phone → authUserId 的映射表，
+ * 而不是每次拉全量。
+ */
+async function authUserByMsisdn(admin: Awaited<ReturnType<typeof createAdminClient>>, e164: string) {
+  const { data, error } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (error) return { error: error.message as string };
+  return { user: data.users.find((u) => sameMsisdn(u.phone, e164)) ?? null };
+}
+
+/**
+ * 让这个号码能在 Supabase 里登录进**客户已有的账号**。
+ *
+ * 为什么需要它：Supabase 的手机验证码会给新号码建独立身份；对已有邮箱账号的客户，那等于
+ * 同一个人两个账号，而 Customer.authId 只能指向一个。做法是发码前把号码挂到他账号上
+ * （updateUserById + phone_confirm:true，**不会发短信**）。
+ *
+ * 判定规则全在 lib/auth/phone-login.ts 的 planPhoneLogin（纯函数、有单测）；这里只执行：
+ *  · create   → 让 Supabase 建/找手机账号（新号码，或老客尚未绑定账号）
+ *  · attach   → 把号码挂到他账号上；若号码被**孤儿**账号占着，先删掉孤儿（否则号码唯一性会挡）
+ *  · conflict → 号码已被**另一个客户**的账号绑定：绝不动别人的账号，报错让人工处理
+ */
+async function preparePhoneIdentity(e164: string, existing: { id: string; authId: string | null } | null) {
+  const admin = await createAdminClient();
+  const found = await authUserByMsisdn(admin, e164);
+  if (found.error) return { ok: false as const, error: found.error };
+  const holder = found.user;
+  const holderLinked = holder
+    ? await db.customer.findUnique({ where: { authId: holder.id }, select: { id: true } })
+    : null;
+  const plan = planPhoneLogin({
+    customerAuthId: existing?.authId ?? null,
+    phoneHolderAuthId: holder?.id ?? null,
+    holderBelongsToAnotherCustomer: !!holderLinked && holderLinked.id !== existing?.id,
+  });
+
+  if (plan.action === "create") return { ok: true as const, shouldCreateUser: true };
+  if (plan.action === "conflict") {
+    return { ok: false as const, error: "This phone number is already used by another account. Please contact the workshop." };
+  }
+  if (plan.deleteOrphanAuthUserId) {
+    const { error } = await admin.auth.admin.deleteUser(plan.deleteOrphanAuthUserId);
+    if (error) return { ok: false as const, error: "Could not release this phone number: " + error.message };
+  }
+  const { error: upErr } = await admin.auth.admin.updateUserById(plan.authUserId, {
+    phone: e164,
+    phone_confirm: true,
+  });
+  if (upErr) return { ok: false as const, error: "Could not link this phone number: " + upErr.message };
+  return { ok: true as const, shouldCreateUser: false };
+}
+
+/**
+ * 请求验证码。LOGIN 要求号码先有客户档案（避免用登录入口建出一堆空账号）；SIGNUP 允许全新号码。
+ * 两者在"已有账号"这一支上已经统一：都把号码挂到既有账号再发码（见文件头 ③）。
  */
 export async function requestRiderPhoneOtp(input: {
   phone: string;
@@ -314,42 +384,43 @@ export async function requestRiderPhoneOtp(input: {
     return { ok: false as const, error: "SMS codes are currently sent to Malaysian numbers (+60) only." };
   }
 
-  const existing = await customerByPhone(normalizePhoneLoose(e164));
+  const matches = await customersByPhone(normalizePhoneLoose(e164));
+  if (matches.length > 1) {
+    // 同一号码挂在多个客户档案上——先让人合并，别猜该登进哪一个。
+    return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
+  }
+  const existing = matches[0] ?? null;
 
-  if (input.purpose === "LOGIN") {
-    if (!existing) return { ok: false as const, error: "No account found with this phone number — try signing up." };
-    if (existing.authId) {
-      // 已有 Supabase 账号：只有它自己就绑着这个号码，才允许用验证码登录。
-      const admin = await createAdminClient();
-      const { data: au, error: auErr } = await admin.auth.admin.getUserById(existing.authId);
-      if (auErr || !au.user) return { ok: false as const, error: "Could not resolve account — contact the workshop." };
-      if (!au.user.phone) {
-        return {
-          ok: false as const,
-          error: "This number belongs to an account that signs in with email. Please use the email tab, or contact the workshop.",
-        };
-      }
-      if (au.user.phone !== e164) {
-        return { ok: false as const, error: "This number is linked to a different login. Please contact the workshop." };
-      }
-    }
-  } else if (existing?.authId) {
-    return { ok: false as const, error: "An account with this phone already exists — try signing in." };
+  // LOGIN 要求号码先有档案：避免任何人用登录入口批量建出空账号（那些走 SIGNUP）。
+  if (input.purpose === "LOGIN" && !existing) {
+    return { ok: false as const, error: "No account found with this phone number — try signing up." };
   }
 
+  // 限流先于一切写操作：preparePhoneIdentity 会改 Supabase 里的身份，不该被滥用触发。
   const ipHash = await clientIpHash();
   const rate = await otpRateCheck(e164, ipHash);
   if (!rate.allow) return { ok: false as const, error: rate.message };
 
-  // 先写审计行（这就是限流的计数依据）：即使 Supabase 调用失败也留下痕迹。
+  // 发码之前把号码挂到**他已有的账号**上——这正是"已有邮箱账号的客户也能短信登录"的关键一步。
+  const prepared = await preparePhoneIdentity(e164, existing ? { id: existing.id, authId: existing.authId } : null);
+  if (!prepared.ok) {
+    // 拒绝也要落痕（教训：不留痕的失败，线上就只剩第三方的笼统文案）。
+    await db.otpAttempt.create({
+      data: { phoneE164: e164, purpose: input.purpose, ipHash, status: "REJECTED", error: prepared.error.slice(0, 200) },
+    });
+    return { ok: false as const, error: prepared.error };
+  }
+
+  // 审计行（限流的计数依据）：即使 Supabase 调用失败也留下痕迹。
   const attempt = await db.otpAttempt.create({
     data: { phoneE164: e164, purpose: input.purpose, ipHash, status: "REQUESTED" },
   });
 
   const supabase = await createClient();
-  // 老客未绑定账号时 Supabase 里还没有这个用户，必须允许创建（下一步 verify 会把档案认领过来）。
-  const shouldCreateUser = input.purpose === "SIGNUP" || !existing?.authId;
-  const { error } = await supabase.auth.signInWithOtp({ phone: e164, options: { shouldCreateUser } });
+  const { error } = await supabase.auth.signInWithOtp({
+    phone: e164,
+    options: { shouldCreateUser: prepared.shouldCreateUser },
+  });
   if (error) {
     await db.otpAttempt.update({
       where: { id: attempt.id },
@@ -382,7 +453,12 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
     data: { verifiedAt: new Date() },
   });
 
-  const cust = await customerByPhone(normalizePhoneLoose(e164));
+  const matches = await customersByPhone(normalizePhoneLoose(e164));
+  if (matches.length > 1) {
+    await supabase.auth.signOut();
+    return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
+  }
+  const cust = matches[0] ?? null;
 
   if (!cust) {
     // 新号码：档案在"补全资料"那一步创建（此时才有姓名）。
@@ -390,9 +466,11 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
   }
 
   if (cust.authId && cust.authId !== data.user.id) {
-    // 号码属于另一个登录身份——不许静默改写绑定，否则等于把别人的客户档案挂到这个新账号上。
+    // 正常路径下走不到这里：发码前 preparePhoneIdentity 已经把号码挂到他本人的账号上。
+    // 剩下两种可能是"验证码是在旧代码下请求的"或并发改写绑定——不静默改写（那等于把别人的档案
+    // 挂到这个新账号上），让用户重新要一个码：那时挂载逻辑会把号码正确归位。
     await supabase.auth.signOut();
-    return { ok: false as const, error: "This phone is linked to another login. Please contact the workshop." };
+    return { ok: false as const, error: "Please request a new code and try again." };
   }
 
   if (!cust.authId) {
@@ -439,7 +517,11 @@ export async function completeRiderPhoneSignup(input: { name: string; gender?: s
   try {
     let customer = await db.customer.findUnique({ where: { authId: user.id } });
     if (!customer) {
-      const byPhone = await customerByPhone(normalizePhoneLoose(phone));
+      const byPhoneMatches = await customersByPhone(normalizePhoneLoose(phone));
+      if (byPhoneMatches.length > 1) {
+        return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
+      }
+      const byPhone = byPhoneMatches[0] ?? null;
       if (byPhone?.authId && byPhone.authId !== user.id) {
         return { ok: false as const, error: "This phone is linked to another login. Please contact the workshop." };
       }
