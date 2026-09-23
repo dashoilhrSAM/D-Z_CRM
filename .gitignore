@@ -77,3 +77,7 @@ app-screenshots/
 
 # production database dumps (contains customer PII — never commit)
 docs/backups/
+
+# 压测库/临时库：绝不该进 git（2026-09-23 差点被 git add -A 带进去）
+prisma/perf*.db
+prisma/*.db-journal

@@ -11,7 +11,10 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const saved = { databaseUrl: process.env.DATABASE_URL };
 const tag = "inv" + Date.now().toString(36);
-const YEAR = new Date().getFullYear();
+// **合成年份**：计数器是按年份全局的（生产语义正确），而并行跑的其它测试文件
+// （完工链路）也在推进当前年份的计数器 —— 用真实年份会让断言拿到被它们推进过的值。
+// 全量跑第一次就是这么红的：单独跑绿、并行跑红，正是"共享状态"的典型症状。
+const YEAR = 2099;
 const PREFIX = "DZ-" + YEAR + "-";
 
 let db: typeof import("@/lib/db")["db"];
@@ -70,6 +73,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
+  await db.invoice.deleteMany({ where: { invoiceNumber: { startsWith: "DZ-" + YEAR + "-" } } });
   await db.invoice.deleteMany({ where: { jobId: { in: jobIds } } });
   for (const id of jobIds) {
     await db.serviceJobItem.deleteMany({ where: { jobId: id } });
@@ -78,8 +82,8 @@ afterAll(async () => {
     await db.jobStatusHistory.deleteMany({ where: { jobId: id } });
     await db.serviceJob.delete({ where: { id } });
   }
-  // 计数器是全局的：测试用完要清掉，且必须在删掉测试发票之后清，
-  // 否则别的本地使用会从错误的号继续（清掉后它会重新按"现有最大号"起算）。
+  // 计数器按年份：只清掉这个**合成年份**的行（真实年份的计数器属于本地/生产使用，不能碰），
+  // 且必须在删掉测试发票之后清，否则别的使用会从错误的号继续。
   await db.invoiceCounter.deleteMany({ where: { year: YEAR } });
   await db.motorcycle.deleteMany({ where: { customerId } });
   await db.customer.deleteMany({ where: { organisationId: orgId } });
