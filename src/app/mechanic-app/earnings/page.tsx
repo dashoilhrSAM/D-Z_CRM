@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { EarningsConfirm } from "@/components/mechanic/earnings-confirm";
+import { RewardPanel } from "@/components/mechanic/reward-panel";
+import { tierPanelFor } from "@/modules/commission/claim";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
@@ -14,6 +16,10 @@ export default async function EarningsPage() {
   const lang = await getLang();
   const session = await getSessionUser();
   if (session.kind !== "staff" || !session.user) redirect("/workshop/dashboard");
+
+  // P3：阶梯奖励面板。与工资明细同一页 —— 技师看"我这个月能拿多少"时，
+  // 不该在两个地方各看一半。
+  const panel = await tierPanelFor(session.orgId, session.user.id);
 
   const [jobs, payouts] = await Promise.all([
     db.serviceJob.findMany({
@@ -39,6 +45,24 @@ export default async function EarningsPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-bold">{t("mech.my-earnings", lang)}</h1>
+
+      <RewardPanel
+        panel={{
+          windowKey: panel.windowKey,
+          claimableTotalSen: panel.claimableTotalSen,
+          sets: panel.sets.map((s) => ({
+            tierSetId: s.tierSetId, tierSetName: s.tierSetName, scope: s.scope, targetName: s.targetName,
+            rewardKind: s.rewardKind, units: s.units, progressPct: s.progressPct, remaining: s.remaining,
+            nextTier: s.nextTier ? { thresholdQty: s.nextTier.thresholdQty } : null,
+            baseRuleLabel: s.baseRuleLabel,
+            tiers: s.tiers.map((x) => ({ tierId: x.tierId, thresholdQty: x.thresholdQty, amountSen: x.amountSen, claimed: x.claimed, claimable: x.claimable })),
+          })),
+          history: panel.history.map((h) => ({
+            id: h.id, tierSetName: h.tierSetName, windowKey: h.windowKey,
+            claimedQty: h.claimedQty, amountSen: h.amountSen, claimedAt: h.claimedAt.toISOString(),
+          })),
+        }}
+      />
 
       <div className="grid grid-cols-3 gap-3">
         <div className="rounded-2xl border bg-card p-4">
