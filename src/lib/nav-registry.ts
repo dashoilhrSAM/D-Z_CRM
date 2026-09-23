@@ -9,6 +9,7 @@ import {
   LayoutDashboard, Users, UserCheck, BellRing, CalendarClock, Wrench, ClipboardList, ListChecks, Package,
   Store, Megaphone, MessageSquare, Star, Users2, Gauge, Boxes, AlertTriangle, Archive, RefreshCw,
   ShoppingCart, Truck, Wallet, Sparkles, Settings, Filter, Kanban, Timer, ListTodo, Bike, Bell, Upload, Plug, ShieldCheck, ReceiptText, Clock, Percent,
+  FolderOpen,
 } from "lucide-react";
 // 工作台导航分组（从真实 Role 映射，生产权限模型——非 demo）。
 export type WorkshopPersona = "OWNER" | "COUNTER_STAFF" | "MECHANIC" | "CUSTOMER";
@@ -114,6 +115,9 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       // HRM: 考勤不再挂在 TECHNICIANS 下（那是技师技能口径），也不只给技师看——
       // 柜台/销售/行政都要打卡，而 MECHANIC 实际走 /mechanic-app（workshop layout 会把他们重定向过去）。
       { key: "attendance", label: "Attendance", labelKey: "nav.attendance", href: "/workshop/attendance", icon: Clock, module: "ATTENDANCE", access: ["OWNER", "COUNTER_STAFF"] },
+      // P1：全局文档中心（待审核 / 即将到期）。模块用 CUSTOMERS：文档绝大多数挂在客户身上，
+      // 而柜台与老板正是要看"哪些证件还没人审、哪些快到期了"的那批人。
+      { key: "documents", label: "Documents", labelKey: "nav.documents", href: "/workshop/documents", icon: FolderOpen, module: "CUSTOMERS", access: ["OWNER", "COUNTER_STAFF"] },
     ],
   },
   {

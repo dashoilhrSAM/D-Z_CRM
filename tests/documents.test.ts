@@ -59,6 +59,8 @@ beforeAll(async () => {
 afterAll(async () => {
   // 顺序要紧：审计行挂着 organisation 外键，不先删就删不掉组织（第一次跑就是这么红的）
   await db.auditLog.deleteMany({ where: { organisationId: { in: [orgA, orgB] } } });
+  // 通知挂着 user 外键（到期扫描会给 org 级账号发通知）——不先删就删不掉用户
+  await db.notification.deleteMany({ where: { userId: { in: [ownerA, ownerB, managerA1, managerA2, mechA1] } } });
   await db.document.deleteMany({ where: { organisationId: { in: [orgA, orgB] } } });
   await db.user.deleteMany({ where: { organisationId: { in: [orgA, orgB] } } });
   await db.customer.deleteMany({ where: { organisationId: { in: [orgA, orgB] } } });
@@ -181,5 +183,70 @@ describe("状态与删除", () => {
     const row = await db.document.findUnique({ where: { id } });
     expect(row).not.toBeNull();
     expect(row!.status).toBe("DELETED");
+  });
+});
+
+describe("到期规则（P1，纯函数）", () => {
+  const now = new Date("2026-09-23T00:00:00Z");
+  const base = { status: "UPLOADED", legalHold: false, deletedAt: null };
+
+  it("过了到期日 → EXPIRE；30 天内 → WARN；还早 → NONE", () => {
+    expect(validate.expiryDecision({ ...base, retainUntil: new Date("2026-09-01T00:00:00Z") }, now)).toBe("EXPIRE");
+    expect(validate.expiryDecision({ ...base, retainUntil: new Date("2026-10-10T00:00:00Z") }, now)).toBe("WARN");
+    expect(validate.expiryDecision({ ...base, retainUntil: new Date("2027-09-01T00:00:00Z") }, now)).toBe("NONE");
+    expect(validate.expiryDecision({ ...base, retainUntil: null }, now)).toBe("NONE");
+  });
+
+  it("**legalHold 永不自动过期**（争议/审计期间，自动动它就是毁证据）", () => {
+    expect(validate.expiryDecision({ ...base, legalHold: true, retainUntil: new Date("2026-01-01T00:00:00Z") }, now)).toBe("NONE");
+  });
+
+  it("已软删 / 已归档 / 已过期的**不重复处理**（否则每次 cron 都会改一遍 updatedAt）", () => {
+    const past = new Date("2026-01-01T00:00:00Z");
+    expect(validate.expiryDecision({ ...base, deletedAt: now, retainUntil: past }, now)).toBe("NONE");
+    expect(validate.expiryDecision({ ...base, status: "EXPIRED", retainUntil: past }, now)).toBe("NONE");
+    expect(validate.expiryDecision({ ...base, status: "ARCHIVED", retainUntil: past }, now)).toBe("NONE");
+  });
+});
+
+describe("到期扫描（P1，会写库）", () => {
+  async function seedDoc(opts: { retainUntil: Date; legalHold?: boolean; status?: string }) {
+    const row = await db.document.create({
+      data: {
+        organisationId: orgA, branchId: branchA1, kind: "CUSTOMER_ID", status: opts.status ?? "UPLOADED",
+        storageKey: "private/documents/" + orgA + "/" + Math.random().toString(36).slice(2),
+        fileName: "expiry-" + Math.random().toString(36).slice(2) + ".pdf", mimeType: "application/pdf",
+        sizeBytes: 100, sha256: "x".repeat(64), uploadedById: managerA1, customerId: customerA,
+        retainUntil: opts.retainUntil, legalHold: opts.legalHold ?? false,
+      },
+    });
+    docIds.push(row.id);
+    return row.id;
+  }
+
+  it("把到期的标成 EXPIRED 并通知 org 级账号；**legalHold 的原封不动**", async () => {
+    const now = new Date("2026-09-23T00:00:00Z");
+    const due = await seedDoc({ retainUntil: new Date("2026-09-01T00:00:00Z") });
+    const held = await seedDoc({ retainUntil: new Date("2026-09-01T00:00:00Z"), legalHold: true });
+    const fresh = await seedDoc({ retainUntil: new Date("2027-09-01T00:00:00Z") });
+
+    await db.notification.deleteMany({ where: { type: "DOCUMENT_EXPIRED" } });
+    const res = await service.expireDueDocuments({ organisationId: orgA, now });
+
+    expect(res.expired).toBe(1);
+    expect((await db.document.findUnique({ where: { id: due } }))!.status).toBe("EXPIRED");
+    expect((await db.document.findUnique({ where: { id: held } }))!.status).toBe("UPLOADED");
+    expect((await db.document.findUnique({ where: { id: fresh } }))!.status).toBe("UPLOADED");
+    // 通知发给了 org 级账号（OWNER），而不是每个员工
+    const notes = await db.notification.findMany({ where: { type: "DOCUMENT_EXPIRED" } });
+    expect(notes.length).toBeGreaterThan(0);
+    expect(notes.every((n) => n.userId === ownerA)).toBe(true);
+    await db.notification.deleteMany({ where: { type: "DOCUMENT_EXPIRED" } });
+  });
+
+  it("重复跑不会把已 EXPIRED 的再处理一遍（幂等）", async () => {
+    const now = new Date("2026-09-23T00:00:00Z");
+    const res = await service.expireDueDocuments({ organisationId: orgA, now });
+    expect(res.expired).toBe(0);
   });
 });

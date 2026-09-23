@@ -12,6 +12,9 @@ import { AiRecommendationActions } from "@/components/workshop/ai-recommendation
 import { EditJobForm, type EditJobData } from "@/components/workshop/edit-job-form";
 import { MileageCorrector } from "@/components/workshop/mileage-corrector";
 import { JobPhotosView } from "@/components/workshop/job-photos-view";
+import { DocumentPanel } from "@/components/documents/document-panel";
+import { listDocuments } from "@/modules/documents/service";
+import { can } from "@/lib/auth/permissions";
 import { QuotationPanel } from "@/components/workshop/quotation-panel";
 import { InvoicePaymentPanel } from "@/components/workshop/invoice-payment-panel";
 import { fmtDate, fmtDateTime, fmtKM } from "@/lib/format";
@@ -39,6 +42,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   // another branch was rejected on save.
   const mechanics = await loadAssignableStaff(detail.branchId);
   const statusHistory = await db.jobStatusHistory.findMany({ where: { jobId: id }, orderBy: { changedAt: "desc" } });
+  // 文档（P1）：挂在工单上的文件——保险理赔单、客户签字的授权书之类
+  const jobDocuments = await listDocuments({ organisationId: session.orgId, link: { jobId: id } });
+  const docActor = session.user ? { id: session.user.id, role: session.role as never, organisationId: session.orgId } : null;
+  const canWriteDocs = docActor ? await can(docActor, "JOB_CARDS", "edit") : false;
   const editData: EditJobData = {
     jobId: detail.id,
     mileage: detail.mileage,
@@ -159,6 +166,18 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               <JobPhotosView photos={(detail.photos ?? []).map((p) => ({ angle: p.angle, photoUrl: p.photoUrl }))} />
             )}
           </section>
+
+          {/* 文档（P1）：与 SOP 照片并列 —— 照片是"车当时的样"，文档是"这单相关的纸" */}
+          <DocumentPanel
+            link={{ jobId: id }}
+            rows={jobDocuments.map((d) => ({
+              id: d.id, kind: d.kind, status: d.status, fileName: d.fileName, mimeType: d.mimeType,
+              sizeBytes: d.sizeBytes, uploadedAt: d.uploadedAt.toISOString(), verifyNote: d.verifyNote,
+            }))}
+            canWrite={canWriteDocs}
+            canVerify={canWriteDocs && session.role !== "MECHANIC"}
+            canDelete={session.role === "OWNER" || session.role === "SUPER_ADMIN"}
+          />
 
           {/* items & parts */}
           <section className="dz-panel">

@@ -99,6 +99,34 @@ export function retainUntilFor(kind: DocumentKind, from: Date): Date | null {
   return d;
 }
 
+/** 到期前多少天开始提醒（老板批准的方案里写的是 30 天）。 */
+export const EXPIRY_WARN_DAYS = 30;
+
+export type ExpiryDecision = "EXPIRE" | "WARN" | "NONE";
+
+/**
+ * 到期判定（纯函数，可单测 —— 这是 P1 里最容易算错的一块）。
+ *
+ * 三条刻意的规则：
+ *  ① **legalHold 永不自动过期**（争议/审计期间，自动删会毁证据）；
+ *  ② 已软删的不再处理（它已经不可见了，再标一次只会制造噪声）；
+ *  ③ ARRIVED 但已 ARCHIVED/EXPIRED 的不重复标（否则每次 cron 都会改一遍 updatedAt）。
+ */
+export function expiryDecision(
+  doc: { status: string; retainUntil: Date | null; legalHold: boolean; deletedAt: Date | null },
+  now: Date,
+  warnDays = EXPIRY_WARN_DAYS,
+): ExpiryDecision {
+  if (doc.deletedAt) return "NONE";
+  if (doc.legalHold) return "NONE";
+  if (!doc.retainUntil) return "NONE";
+  if (doc.status === "EXPIRED" || doc.status === "ARCHIVED" || doc.status === "DELETED") return "NONE";
+  const at = doc.retainUntil.getTime();
+  if (at <= now.getTime()) return "EXPIRE";
+  if (at <= now.getTime() + warnDays * 24 * 60 * 60 * 1000) return "WARN";
+  return "NONE";
+}
+
 /** 允许的下载/存取判定用到的模块：文档挂在谁身上，就看谁那个模块的权限。 */
 export function moduleForDocumentLink(link: {
   customerId?: string | null;
