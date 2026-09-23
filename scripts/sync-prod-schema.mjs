@@ -158,6 +158,22 @@ function elapsed(startedAt) {
   return ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
 }
 
+/**
+ * 把连接串（连同其中的密码）从任何准备打印的文本里抹掉。
+ *
+ * 2026-09-23：这里曾经只打印 e.message 的第一行 —— "Command failed: …prisma migrate diff …"，
+ * 真正的 Prisma 错误（P1000 密码错 / P1001 主机不可达 / FATAL ENOTFOUND 区域不对）全被吞掉，
+ * 于是一次"连不上"变成了一条查不出原因的日志，只能靠人肉猜。
+ * 现在 stderr 尾部照样打，但连接串一律脱敏。
+ */
+export function redactSecrets(text, url) {
+  let out = String(text ?? "");
+  if (url) out = out.split(url).join("[REDACTED]");
+  // 兜底：任何残留的 postgres 连接串整体抹掉（含密码与主机）
+  out = out.replace(/postgres(?:ql)?:\/\/[^\s"']+/g, "[REDACTED]");
+  return out;
+}
+
 /** SQL that would take the database from its current state to the schema. */
 export function diffSql(url) {
   return runPrisma(
@@ -249,6 +265,15 @@ async function main() {
     const why = e instanceof PrismaTimeout
       ? "inspection timed out after " + e.seconds + "s"
       : "could not inspect the database (" + String(e.message).split("\n")[0] + ")";
+    // 打印底层 Prisma 错误的尾部：没有这几行，"连不上"就无法区分密码错 / 主机不可达 / 区域不对。
+    const detail = redactSecrets(e.stderr ?? "", url)
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.toLowerCase().startsWith("warn") && !l.includes("prisma-config"));
+    if (detail.length > 0) {
+      console.error("[schema-sync] prisma said:");
+      for (const l of detail.slice(-6)) console.error("[schema-sync]   " + l);
+    }
     if (isProduction && !checkOnly) {
       // 2026-09-15 生产事故后收紧：以前这里一律 fail-open（"连不上就不检查，让构建继续"），
       // 结果 owner 合并了带 schema 变更的分支后，构建**成功**、站点**全挂**——
