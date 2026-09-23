@@ -1,11 +1,14 @@
 import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
 import { getLang } from "@/lib/get-lang";
-import { t } from "@/lib/i18n";
+import { t, tpl } from "@/lib/i18n";
 import { listCommissionConfig } from "@/actions/commission";
 import { CommissionConfigView } from "@/components/workshop/commission-config";
 import { TierSetConfig } from "@/components/workshop/tier-set-config";
 import { listCommissionTierSets } from "@/actions/commission-tiers";
+import { runCommissionReconciliation } from "@/modules/commission/reconcile";
+import { windowKeyOf } from "@/lib/commission/apportion";
+import { formatRM } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -24,7 +27,14 @@ export default async function CommissionPage() {
       ? await can({ id: session.user.id, role: session.role as never, organisationId: session.orgId }, "TECHNICIANS", "edit")
       : false;
 
-  const [data, tierData] = await Promise.all([listCommissionConfig(), listCommissionTierSets()]);
+  const [data, tierData, recon] = await Promise.all([
+    listCommissionConfig(),
+    listCommissionTierSets(),
+    // 成本占比：佣金 ÷ 同期营收。数字其实早就被对账算出来了，这里只是把它摆到老板眼前 ——
+    // "佣金花了多少"是老板看佣金配置时第一个会问的问题。
+    runCommissionReconciliation({ organisationId: session.orgId }).catch(() => null),
+  ]);
+  const costWindow = recon?.windows.find((w) => w.windowKey === windowKeyOf(new Date())) ?? null;
 
   return (
     <div className="space-y-5">
@@ -32,6 +42,20 @@ export default async function CommissionPage() {
         <h1 className="text-2xl font-bold tracking-tight">{t("comm.title", lang)}</h1>
         <p className="text-sm text-muted-foreground mt-1">{t("comm.subtitle", lang)}</p>
       </div>
+
+      {costWindow && (
+        <div className="rounded-2xl border bg-card p-4">
+          <div className="text-xs text-muted-foreground">{tpl("comm.cost-title", lang, { window: costWindow.windowKey })}</div>
+          <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-2xl font-bold">
+              {costWindow.ratioPct === null ? "—" : costWindow.ratioPct.toFixed(1) + "%"}
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {tpl("comm.cost-line", lang, { commission: formatRM(costWindow.baseSen), revenue: formatRM(costWindow.revenueSen) })}
+            </span>
+          </div>
+        </div>
+      )}
       {!data.ok ? (
         <div className="rounded-2xl border bg-card p-4 text-sm text-destructive">{data.error}</div>
       ) : (

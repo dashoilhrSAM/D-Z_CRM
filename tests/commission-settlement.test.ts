@@ -14,6 +14,7 @@ const tag = "s" + Date.now().toString(36);
 
 let db: typeof import("@/lib/db")["db"];
 let commissionFromLedger: typeof import("@/modules/commission/settlement")["commissionFromLedger"];
+let commissionBreakdownFor: typeof import("@/modules/commission/settlement")["commissionBreakdownFor"];
 
 let orgId = "";
 let userId = "";
@@ -30,7 +31,7 @@ async function row(kind: string, amountSen: number, earnedAt: Date, windowKey: s
 beforeAll(async () => {
   process.env.DATABASE_URL = saved.databaseUrl ?? "file:./dev.db";
   ({ db } = await import("@/lib/db"));
-  ({ commissionFromLedger } = await import("@/modules/commission/settlement"));
+  ({ commissionFromLedger, commissionBreakdownFor } = await import("@/modules/commission/settlement"));
 
   const org = await db.organisation.create({ data: { name: "COMM-SETTLE-" + tag } });
   orgId = org.id;
@@ -94,6 +95,26 @@ describe("按周期取台账：四种 kind 的符号各不相同", () => {
     expect(w.baseSen).toBe(2100); // 没有被算进来
     expect(start.getTime()).toBe(Date.UTC(2026, 7, 31, 16, 0)); // 窗口起点 = 9/1 00:00 MYT
     expect(end.getTime()).toBe(Date.UTC(2026, 8, 30, 16, 0));
+  });
+});
+
+describe("「为什么是这个数」的逐行明细", () => {
+  it("把工单号、行描述、规则与金额都摊开，并标出迟到的计提", async () => {
+    const b = await commissionBreakdownFor({ organisationId: orgId, userId, period: "month", periodStart: PERIOD_START });
+    expect(b.windowKey).toBe("2026-09");
+    // 8 月那笔迟到计提：时间在 9 月、窗口键是 2026-08 → 必须被标出来
+    const late = b.lines.filter((l) => l.late);
+    expect(late.length).toBeGreaterThanOrEqual(1);
+    expect(late[0].windowKey).toBe("2026-08");
+    // PENDING 是 0 元痕迹，但**必须显示**：它回答的是"这一行为什么没有钱"
+    const pending = b.lines.filter((l) => l.kind === "PENDING");
+    expect(pending.length).toBe(1);
+    expect(pending[0].amountSen).toBe(0);
+    // 金额与汇总一致（面板上的总数就是从这些行来的）
+    const sum = b.lines
+      .filter((l) => ["BASE", "TIER_BONUS", "ADJUSTMENT", "REVERSAL"].includes(l.kind))
+      .reduce((s, l) => s + (l.kind === "REVERSAL" ? -l.amountSen : l.amountSen), 0);
+    expect(sum).toBe(b.totals.totalSen);
   });
 });
 

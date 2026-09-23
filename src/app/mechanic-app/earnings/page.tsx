@@ -4,6 +4,9 @@ import { getSessionUser } from "@/lib/session-user";
 import { EarningsConfirm } from "@/components/mechanic/earnings-confirm";
 import { RewardPanel } from "@/components/mechanic/reward-panel";
 import { tierPanelFor } from "@/modules/commission/claim";
+import { commissionBreakdownFor } from "@/modules/commission/settlement";
+import { LedgerBreakdownCard } from "@/components/mechanic/ledger-breakdown";
+import { periodWindow } from "@/lib/period";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
@@ -20,6 +23,13 @@ export default async function EarningsPage() {
   // P3：阶梯奖励面板。与工资明细同一页 —— 技师看"我这个月能拿多少"时，
   // 不该在两个地方各看一半。
   const panel = await tierPanelFor(session.orgId, session.user.id);
+
+  // P4：本月佣金**逐行明细**（"为什么是这个数"）。技师问得最多的一句，
+  // 而系统以前只能回答一个总数 —— 对不上账就没人再信它。
+  const thisMonth = periodWindow("month", new Date()).start;
+  const breakdown = await commissionBreakdownFor({
+    organisationId: session.orgId, userId: session.user.id, period: "month", periodStart: thisMonth,
+  });
 
   const [jobs, payouts] = await Promise.all([
     db.serviceJob.findMany({
@@ -78,6 +88,8 @@ export default async function EarningsPage() {
           <div className="mt-1 text-2xl font-bold">{formatRM(totalBonus)}</div>
         </div>
       </div>
+
+      <LedgerBreakdownCard breakdown={breakdown} lang={lang} />
 
       {toConfirm.length > 0 && (
         <div className="space-y-2">

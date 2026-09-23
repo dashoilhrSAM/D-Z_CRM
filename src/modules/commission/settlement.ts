@@ -90,6 +90,70 @@ export async function commissionFromLedger(args: {
   };
 }
 
+export interface LedgerBreakdownLine {
+  id: string;
+  kind: string;
+  amountSen: number;
+  baseSen: number;
+  basis: string;
+  reason: string | null;
+  earnedAt: Date;
+  windowKey: string;
+  /** 迟到的计提：时间落在本周期、归属窗口是更早的月份 */
+  late: boolean;
+  jobNumber: string | null;
+  description: string | null;
+}
+
+export interface LedgerBreakdown {
+  windowKey: string;
+  totals: WindowCommission;
+  lines: LedgerBreakdownLine[];
+}
+
+/**
+ * 「为什么是这个数」——把本周期参与结算的台账行摊开给人看（设计稿 §7：佣金系统的必需品）。
+ *
+ * 只列出**参与金额**的四种 kind（BASE / TIER_BONUS / ADJUSTMENT / REVERSAL）；
+ * PENDING 与 LEGACY 是 0 元痕迹，但**也要显示** —— 它们回答的是"这一行为什么没有钱"，
+ * 那正是技师最需要看到的答案（比多给一行金额更重要）。
+ */
+export async function commissionBreakdownFor(args: {
+  organisationId: string;
+  userId: string;
+  period: "day" | "week" | "month" | string;
+  periodStart: Date;
+}): Promise<LedgerBreakdown> {
+  const period = (args.period === "day" || args.period === "week" ? args.period : "month") as "day" | "week" | "month";
+  const { start, end } = periodWindow(period, args.periodStart);
+  const windowKey = windowKeyOf(start);
+  const totals = await commissionFromLedger(args);
+
+  const rows = await db.commissionLedger.findMany({
+    where: { organisationId: args.organisationId, userId: args.userId, earnedAt: { gte: start, lt: end } },
+    orderBy: { earnedAt: "asc" },
+  });
+  const jobIds = [...new Set(rows.map((r) => r.jobId).filter((v): v is string => !!v))];
+  const itemIds = [...new Set(rows.map((r) => r.jobItemId).filter((v): v is string => !!v))];
+  const [jobs, items] = await Promise.all([
+    jobIds.length ? db.serviceJob.findMany({ where: { id: { in: jobIds } }, select: { id: true, jobNumber: true } }) : Promise.resolve([]),
+    itemIds.length ? db.serviceJobItem.findMany({ where: { id: { in: itemIds } }, select: { id: true, description: true } }) : Promise.resolve([]),
+  ]);
+  const jobNo = new Map(jobs.map((j) => [j.id, j.jobNumber]));
+  const itemDesc = new Map(items.map((i) => [i.id, i.description]));
+
+  return {
+    windowKey,
+    totals,
+    lines: rows.map((r) => ({
+      id: r.id, kind: r.kind, amountSen: r.amountSen, baseSen: r.baseSen, basis: r.basis,
+      reason: r.reason, earnedAt: r.earnedAt, windowKey: r.windowKey, late: r.windowKey !== windowKey,
+      jobNumber: r.jobId ? jobNo.get(r.jobId) ?? null : null,
+      description: r.jobItemId ? itemDesc.get(r.jobItemId) ?? null : null,
+    })),
+  };
+}
+
 export type CommissionSource = "LEDGER" | "LEGACY" | "LOCKED";
 
 export interface PayoutCommissionDecision {
