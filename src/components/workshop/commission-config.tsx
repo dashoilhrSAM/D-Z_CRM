@@ -12,7 +12,7 @@ import { useLang } from "@/components/shared/language-context";
 import { t, type Lang } from "@/lib/i18n";
 import { upsertCommissionRule, setCommissionRuleActive, simulateCommission, type CommissionConfigItem, type CommissionRuleRow } from "@/actions/commission";
 
-// 佣金配置界面（P1）。
+// 佣金配置界面（P1）——**只管"逐项设置"**：试算器与奖励目标由页面分别摆放（页面负责顺序与分组）。
 //
 // 两个刻意的设计：
 //  ① **没配的排前面**（默认开启）：这一页的价值是「哪些还没配」，不是「看看我配了多少」。
@@ -96,40 +96,6 @@ export function CommissionConfigView({
         </div>
       )}
 
-      <Simulator items={items} />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("comm.search", lang)} className="pl-9" />
-        </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={unconfiguredFirst} onChange={(e) => setUnconfiguredFirst(e.target.checked)} className="h-4 w-4" />
-          {t("comm.unconfigured-first", lang)}
-        </label>
-      </div>
-
-      <Tabs defaultValue="PRODUCT">
-        <TabsList className="flex-wrap">
-          {SCOPES.map((s) => (
-            <TabsTrigger key={s} value={s}>
-              {SCOPE_LABEL[s]} ({counts[s].total - counts[s].missing}/{counts[s].total})
-            </TabsTrigger>
-          ))}
-        </TabsList>
-
-        {SCOPES.map((s) => (
-          <TabsContent key={s} value={s} className="mt-3">
-            <div className="rounded-2xl border bg-card divide-y">
-              {filterSort(s).length === 0 && <div className="p-4 text-sm text-muted-foreground">{t("comm.empty", lang)}</div>}
-              {filterSort(s).map((item) => (
-                <Row key={item.scope + item.key} item={item} canEdit={canEdit} pending={pending} start={start} lang={lang} />
-              ))}
-            </div>
-          </TabsContent>
-        ))}
-      </Tabs>
-
       {/* 全部规则（含已停用）：停用是"保留历史、不再生效"，所以必须能看见、也能重新启用 ——
           否则一次误停用就只能靠数据库改回来。 */}
       <details className="rounded-2xl border bg-card">
@@ -170,6 +136,45 @@ export function CommissionConfigView({
           })}
         </div>
       </details>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-semibold">{t("sec.peritem", lang)}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sec.peritem-hint", lang)}</p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t("comm.search", lang)} className="pl-9" />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={unconfiguredFirst} onChange={(e) => setUnconfiguredFirst(e.target.checked)} className="h-4 w-4" />
+          {t("comm.unconfigured-first", lang)}
+        </label>
+      </div>
+
+      <Tabs defaultValue="PRODUCT">
+        <TabsList className="flex-wrap">
+          {SCOPES.map((s) => (
+            <TabsTrigger key={s} value={s}>
+              {SCOPE_LABEL[s]} ({counts[s].total - counts[s].missing}/{counts[s].total})
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {SCOPES.map((s) => (
+          <TabsContent key={s} value={s} className="mt-3">
+            <div className="rounded-2xl border bg-card divide-y">
+              {filterSort(s).length === 0 && <div className="p-4 text-sm text-muted-foreground">{t("comm.empty", lang)}</div>}
+              {filterSort(s).map((item) => (
+                <Row key={item.scope + item.key} item={item} canEdit={canEdit} pending={pending} start={start} lang={lang} />
+              ))}
+            </div>
+          </TabsContent>
+        ))}
+        </Tabs>
+      </section>
     </div>
   );
 }
@@ -326,13 +331,52 @@ function Row({
 }
 
 /** 模拟器：拿一张「假设的工单明细」立刻看出每行佣金 —— 写规则之前先看结果，最省事故的一块。 */
-function Simulator({ items }: { items: CommissionConfigItem[] }) {
+/** 试算返回的一行（结构由服务端给出；界面只用不重算 —— 否则就是第二个实现，迟早与发薪漂移）。 */
+interface SimLevel {
+  scope: string;
+  covers: boolean;
+  ruleLabel: string | null;
+  amountSen: number | null;
+}
+interface SimLine {
+  baseSen: number;
+  qty: number;
+  matchedBy: string | null;
+  ruleLabel: string | null;
+  amountSen: number;
+  basis: string | null;
+  value: number | null;
+  valuePercent: number | null;
+  valueFixedSen: number | null;
+  levels: SimLevel[];
+  explanation: string;
+}
+
+const pctText = (v: number) => (v / 100).toFixed(2).replace(/\.00$/, "") + "%";
+
+/** 把佣金算式写成人话：按比例、按件固定、或两者组合。 */
+function formulaText(r: SimLine): string {
+  const base = "RM " + rmSen(r.baseSen);
+  if (r.basis === "FIXED") return "RM " + rmSen(r.value ?? 0) + " × " + r.qty + " = RM " + rmSen(r.amountSen);
+  if (r.basis === "COMBO")
+    return base + " × " + pctText(r.valuePercent ?? 0) + " + RM " + rmSen(r.valueFixedSen ?? 0) + " × " + r.qty + " = RM " + rmSen(r.amountSen);
+  return base + " × " + pctText(r.value ?? 0) + " = RM " + rmSen(r.amountSen);
+}
+
+/**
+ * 试算器。
+ *
+ * 老板的原话是「有点看不懂」。看不懂的通常不是那个数字，而是**这个数字怎么来的** ——
+ * 所以这里给三样东西：算式、命中的是哪一层规则、以及五层各自的解析结果。
+ * 上一层没配就往下找这件事，光看规则列表是看不出来的，必须画出来。
+ */
+export function Simulator({ items }: { items: CommissionConfigItem[] }) {
   const lang = useLang();
   const [pending, start] = useTransition();
   const [pick, setPick] = useState("");
   const [amount, setAmount] = useState("100");
   const [qty, setQty] = useState("1");
-  const [result, setResult] = useState<{ explanation: string; amountSen: number } | null>(null);
+  const [result, setResult] = useState<SimLine | null>(null);
 
   const options = items.filter((i) => i.scope !== "DEFAULT" && i.scope !== "CATEGORY");
 
@@ -347,37 +391,95 @@ function Simulator({ items }: { items: CommissionConfigItem[] }) {
             ? { serviceTypeId: item.key }
             : { packageId: item.key };
       const r = await simulateCommission([{ ...line, baseSen: Math.round(parseFloat(amount || "0") * 100), qty: Math.max(1, parseInt(qty || "1", 10)) }]);
-      if (r.ok && r.lines[0]) setResult({ explanation: r.lines[0].explanation, amountSen: r.lines[0].amountSen });
+      if (r.ok && r.lines[0]) setResult(r.lines[0]);
       else if (!r.ok) toast.error(r.error);
     });
 
   return (
-    <div className="rounded-2xl border bg-card p-4">
-      <h2 className="font-semibold">{t("comm.sim-title", lang)}</h2>
-      <p className="mt-1 text-xs text-muted-foreground">{t("comm.sim-desc", lang)}</p>
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        <select value={pick} onChange={(e) => setPick(e.target.value)} className="h-10 rounded-lg border bg-background px-3 text-sm md:col-span-2">
-          <option value="">{t("comm.sim-pick", lang)}</option>
-          {options.map((o) => (
-            <option key={o.scope + ":" + o.key} value={o.scope + ":" + o.key}>
-              {SCOPE_LABEL[o.scope]} · {o.name}
-            </option>
-          ))}
-        </select>
-        <Input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t("comm.sim-amount", lang)} inputMode="decimal" />
-        <Input value={qty} onChange={(e) => setQty(e.target.value)} placeholder={t("comm.sim-qty", lang)} inputMode="numeric" />
+    <div className="space-y-3">
+      <div className="grid gap-3 md:grid-cols-4">
+        <div className="md:col-span-2">
+          <Label className="text-xs">{t("comm.sim-pick", lang)}</Label>
+          <select
+            value={pick}
+            onChange={(e) => setPick(e.target.value)}
+            className="mt-1.5 h-10 w-full rounded-lg border bg-background px-3 text-sm"
+          >
+            <option value="">{t("comm.sim-pick", lang)}</option>
+            {options.map((o) => (
+              <option key={o.scope + ":" + o.key} value={o.scope + ":" + o.key}>
+                {SCOPE_LABEL[o.scope]} · {o.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label className="text-xs">{t("comm.sim-amount", lang)}</Label>
+          <Input value={amount} onChange={(e) => setAmount(e.target.value)} className="mt-1.5" inputMode="decimal" />
+        </div>
+        <div>
+          <Label className="text-xs">{t("comm.sim-qty", lang)}</Label>
+          <Input value={qty} onChange={(e) => setQty(e.target.value)} className="mt-1.5" inputMode="numeric" />
+        </div>
       </div>
-      <div className="mt-3 flex items-center gap-3">
+
+      <div className="flex flex-wrap items-center gap-3">
         <Button size="sm" onClick={run} disabled={pending || !pick}>
           {t("comm.sim-run", lang)}
         </Button>
-        {result && (
-          <span className="text-sm">
-            <span className="font-semibold text-emerald-600">RM {rmSen(result.amountSen)}</span>
-            <span className="ml-2 text-xs text-muted-foreground">{result.explanation}</span>
-          </span>
-        )}
+        <span className="text-xs text-muted-foreground">{t("sim.no-write", lang)}</span>
       </div>
+
+      {result && (
+        <div className="space-y-3 rounded-xl border bg-background/40 p-4">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            <span className="text-2xl font-bold text-emerald-600">RM {rmSen(result.amountSen)}</span>
+            <span className="text-sm text-muted-foreground">{t("sim.verdict", lang)}</span>
+          </div>
+
+          {result.matchedBy ? (
+            <dl className="grid gap-x-6 gap-y-1.5 text-sm md:grid-cols-2">
+              <SimFact label={t("sim.rule", lang)} value={(SCOPE_LABEL[result.matchedBy] ?? result.matchedBy) + " · " + (result.ruleLabel ?? "")} />
+              <SimFact label={t("sim.base", lang)} value={"RM " + rmSen(result.baseSen)} />
+              <SimFact label={t("comm.sim-qty", lang)} value={String(result.qty)} />
+              <SimFact label={t("sim.formula", lang)} value={formulaText(result)} />
+            </dl>
+          ) : (
+            <p className="text-sm text-amber-700">{t("sim.no-rule", lang)}</p>
+          )}
+
+          <div>
+            <div className="text-xs font-medium text-muted-foreground">{t("sim.levels", lang)}</div>
+            <ul className="mt-1.5 divide-y rounded-lg border bg-card">
+              {result.levels.map((l) => (
+                <li
+                  key={l.scope}
+                  className={"flex items-center gap-3 px-3 py-1.5 " + (l.scope === result.matchedBy ? "bg-emerald-500/5" : "")}
+                >
+                  <span className="w-20 shrink-0 text-xs font-medium">{SCOPE_LABEL[l.scope] ?? l.scope}</span>
+                  <span className="flex-1 text-xs text-muted-foreground">
+                    {l.covers ? (l.ruleLabel ?? "") + " → RM " + rmSen(l.amountSen ?? 0) : t("sim.level-none", lang)}
+                  </span>
+                  {l.scope === result.matchedBy && (
+                    <span className="text-xs font-medium text-emerald-700">{t("sim.level-used", lang)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">{t("sim.levels-hint", lang)}</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 试算结果里的一行「标签 — 值」。**放在组件外**：组件内定义子组件会让它每次渲染都是新类型。 */
+function SimFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="shrink-0 text-muted-foreground">{label}</dt>
+      <dd className="font-medium">{value}</dd>
     </div>
   );
 }

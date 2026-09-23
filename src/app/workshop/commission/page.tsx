@@ -3,7 +3,7 @@ import { can } from "@/lib/auth/permissions";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
 import { listCommissionConfig } from "@/actions/commission";
-import { CommissionConfigView } from "@/components/workshop/commission-config";
+import { CommissionConfigView, Simulator } from "@/components/workshop/commission-config";
 import { TierSetConfig } from "@/components/workshop/tier-set-config";
 import { listCommissionTierSets } from "@/actions/commission-tiers";
 import { listCommissionSwitches } from "@/actions/commission";
@@ -16,6 +16,11 @@ export const dynamic = "force-dynamic";
 
 /**
  * 佣金配置页（P1）。
+ *
+ * **页面顺序是刻意的**（2026-09-23 按老板反馈重排：「奖励目标和全部规则太下面，花很久才看到」）：
+ *   ① 怎么算（开关 + 本月成本）→ ② 先算一遍（试算器）→ ③ 奖励目标 → ④ 全部规则 → ⑤ 逐项设置。
+ *   先给"现在是什么样"，再给"改哪里"；最长的那张清单（82 个 SKU…）放最后，
+ *   因为它只是工作量，不是每次打开页面都要看的东西。
  *
  * 一行一个 SKU / 一个服务 / 一个套餐 / 一个分类 + 默认级，显示当前生效规则与**来源层级**。
  * 没配的排在前面 —— 这是一张待办清单，不是报表。编辑权限由矩阵 TECHNICIANS/edit 决定
@@ -46,6 +51,7 @@ export default async function CommissionPage() {
         <p className="text-sm text-muted-foreground mt-1">{t("comm.subtitle", lang)}</p>
       </div>
 
+      {/* ① 怎么算：业务开关（零件是否计佣 / 按原价还是实付）*/}
       {switches.ok && canEdit && <CommissionSwitches initial={switches.switches} />}
 
       {costWindow && (
@@ -64,14 +70,30 @@ export default async function CommissionPage() {
           )}
         </div>
       )}
+      {/* ② 先算一遍：试算器（与发薪共用同一个解析器）—— 老板反馈「有点看不懂」，所以这里讲算式与五层解析 */}
+      <section className="space-y-3">
+        <div>
+          <h2 className="font-semibold">{t("sec.sim", lang)}</h2>
+          <p className="mt-1 text-xs text-muted-foreground">{t("sec.sim-hint", lang)}</p>
+        </div>
+        <div className="rounded-2xl border bg-card p-4">
+          {data.ok ? (
+            <Simulator items={data.items} />
+          ) : (
+            <p className="text-sm text-destructive">{data.error}</p>
+          )}
+        </div>
+      </section>
+
+      {/* ③ 奖励目标（P3）：上移到「全部规则」之前 —— 它是"卖够多少再拿多少"，比逐项清单更常看 */}
+      {tierData.ok && canEdit && <TierSetConfig items={tierData.items} catalogue={tierData.catalogue} />}
+
+      {/* ④ 全部规则 + ⑤ 逐项设置（都在 CommissionConfigView 里：先给"配了什么"，再给"要配什么"）*/}
       {!data.ok ? (
         <div className="rounded-2xl border bg-card p-4 text-sm text-destructive">{data.error}</div>
       ) : (
         <CommissionConfigView items={data.items} rules={data.rules} conflicts={data.conflicts} canEdit={canEdit} />
       )}
-
-      {/* 阶梯组合（P3）：与基础规则同一页 —— "这单本来拿多少" 与 "卖够多少再拿多少" 是同一件事的两半 */}
-      {tierData.ok && canEdit && <TierSetConfig items={tierData.items} catalogue={tierData.catalogue} />}
     </div>
   );
 }
