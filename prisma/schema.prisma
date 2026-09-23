@@ -1838,3 +1838,17 @@ model CommissionClaim {
   @@unique([userId, tierId, windowKey])
   @@index([organisationId, userId, windowKey])
 }
+
+/// 发票计数器（2026-09-23）：发票号必须**原子**分配。
+///
+/// 为什么单独一张表：原来是 count(该年发票) + 1 —— 两个并发的完工事务读到同一个 count，
+/// 第二张发票撞唯一键，**整个完工事务回滚**（发票、收款、库存扣减、佣金、服务提醒一起没了）。
+/// 本项目早已写明「凡读出当前值 → 判断 → 写回，都必须原子写」，这里是漏网的一处。
+/// 另：count 还有一个隐患 —— 删掉一张发票会让号码回退、与既有发票重号。
+///
+/// 按**年份全局**编号（与既有发票号 DZ-YYYY-NNNNN 的语义一致：invoiceNumber 是全局唯一键）。
+model InvoiceCounter {
+  year  Int @id
+  /// 已发出的最后一个号码（不是「下一个」）—— 语义写清楚才不会在边界上出错
+  value Int
+}

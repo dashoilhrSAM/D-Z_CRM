@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { jobService } from "@/modules/service-jobs/service";
 import { inventoryService } from "@/modules/inventory/service";
@@ -8,6 +9,61 @@ import { promoDiscountForBill, readPromoSnapshot } from "@/modules/marketing/pro
 import { completionMessage } from "@/modules/messaging/completion-message";
 import { DEFAULT_SERVICE_INTERVAL_KM, AVG_KM_PER_MONTH } from "@/lib/constants";
 import { accrueForJob } from "@/modules/commission/engine";
+
+const INVOICE_PREFIX = "DZ-";
+/** 号码里的序号补零到 5 位 —— **必须补零**：invoiceNumber 是按字符串排序取最大号的，
+ *  不补零会让 "9" 排在 "10" 之后（本项目在别处已经栽过一次同样的坑）。 */
+const INVOICE_PAD = 5;
+
+/**
+ * 原子分配发票号（2026-09-23 修一个真 bug）。
+ *
+ * **原来是这样**：count(该年发票) + 1 —— 两个并发的完工事务会读到同一个 count，
+ * 第二张发票撞 invoiceNumber 唯一键，**整个完工事务回滚**（发票、收款、库存扣减、佣金、
+ * 服务提醒一起没了）。本项目早已写明「凡读出当前值 → 判断 → 写回，都必须原子写」，
+ * 这里是漏网的一处，而且是资金单据。
+ * count 还有第二个隐患：**删掉一张发票会让号码回退**、与既有发票重号。
+ *
+ * **现在**：一张按年份的计数器表，用 upsert 的 UPDATE 分支做 value = value + 1
+ * （Postgres/SQLite 都编译成 INSERT ... ON CONFLICT DO UPDATE，是原子的），
+ * 取号天然不重号、不需要重试；只有"计数器行第一次被创建"那一瞬间的并发会撞唯一键，
+ * 重试一次即可（那时对方已经建好，走 UPDATE 分支）。
+ *
+ * 为什么按**年份全局**而不是按组织：invoiceNumber 是全局唯一键，按组织分号会跨组织重号。
+ */
+/** 导出是为了让测试能直接钉住"唯一 + 单调 + 不回退"这三条契约（本地 sqlite 复现不了真实竞态）。 */
+export async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: number): Promise<string> {
+  const existing = await tx.invoiceCounter.findUnique({ where: { year } });
+  // 只在计数器还不存在时回看既有发票：**从最大号起步，绝不回退**（新建表那天必须接得上）
+  const start = existing ? existing.value : await maxIssuedInvoiceNumber(tx, year);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const row = await tx.invoiceCounter.upsert({
+        where: { year },
+        create: { year, value: start + 1 },
+        update: { value: { increment: 1 } },
+      });
+      return INVOICE_PREFIX + year + "-" + String(row.value).padStart(INVOICE_PAD, "0");
+    } catch (e) {
+      const code = e && typeof e === "object" && "code" in e ? (e as { code?: string }).code : null;
+      if (code !== "P2002") throw e; // 唯一键冲突 = 别人刚建好计数器行，重试走 UPDATE
+    }
+  }
+  throw new Error("Could not allocate an invoice number after 5 attempts");
+}
+
+/** 这一年已经发出去的最大号（没有就返回 0）。号码补零所以字符串排序等于数值排序。 */
+async function maxIssuedInvoiceNumber(tx: Prisma.TransactionClient, year: number): Promise<number> {
+  const prefix = INVOICE_PREFIX + year + "-";
+  const last = await tx.invoice.findFirst({
+    where: { invoiceNumber: { startsWith: prefix } },
+    orderBy: { invoiceNumber: "desc" },
+    select: { invoiceNumber: true },
+  });
+  if (!last) return 0;
+  const n = parseInt(last.invoiceNumber.slice(prefix.length), 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
 
 export interface CompletionResult {
   jobId: string;
@@ -90,8 +146,7 @@ export class CompletionService {
 
       // 2. Build the invoice
       const year = new Date().getFullYear();
-      const invCount = await tx.invoice.count({ where: { invoiceNumber: { startsWith: "DZ-" + year + "-" } } });
-      const invoiceNumber = "DZ-" + year + "-" + String(invCount + 1).padStart(5, "0");
+      const invoiceNumber = await nextInvoiceNumber(tx, year);
       const subtotal = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
       const cogs = acceptedParts.reduce((s, p) => s + p.unitCostSen * p.quantity, 0);
       // MKT-017: honour the promotional discount the customer was quoted. The amount was fixed
