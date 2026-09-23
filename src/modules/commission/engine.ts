@@ -56,7 +56,7 @@ export async function accrueForJob(
   const organisationId = job.branch.organisationId;
 
   const [org, rulesRaw] = await Promise.all([
-    tx.organisation.findUnique({ where: { id: organisationId }, select: { commissionOnGross: true } }),
+    tx.organisation.findUnique({ where: { id: organisationId }, select: { commissionOnGross: true, commissionOnParts: true } }),
     tx.commissionRule.findMany({ where: { organisationId, active: true } }),
   ]);
 
@@ -90,7 +90,8 @@ export async function accrueForJob(
   const summary: AccrualSummary = { ...EMPTY };
   // P3：件数要按作用域统计（单 SKU / 单个服务 / 一个分类 / 全店），所以每条台账行自带"这一行是什么"。
   // 分类不在工单行上（它属于商品/服务），所以这里把用到的商品与服务各自的分类读一次。
-  const productIds = [...new Set(billable.map((i) => i.productId).filter((v): v is string => !!v))];
+  // 零件的商品也要进这张表（零件行的分类要用来做 CATEGORY 作用域的阶梯统计）
+  const productIds = [...new Set([...billable.map((i) => i.productId), ...acceptedParts.map((p) => p.productId)].filter((v): v is string => !!v))];
   const serviceTypeIds = [...new Set(billable.map((i) => i.serviceTypeId).filter((v): v is string => !!v))];
   const [products, serviceTypes] = await Promise.all([
     productIds.length ? tx.product.findMany({ where: { id: { in: productIds } }, select: { id: true, category: true } }) : Promise.resolve([]),
@@ -100,7 +101,8 @@ export async function accrueForJob(
   const categoryOfService = new Map(serviceTypes.map((s) => [s.id, s.category]));
 
   const rows: {
-    jobItemId: string; kind: string; amountSen: number; basis: string; baseSen: number; qty: number;
+    jobItemId: string | null; jobPartId: string | null; kind: string; amountSen: number; basis: string;
+    baseSen: number; qty: number;
     ruleId: string | null; ruleSnapshot: string | null; reason: string | null;
     productId: string | null; serviceTypeId: string | null; category: string | null;
   }[] = [];
@@ -125,7 +127,7 @@ export async function accrueForJob(
       // 没有任何规则覆盖这一行 → 留一条金额 0 的 LEGACY 痕迹（钱仍由旧的人员级结算路径付，
       // 所以这里是 0 而不是"猜一个数"），并让它出现在对账报告的"未覆盖"清单里。
       rows.push({
-        jobItemId: item.id, kind: "LEGACY", amountSen: 0, basis: "LEGACY", baseSen, qty: item.quantity,
+        jobItemId: item.id, jobPartId: null, kind: "LEGACY", amountSen: 0, basis: "LEGACY", baseSen, qty: item.quantity,
         ruleId: null, ruleSnapshot: null, reason: "no commission rule covers this line — legacy per-staff settlement still applies",
         ...identity,
       });
@@ -133,14 +135,14 @@ export async function accrueForJob(
     }
     if (!job.mechanicId) {
       rows.push({
-        jobItemId: item.id, kind: "PENDING", amountSen: 0, basis: res.rule.basis, baseSen, qty: item.quantity,
+        jobItemId: item.id, jobPartId: null, kind: "PENDING", amountSen: 0, basis: res.rule.basis, baseSen, qty: item.quantity,
         ruleId: res.rule.id, ruleSnapshot: null, reason: "no mechanic assigned on completion",
         ...identity,
       });
       continue;
     }
     rows.push({
-      jobItemId: item.id, kind: "BASE", amountSen: res.amountSen, basis: res.rule.basis, baseSen, qty: item.quantity,
+      jobItemId: item.id, jobPartId: null, kind: "BASE", amountSen: res.amountSen, basis: res.rule.basis, baseSen, qty: item.quantity,
       ruleId: res.rule.id,
       // 规则快照：事后改规则不影响历史（与促销"报价即承诺"同一套原则）
       ruleSnapshot: JSON.stringify({
@@ -153,12 +155,63 @@ export async function accrueForJob(
     });
   }
 
+  // ── P4b：零件行（ServiceJobPart）────────────────────────────────────────────
+  //
+  // 零件行**有 productId**（目录身份完整），所以规则解析（PRODUCT 作用域）与 P3 的阶梯统计
+  // 都能照常工作 —— 之前不生效只是因为**没人读这张表**。
+  //
+  // 由 workshop 的开关决定（Organisation.commissionOnParts，默认开）：
+  //  · 开 = 零件与服务一样计提；
+  //  · 关 = **完全跳过**（不留任何台账行）—— 有意的：关掉时连 0 元痕迹都不该有，
+  //    否则对账会把它报成"未被规则覆盖"，那是噪声。
+  const billableParts = org?.commissionOnParts === false ? [] : acceptedParts.filter(isBillableLine);
+  for (const part of billableParts) {
+    // 折扣分摊的份额：shares 的前 acceptedItems.length 个是服务行，其余按 acceptedParts 顺序
+    const partIdx = acceptedParts.findIndex((p) => p.id === part.id);
+    const baseSen = netLineSen(part.lineTotalSen, shares[acceptedItems.length + partIdx] ?? 0);
+    const identity = {
+      productId: part.productId ?? null,
+      serviceTypeId: null,
+      category: part.productId ? categoryOfProduct.get(part.productId) ?? null : null,
+    };
+    const res = resolveCommissionRule(
+      { productId: part.productId, baseSen, qty: part.quantity },
+      rules,
+      earnedAt,
+    );
+    const common = { jobItemId: null, jobPartId: part.id, baseSen, qty: part.quantity, ...identity };
+    if (!res.ok) {
+      rows.push({
+        ...common, kind: "LEGACY", amountSen: 0, basis: "LEGACY",
+        ruleId: null, ruleSnapshot: null,
+        reason: "no commission rule covers this part line — legacy per-staff settlement still applies",
+      });
+      continue;
+    }
+    if (!job.mechanicId) {
+      rows.push({
+        ...common, kind: "PENDING", amountSen: 0, basis: res.rule.basis,
+        ruleId: res.rule.id, ruleSnapshot: null, reason: "no mechanic assigned on completion",
+      });
+      continue;
+    }
+    rows.push({
+      ...common, kind: "BASE", amountSen: res.amountSen, basis: res.rule.basis, ruleId: res.rule.id,
+      ruleSnapshot: JSON.stringify({
+        scope: res.rule.scope, targetKey: res.rule.targetKey, basis: res.rule.basis,
+        value: res.rule.value, valuePercent: res.rule.valuePercent, valueFixedSen: res.rule.valueFixedSen,
+        matchedBy: res.matchedBy,
+      }),
+      reason: res.ambiguous ? "AMBIGUOUS: several rules were in force at this moment" : null,
+    });
+  }
+
   for (const r of rows) {
     try {
       await tx.commissionLedger.create({
         data: {
           organisationId, branchId: job.branchId, userId: job.mechanicId ?? "UNASSIGNED",
-          jobId: job.id, jobItemId: r.jobItemId, invoiceId: invoice.id,
+          jobId: job.id, jobItemId: r.jobItemId, jobPartId: r.jobPartId, invoiceId: invoice.id,
           kind: r.kind, amountSen: r.amountSen, basis: r.basis, baseSen: r.baseSen, qty: r.qty,
           ruleId: r.ruleId, ruleSnapshot: r.ruleSnapshot, reason: r.reason,
           productId: r.productId, serviceTypeId: r.serviceTypeId, category: r.category,

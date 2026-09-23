@@ -125,6 +125,12 @@ export const DICT: Dict = {
   // P3：技师的阶梯奖励面板（/mechanic-app/earnings）
   "reward.title": { en: "Reward progress", zh: "奖励进度", ms: "Kemajuan Ganjaran" },
   // P3：阶梯组合的管理界面（/workshop/commission）
+  "sw.title": { en: "How commission is calculated", zh: "佣金怎么算（业务开关）", ms: "Cara komisen dikira" },
+  "sw.parts": { en: "Parts earn commission", zh: "零件也计佣", ms: "Alat ganti juga dikira komisen" },
+  "sw.parts-hint": { en: "On: part lines (ServiceJobPart) earn like services. Off: parts earn nothing at all — no ledger row is written.", zh: "开：零件行与服务一样计提。关：零件完全不计佣（连台账痕迹都不留）。", ms: "Hidup: alat ganti dikira seperti servis. Mati: alat ganti tidak dikira langsung." },
+  "sw.gross": { en: "Calculate on the full price (ignore discounts)", zh: "按原价算（不看折扣）", ms: "Kira atas harga penuh" },
+  "sw.gross-hint": { en: "Off (default): commission follows what the customer actually paid, so a discount reduces it. On: discounts are treated as the shop's cost, not the mechanic's.", zh: "关（默认）：佣金按客户实付算，折扣会摊到技师头上。开：折扣算店的成本，不摊给技师。", ms: "Mati (lalai): komisen ikut bayaran sebenar pelanggan." },
+  "sw.saved": { en: "Saved", zh: "已保存", ms: "Disimpan" },
   "comm.cost-title": { en: "Commission cost this month ({window})", zh: "本月佣金成本（{window}）", ms: "Kos komisen bulan ini ({window})" },
   "comm.cost-line": { en: "{commission} commission on {revenue} revenue", zh: "{commission} 佣金 / {revenue} 营业额", ms: "{commission} komisen atas {revenue} hasil" },
   "comm.cost-none": { en: "No commission has accrued this month yet — jobs completed from now on are counted automatically. Jobs finished before the ledger existed stay on the old per-staff scheme.", zh: "本月还没有计提佣金 —— 之后完工的工单会自动计入。台账上线前完工的历史工单仍按旧的人员级口径发放。", ms: "Belum ada komisen diakru bulan ini." },

@@ -268,6 +268,51 @@ export async function setCommissionRuleActive(id: string, active: boolean) {
 }
 
 /** 模拟器：给几行明细，算出每行的佣金与「为什么是这个数」。 */
+/**
+ * 两个「佣金怎么算」的业务开关（按本项目约定：营收相关行为一律放 Organisation 字段 + 页面开关，
+ * 不写死源码常量）。
+ *
+ *  · onParts：零件（ServiceJobPart）是否计佣。默认开。关掉后零件完全不计提（连 0 元痕迹都不留）。
+ *  · onGross：佣金按**原价**算还是按**客户实付**算。默认按实付（折扣由店承担）。
+ *
+ * 为什么要有界面：这两个开关原本只存在于数据库字段里 —— onGross 从 P2 起就没被人看见过，
+ * 等于「留了个口子但没人能用」。开关必须能被业务方按到，否则它和不存在没区别。
+ */
+export async function listCommissionSwitches() {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user) return { ok: false as const, error: "Not signed in" };
+  const org = await db.organisation.findUnique({
+    where: { id: session.orgId },
+    select: { commissionOnParts: true, commissionOnGross: true },
+  });
+  return { ok: true as const, switches: { onParts: org?.commissionOnParts ?? true, onGross: org?.commissionOnGross ?? false } };
+}
+
+export async function setCommissionSwitch(input: { key: "PARTS" | "GROSS"; active: boolean }) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user) return { ok: false as const, error: "Not signed in" };
+  const allowed = await can(
+    { id: session.user.id, role: session.role as never, organisationId: session.orgId },
+    "TECHNICIANS",
+    "edit",
+  );
+  if (!allowed) return { ok: false as const, error: "No permission to change commission settings" };
+
+  const data = input.key === "PARTS" ? { commissionOnParts: !!input.active } : { commissionOnGross: !!input.active };
+  const before = await db.organisation.findUnique({
+    where: { id: session.orgId },
+    select: { commissionOnParts: true, commissionOnGross: true },
+  });
+  await db.organisation.update({ where: { id: session.orgId }, data });
+  await audit({
+    organisationId: session.orgId, branchId: session.branchId, userId: session.user.id,
+    action: "COMMISSION_SWITCH_SET", entity: "Organisation", entityId: session.orgId,
+    before: before ?? undefined, after: { ...data },
+  });
+  revalidatePath("/workshop/commission");
+  return { ok: true as const };
+}
+
 export async function simulateCommission(lines: { productId?: string | null; serviceTypeId?: string | null; packageId?: string | null; category?: string | null; baseSen: number; qty: number }[]) {
   const session = await getSessionUser();
   if (session.kind !== "staff" || !session.user) return { ok: false as const, error: "Not signed in" };
