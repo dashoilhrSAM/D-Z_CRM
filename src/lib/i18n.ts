@@ -166,6 +166,8 @@ export const DICT: Dict = {
   "reward.units-short": { en: "{n} units", zh: "{n} 件", ms: "{n} unit" },
   "reward.remaining": { en: "{n} more to trigger the next reward", zh: "再 {n} 件触发下一档", ms: "{n} lagi untuk picu ganjaran seterusnya" },
   "reward.tier": { en: "at {qty} units", zh: "满 {qty} 件", ms: "pada {qty} unit" },
+  "reward.per-unit": { en: "{amount} / unit", zh: "每件 {amount}", ms: "{amount} / unit" },
+  "reward.free-units": { en: "{n} free units", zh: "送 {n} 件", ms: "{n} unit percuma" },
   "reward.claim": { en: "Claim", zh: "领取", ms: "Tuntut" },
   "reward.claimed": { en: "Claimed — paid with this month's settlement", zh: "已领取 — 随本月结算发放", ms: "Dituntut - dibayar dengan penyelesaian bulan ini" },
   "reward.not-yet": { en: "Not reached yet", zh: "还没达标", ms: "Belum dicapai" },

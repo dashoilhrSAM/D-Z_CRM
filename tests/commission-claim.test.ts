@@ -115,6 +115,18 @@ describe("面板：可领取状态是推导出来的", () => {
     expect(set.nextTier?.thresholdQty).toBe(20);
   });
 
+  it("**未达标时显示配置值，而不是 RM0**（生产上就是这么露出来的）", async () => {
+    // bug 现场：面板上写着「满 10 件 · RM0」——技师会以为这奖励一文不值。
+    // 原因是我把「实际会发的数」与「配置里写的数」混成了一个字段，未达标时回落成 0。
+    // 这条测试把两种口径钉死：amountSen 只在可领取时有值，否则必须是 null，
+    // 界面据此回退到 rewardValue（配置值）。
+    const panel = await tierPanelFor(orgId, mechB, NOW);
+    const tier = panel.sets.find((s) => s.tierSetId === tierSetId)!.tiers.find((x) => x.tierId === tier10)!;
+    expect(tier.claimable).toBe(false);
+    expect(tier.amountSen).toBeNull();
+    expect(tier.rewardValue).toBe(5000);
+  });
+
   it("只卖 9 件的技师什么都领不到（差一件就是差一件）", async () => {
     const panel = await tierPanelFor(orgId, mechB, NOW);
     expect(panel.claimableTotalSen).toBe(0);
