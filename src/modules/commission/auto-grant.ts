@@ -16,6 +16,19 @@ export interface AutoGrantResult {
   users: number;
 }
 
+/** 遍历所有组织各跑一次（cron / 脚本用）。 */
+export async function autoGrantAllOrganisations(now = new Date()): Promise<{ organisations: number; granted: number; totalSen: number }> {
+  const orgs = await db.organisation.findMany({ select: { id: true } });
+  let granted = 0;
+  let totalSen = 0;
+  for (const org of orgs) {
+    const res = await autoGrantExpiredTiers({ organisationId: org.id, now });
+    granted += res.granted;
+    totalSen += res.totalSen;
+  }
+  return { organisations: orgs.length, granted, totalSen };
+}
+
 /**
  * 把上一个窗口里「达标但没领」的阶梯奖励补发掉。
  * 幂等：CommissionClaim 的 (userId, tierId, windowKey) 唯一键兜住 —— 重复调用只会撞键。

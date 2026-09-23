@@ -50,11 +50,14 @@ function toLikes(rows: { id: string; userId: string; kind: string; qty: number; 
 }
 
 async function loadContext(organisationId: string, userId: string, windowKey: string) {
-  const [rows, tierSetsRaw, tiersRaw, claims, rulesRaw, products, serviceTypes] = await Promise.all([
+  const [rows, tierSetsRaw, tiersRaw, claims, allClaims, rulesRaw, products, serviceTypes] = await Promise.all([
     db.commissionLedger.findMany({ where: { organisationId, userId, windowKey } }),
     db.commissionTierSet.findMany({ where: { organisationId, active: true }, include: { tiers: true } }),
     db.commissionTier.findMany({ where: { tierSet: { organisationId } } }),
-    db.commissionClaim.findMany({ where: { organisationId, userId, windowKey } }),
+    // 当前窗口的领取（用来判定"还能不能领"）与**全部窗口的领取**（用来显示历史）分开取：
+    // 只查当前窗口会让月初一看历史空掉 —— 而"往期领过什么"正是技师最想核对的。
+    db.commissionClaim.findMany({ where: { organisationId, userId, windowKey }, orderBy: { claimedAt: "desc" }, take: 50 }),
+    db.commissionClaim.findMany({ where: { organisationId, userId }, orderBy: { claimedAt: "desc" }, take: 50 }),
     db.commissionRule.findMany({ where: { organisationId, active: true } }),
     db.product.findMany({ where: { organisationId }, select: { id: true, name: true } }),
     db.serviceType.findMany({ where: { organisationId }, select: { id: true, name: true } }),
@@ -71,13 +74,13 @@ async function loadContext(organisationId: string, userId: string, windowKey: st
     valuePercent: r.valuePercent, valueFixedSen: r.valueFixedSen,
     effectiveFrom: r.effectiveFrom, effectiveTo: r.effectiveTo, priority: r.priority, active: r.active,
   }));
-  return { ledgerRows: toLikes(rows), tierSets, tiers, claims, rules, products, serviceTypes };
+  return { ledgerRows: toLikes(rows), tierSets, tiers, claims, allClaims, rules, products, serviceTypes };
 }
 
 /** 面板数据（技师自己看自己）。 */
 export async function tierPanelFor(organisationId: string, userId: string, now = new Date()): Promise<TierPanel> {
   const windowKey = windowKeyFor("MONTH", now);
-  const { ledgerRows, tierSets, tiers, claims, rules, products, serviceTypes } = await loadContext(organisationId, userId, windowKey);
+  const { ledgerRows, tierSets, tiers, claims, allClaims, rules, products, serviceTypes } = await loadContext(organisationId, userId, windowKey);
   const claimedTierIds = claims.map((c) => c.tierId);
   const claimable = claimableTiers({ rows: ledgerRows, tierSets, tiers, claimedTierIds, userId, windowKey });
   const nameOf = (set: TierSetLike) => {
@@ -126,7 +129,7 @@ export async function tierPanelFor(organisationId: string, userId: string, now =
     };
   });
 
-  const history = claims
+  const history = allClaims
     .map((c) => ({
       id: c.id,
       tierSetName: tierSets.find((s) => s.id === c.tierSetId)?.name ?? c.tierSetId,
