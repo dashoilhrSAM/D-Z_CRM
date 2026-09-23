@@ -9,6 +9,7 @@ import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/format";
+import { runCommissionReconciliation } from "@/modules/commission/reconcile";
 
 export const dynamic = "force-dynamic";
 
@@ -30,11 +31,36 @@ export default async function SettlementsPage({ searchParams }: { searchParams: 
   const [result, history] = await Promise.all([staffService.settlementByDay(days, undefined, scopedBranchId(session)), staffService.payoutHistory(scopedBranchId(session))]);
   const foremen = isMechanic && session.user ? result.foremen.filter((f) => f.id === session.user!.id) : result.foremen;
 
+  // 对账横幅（设计稿 §4.5：不变量不成立时页面顶部提示 —— "不给'就这样付了'的机会"）。
+  // 两条注意事项：
+  //  ① 报表**绝不能把被它报告的页面搞挂**，所以包 try/catch；
+  //  ② 但**也不能静默**：检查本身失败时要显示"检查失败"，而不是装作一切正常 ——
+  //     否则这个横幅就成了新的"看起来没事"。
+  let recon = { ok: true, hardFailures: [] as string[] };
+  try {
+    const r = await runCommissionReconciliation({ organisationId: session.orgId });
+    recon = { ok: r.ok, hardFailures: r.hardFailures };
+  } catch (e) {
+    recon = { ok: false, hardFailures: ["对账检查本身失败了：" + (e instanceof Error ? e.message : String(e))] };
+  }
+
   const qs = (d: string) => "/workshop/settlements?days=" + d;
 
   return (
     <div>
       <PageHeader title={t("settle.title", lang)} subtitle={t("settle.subtitle", lang)} />
+
+      {!recon.ok && (
+        <div className="mb-4 rounded-2xl border border-red-500/40 bg-red-500/5 p-4">
+          <div className="font-semibold text-red-600">{t("recon.banner-title", lang)}</div>
+          <p className="mt-1 text-sm text-muted-foreground">{t("recon.banner-body", lang)}</p>
+          <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-muted-foreground">
+            {recon.hardFailures.slice(0, 4).map((h, i) => (
+              <li key={i}>{h}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {!isMechanic && (
         <details className="mb-4 rounded-2xl border bg-card open:ring-2 open:ring-primary/20">
