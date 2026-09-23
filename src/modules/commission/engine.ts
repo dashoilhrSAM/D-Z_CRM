@@ -13,7 +13,10 @@ import { resolveCommissionRule, type CommissionRuleLike } from "@/lib/commission
 //     进入"待归属"清单；工头补指派后重跑本函数会补上正式 BASE 行（PENDING 行保留作历史痕迹）。
 
 /** 引擎需要的最小事务接口（完工事务里的 tx，或测试里的 PrismaClient）。 */
-export type CommissionTx = Pick<Prisma.TransactionClient, "serviceJob" | "commissionRule" | "commissionLedger" | "organisation">;
+export type CommissionTx = Pick<
+  Prisma.TransactionClient,
+  "serviceJob" | "commissionRule" | "commissionLedger" | "organisation" | "product" | "serviceType"
+>;
 
 export interface AccrualSummary {
   /** 写入的正式计提行数（kind=BASE） */
@@ -85,13 +88,31 @@ export async function accrueForJob(
   };
 
   const summary: AccrualSummary = { ...EMPTY };
+  // P3：件数要按作用域统计（单 SKU / 单个服务 / 一个分类 / 全店），所以每条台账行自带"这一行是什么"。
+  // 分类不在工单行上（它属于商品/服务），所以这里把用到的商品与服务各自的分类读一次。
+  const productIds = [...new Set(billable.map((i) => i.productId).filter((v): v is string => !!v))];
+  const serviceTypeIds = [...new Set(billable.map((i) => i.serviceTypeId).filter((v): v is string => !!v))];
+  const [products, serviceTypes] = await Promise.all([
+    productIds.length ? tx.product.findMany({ where: { id: { in: productIds } }, select: { id: true, category: true } }) : Promise.resolve([]),
+    serviceTypeIds.length ? tx.serviceType.findMany({ where: { id: { in: serviceTypeIds } }, select: { id: true, category: true } }) : Promise.resolve([]),
+  ]);
+  const categoryOfProduct = new Map(products.map((p) => [p.id, p.category]));
+  const categoryOfService = new Map(serviceTypes.map((s) => [s.id, s.category]));
+
   const rows: {
     jobItemId: string; kind: string; amountSen: number; basis: string; baseSen: number; qty: number;
     ruleId: string | null; ruleSnapshot: string | null; reason: string | null;
+    productId: string | null; serviceTypeId: string | null; category: string | null;
   }[] = [];
 
   for (const item of billable) {
     const baseSen = netLineSen(item.lineTotalSen, itemShareOf(item.id));
+    // 这一行的"身份"：给阶梯统计用（P3）。
+    const identity = {
+      productId: item.productId ?? null,
+      serviceTypeId: item.serviceTypeId ?? null,
+      category: (item.productId ? categoryOfProduct.get(item.productId) : null) ?? (item.serviceTypeId ? categoryOfService.get(item.serviceTypeId) : null) ?? null,
+    };
     const res = resolveCommissionRule(
       {
         productId: item.productId, serviceTypeId: item.serviceTypeId, packageId: item.packageId,
@@ -106,6 +127,7 @@ export async function accrueForJob(
       rows.push({
         jobItemId: item.id, kind: "LEGACY", amountSen: 0, basis: "LEGACY", baseSen, qty: item.quantity,
         ruleId: null, ruleSnapshot: null, reason: "no commission rule covers this line — legacy per-staff settlement still applies",
+        ...identity,
       });
       continue;
     }
@@ -113,6 +135,7 @@ export async function accrueForJob(
       rows.push({
         jobItemId: item.id, kind: "PENDING", amountSen: 0, basis: res.rule.basis, baseSen, qty: item.quantity,
         ruleId: res.rule.id, ruleSnapshot: null, reason: "no mechanic assigned on completion",
+        ...identity,
       });
       continue;
     }
@@ -126,6 +149,7 @@ export async function accrueForJob(
         matchedBy: res.matchedBy,
       }),
       reason: res.ambiguous ? "AMBIGUOUS: several rules were in force at this moment" : null,
+      ...identity,
     });
   }
 
@@ -137,6 +161,7 @@ export async function accrueForJob(
           jobId: job.id, jobItemId: r.jobItemId, invoiceId: invoice.id,
           kind: r.kind, amountSen: r.amountSen, basis: r.basis, baseSen: r.baseSen, qty: r.qty,
           ruleId: r.ruleId, ruleSnapshot: r.ruleSnapshot, reason: r.reason,
+          productId: r.productId, serviceTypeId: r.serviceTypeId, category: r.category,
           actorUserId: opts.actorUserId ?? null, earnedAt, windowKey,
         },
       });

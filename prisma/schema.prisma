@@ -1755,6 +1755,12 @@ model CommissionLedger {
   qty            Int      @default(1)
   ruleId         String?
   ruleSnapshot   String?  // 规则内容快照：事后改规则不影响历史
+  /// P3：件数要按作用域统计（单 SKU / 单个服务 / 一个分类 / 全店），所以台账行必须自带
+  /// "这一行是什么" —— 与 ruleSnapshot 同一个道理：统计不该再去 join 工单行（那行可能被改，
+  /// 而台账是既成事实）。三列都可空：历史行与未链接行本来就是空的。
+  productId      String?
+  serviceTypeId  String?
+  category       String?
   tierSetId      String?
   tierSnapshot   String?
   reason         String?  // 人工调整/冲正/PENDING 的原因
@@ -1768,4 +1774,59 @@ model CommissionLedger {
   @@index([organisationId, userId, windowKey])
   @@index([jobId])
   @@index([invoiceId])
+}
+
+/// 阶梯组合（P3）：一个组合绑定一个作用域（单 SKU / 单个服务 / 一个分类 / 全店），内含若干档。
+///
+/// **刻意不存"当前件数"计数器**：件数一律从台账推导（窗口内 BASE 行的合计）。
+/// 计数器 + 定时清零是这类系统最经典的事故源（漏跑一次就算错，而且没人会发现）；
+/// 窗口天然切换则让"重置"这件事在架构上不存在。
+model CommissionTierSet {
+  id             String   @id @default(cuid())
+  organisationId String
+  name           String   // 如 "机油买十送二"
+  scope          String   // PRODUCT | SERVICE | CATEGORY | ALL
+  targetId       String?  // scope 对应的对象（ALL 为 null）
+  windowKind     String   @default("MONTH") // MONTH（按门店时区 MYT 自然月）
+  countUnit      String   @default("ITEM_QTY") // ITEM_QTY（件）| LINE_COUNT（行）
+  rewardKind     String   // ONE_OFF_FIXED | EXTRA_PER_UNIT_FIXED | FREE_UNIT_COMMISSION
+  /// EXTRA_PER_UNIT_FIXED 的追溯开关：true = 窗口内**全部**合格件都算，false = 只算跨过门槛之后的新件。
+  retroactive    Boolean  @default(true)
+  active         Boolean  @default(true)
+  effectiveFrom  DateTime @default(now())
+  effectiveTo    DateTime?
+  createdAt      DateTime @default(now())
+  tiers          CommissionTier[]
+
+  @@index([organisationId, active])
+}
+
+/// 组合里的一档：达到 thresholdQty 件时触发，rewardValue 按组合的 rewardKind 解释。
+model CommissionTier {
+  id           String @id @default(cuid())
+  tierSetId    String
+  tierSet      CommissionTierSet @relation(fields: [tierSetId], references: [id], onDelete: Cascade)
+  thresholdQty Int    // 达到多少件触发（含）
+  rewardValue  Int    // sen（一次性/每件固定）
+  note         String?
+  @@unique([tierSetId, thresholdQty])
+}
+
+/// 领取记录（P3）：**"可领取"是推导出来的，不是存出来的**——
+/// 窗口内该技师有效件数 ≥ thresholdQty 且这里没有对应行 = 可领取。
+/// 唯一键保证"同一人同一档同一窗口只能领一次"，于是不存在"状态字段忘了改"这种可能。
+model CommissionClaim {
+  id             String   @id @default(cuid())
+  organisationId String
+  userId         String
+  tierSetId      String
+  tierId         String
+  windowKey      String   // 归属窗口，如 "2026-09"
+  claimedQty     Int      // 领取时的窗口件数快照（用于解释与争议）
+  amountSen      Int      // 领取时算出的金额快照
+  ledgerId       String?  // 生成的台账行（TIER_BONUS）
+  claimedAt      DateTime @default(now())
+
+  @@unique([userId, tierId, windowKey])
+  @@index([organisationId, userId, windowKey])
 }
