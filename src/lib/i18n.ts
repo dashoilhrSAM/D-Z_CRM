@@ -125,6 +125,8 @@ export const DICT: Dict = {
   // P3：技师的阶梯奖励面板（/mechanic-app/earnings）
   "reward.title": { en: "Reward progress", zh: "奖励进度", ms: "Kemajuan Ganjaran" },
   // P3：阶梯组合的管理界面（/workshop/commission）
+  "recon.banner-title": { en: "Settlement data needs review", zh: "结算数据待复核", ms: "Data penyelesaian perlu disemak" },
+  "recon.banner-body": { en: "The commission ledger and the payslips do not agree. Paying out before this is resolved would put a wrong number on a payslip.", zh: "佣金台账与工资单对不上。在弄清楚之前出粮，会把错的数字写进工资单。", ms: "Lejar komisen dan slip gaji tidak sepadan. Membayar sebelum ini diselesaikan akan meletakkan angka yang salah pada slip gaji." },
   "tier.title": { en: "Reward targets", zh: "奖励目标", ms: "Sasaran ganjaran" },
   "tier.hint": { en: "Buy N, get extra — the mechanic sees progress and claims it.", zh: "买满 N 件额外奖励——技师在面板看到进度并自己领取。", ms: "Beli N, dapat tambahan - juruteknik nampak kemajuan dan menuntutnya." },
   "tier.new": { en: "New target", zh: "新建目标", ms: "Sasaran baru" },
