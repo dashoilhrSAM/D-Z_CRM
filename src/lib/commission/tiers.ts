@@ -61,6 +61,16 @@ export function windowKeyFor(windowKind: string, at: Date): string {
   throw new Error("Unsupported tier windowKind: " + windowKind);
 }
 
+/**
+ * 上一个窗口键（目前只支持按月）。窗口结束后的「未领取自动补发」要用它 ——
+ * 刻意不做成"减去 30 天"：那会漂移成两个月或同一个月的边界错误。
+ */
+export function previousWindowKey(windowKey: string): string {
+  const [y, m] = windowKey.split("-").map(Number);
+  if (!y || !m) throw new Error("Bad windowKey: " + windowKey);
+  return m === 1 ? String(y - 1) + "-12" : String(y) + "-" + String(m - 1).padStart(2, "0");
+}
+
 /** 这一条台账行是否在这个组合的作用域里。 */
 export function rowMatchesScope(row: LedgerUnitLike, tierSet: TierSetLike): boolean {
   const key = tierSet.targetId;
