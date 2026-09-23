@@ -10,7 +10,7 @@ export const WORKBOOK_VERSION = 1;
 /** 版本写在隐藏 sheet 里；不匹配就拒绝导入，而不是按错误的列去解析。 */
 export const META_SHEET = "_meta";
 
-export type FieldType = "text" | "int" | "money" | "bool" | "enum";
+export type FieldType = "text" | "int" | "money" | "bool" | "enum" | "date";
 
 export interface ColumnDef {
   /** 英文表头（与模板一致） */
@@ -30,11 +30,29 @@ export interface SheetDef {
   key: string;
   /** sheet 名（与模板一致；解析时按前缀匹配，容忍老板改后缀） */
   title: string;
+  /** 主键字段（显示用） */
   keyField: string;
+  /** 复合键的其余字段 —— 例如套餐明细的行由「套餐名 + 项目名」唯一确定 */
+  extraKeyFields?: string[];
   keyHeader: string;
   columns: ColumnDef[];
   /** 是否允许整行删除（明细类不允许独立删，只能随主表走） */
   allowDelete: boolean;
+  /** 这一张 sheet 是否按分店（套餐/促销是；零件不是） */
+  branchScoped?: boolean;
+}
+
+/** 该 sheet 的完整键字段列表 */
+export function keyFieldsOf(def: SheetDef): string[] {
+  return [def.keyField, ...(def.extraKeyFields ?? [])];
+}
+
+/** 把一行拼成可比较的键字符串（显示与匹配都用它） */
+export function keyOf(def: SheetDef, values: Record<string, unknown>): string {
+  return keyFieldsOf(def)
+    .map((f) => String(values[f] ?? "").trim())
+    .filter((v) => v !== "")
+    .join(" / ");
 }
 
 const UNIT_NOTE = "unit / set / litre / piece / box";
@@ -45,6 +63,7 @@ export const PRODUCTS_SHEET: SheetDef = {
   keyField: "sku",
   keyHeader: "SKU",
   allowDelete: true,
+  branchScoped: false, // 零件是组织级（SKU 全局唯一）
   columns: [
     { header: "SKU", zh: "SKU", field: "sku", type: "text", required: true },
     { header: "Name", zh: "名称", field: "name", type: "text", required: true },
@@ -69,6 +88,8 @@ export const PACKAGES_SHEET: SheetDef = {
   keyField: "name",
   keyHeader: "Package Name",
   allowDelete: true,
+  // 套餐按分店存 —— 导出的文件里会写明是哪个分店（见 meta sheet），导入时以文件里的分店为准
+  branchScoped: true,
   columns: [
     { header: "Package Name", zh: "套餐名称", field: "name", type: "text", required: true },
     {
@@ -87,9 +108,14 @@ export const PACKAGES_SHEET: SheetDef = {
 export const PACKAGE_ITEMS_SHEET: SheetDef = {
   key: "packageItems",
   title: "套餐明细 Items",
-  keyField: "itemName",
-  keyHeader: "Item Name",
+  // 明细的唯一键是「套餐名 + 项目名」：不同套餐里允许有同名项目。
+  // **顺序按人的读法**（先套餐后项目）—— 顺序反了会让"拆键"的代码拿到错的段
+  // （实测就是因为反了，报出 Unknown package: Oil change）。
+  keyField: "packageName",
+  extraKeyFields: ["itemName"],
+  keyHeader: "Package Name",
   allowDelete: true,
+  branchScoped: true,
   columns: [
     { header: "Package Name", zh: "套餐名称", field: "packageName", type: "text", required: true },
     { header: "Item Name", zh: "项目名称", field: "itemName", type: "text", required: true },
@@ -103,7 +129,32 @@ export const PACKAGE_ITEMS_SHEET: SheetDef = {
   ],
 };
 
-export const SHEETS: SheetDef[] = [PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET];
+export const CAMPAIGNS_SHEET: SheetDef = {
+  key: "campaigns",
+  title: "促销 Campaigns",
+  keyField: "name",
+  keyHeader: "Campaign Name",
+  allowDelete: true,
+  branchScoped: true,
+  columns: [
+    { header: "Campaign Name", zh: "促销名称", field: "name", type: "text", required: true },
+    {
+      header: "Type", zh: "类型", field: "type", type: "enum", required: true,
+      enumMap: { return: "RETURN", reminder: "REMINDER", promo: "PROMO", news: "NEWS", "回访": "RETURN", "提醒": "REMINDER", "促销": "PROMO", "消息": "NEWS" },
+    },
+    {
+      header: "Status", zh: "状态", field: "status", type: "enum", required: true,
+      enumMap: { draft: "DRAFT", scheduled: "SCHEDULED", active: "ACTIVE", ended: "ENDED", "草稿": "DRAFT", "已排期": "SCHEDULED", "进行中": "ACTIVE", "已结束": "ENDED" },
+    },
+    { header: "Start Date", zh: "开始日期", field: "startDate", type: "date", required: true, note: "YYYY-MM-DD" },
+    { header: "End Date", zh: "结束日期", field: "endDate", type: "date", note: "留空=长期" },
+    { header: "Discount %", zh: "折扣%", field: "discountPercent", type: "int", note: "PROMO 用；1-100" },
+    { header: "Points Bonus", zh: "积分奖励", field: "pointsBonus", type: "int" },
+    { header: "Audience", zh: "受众代码", field: "audience", type: "text", note: "ALL / NEW / 30_DAYS / 60_DAYS / OVERDUE" },
+  ],
+};
+
+export const SHEETS: SheetDef[] = [PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET];
 
 export function sheetByKey(key: string): SheetDef | undefined {
   return SHEETS.find((s) => s.key === key);

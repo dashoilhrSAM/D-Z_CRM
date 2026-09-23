@@ -1,4 +1,4 @@
-import type { ColumnDef, SheetDef } from "./sheets";
+import { keyOf, type ColumnDef, type SheetDef } from "./sheets";
 
 /**
  * 工作簿导入的**差异计算**（纯函数 —— 不碰数据库，所以每一条安全规则都能被单测钉住）。
@@ -98,6 +98,15 @@ export function cellToValue(col: ColumnDef, raw: unknown): { ok: true; value: un
       if (b === null) return { ok: false, error: "expected Yes/No, got " + String(raw) };
       return { ok: true, value: b };
     }
+    case "date": {
+      // 业务日期一律存 UTC 零点（本项目约定）—— 用本地时刻会让 +8 与生产 UTC 显示不一致
+      const s = String(raw).trim();
+      const m = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(s);
+      if (!m) return { ok: false, error: "expected YYYY-MM-DD, got " + s };
+      const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+      if (Number.isNaN(d.getTime())) return { ok: false, error: "not a valid date: " + s };
+      return { ok: true, value: d };
+    }
     case "enum": {
       const s = String(raw).trim().toLowerCase();
       const mapped = col.enumMap?.[s];
@@ -148,15 +157,16 @@ export function planSheet(input: {
 }): { plans: RowPlan[]; summary: SheetSummary } {
   const { def, incoming, existing } = input;
   const allowDelete = input.allowDelete ?? def.allowDelete;
+  // 键可能是复合的（套餐明细＝套餐名 + 项目名）—— 一律走 keyOf，别在两处各拼一遍
   const byKey = new Map<string, Record<string, unknown>>();
-  for (const e of existing) byKey.set(String(e[def.keyField] ?? "").trim().toLowerCase(), e);
+  for (const e of existing) byKey.set(keyOf(def, e).toLowerCase(), e);
 
   const plans: RowPlan[] = [];
   const seen = new Set<string>();
 
   for (const row of incoming) {
     const { values, errors } = parseIncomingRow(def, row);
-    const key = String(values[def.keyField] ?? "").trim();
+    const key = keyOf(def, values);
 
     if (row.action === "skip") {
       plans.push({ sheet: def.key, rowNumber: row.rowNumber, key, action: "skip", values: {}, changes: [], errors: [] });
@@ -164,10 +174,14 @@ export function planSheet(input: {
     }
     if (!key) errors.push(def.keyHeader + " is required (it is how a row is matched)");
     if (key && seen.has(key.toLowerCase()) && row.action !== "delete") {
-      errors.push("duplicate " + def.keyHeader + " in this file: " + key);
+      errors.push("duplicate row in this file: " + key);
     }
     if (key) seen.add(key.toLowerCase());
 
+    {
+      const missingKeyParts = (def.extraKeyFields ?? []).filter((f) => !String(values[f] ?? "").trim());
+      if (missingKeyParts.length) errors.push("missing key column(s): " + missingKeyParts.join(", "));
+    }
     const current = key ? byKey.get(key.toLowerCase()) : undefined;
 
     if (row.action === "delete") {

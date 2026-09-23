@@ -16,18 +16,21 @@ import { applySetupImport, exportSetupWorkbook, previewSetupImport, type Preview
  * 没有"直接导入"这种捷径 —— 那正是这一期要防的操作。
  */
 
-export function BulkSetup({ canDelete }: { canDelete: boolean }) {
+export function BulkSetup({ canDelete, branches }: { canDelete: boolean; branches: { id: string; name: string }[] }) {
   const lang = useLang();
   const router = useRouter();
   const [pending, start] = useTransition();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [downloading, setDownloading] = useState(false);
+  // 套餐与促销是按分店存的，所以必须明确「这一份文件属于哪个分店」——
+  // 文件里也会写明，导入时以文件里的为准（避免把 A 店的文件导进 B 店）。
+  const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
 
   const download = async () => {
     setDownloading(true);
     try {
-      const res = await exportSetupWorkbook();
+      const res = await exportSetupWorkbook({ branchId });
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -63,10 +66,15 @@ export function BulkSetup({ canDelete }: { canDelete: boolean }) {
   const apply = () =>
     start(async () => {
       if (!preview) return;
-      const res = await applySetupImport({ plans: preview.plans });
+      const res = await applySetupImport({ plans: preview.plans, branchId: preview.branchId });
       if (res.ok) {
+        const total = Object.values(res.summary).reduce(
+          (acc, s) => ({ created: acc.created + s.created, updated: acc.updated + s.updated, deleted: acc.deleted + s.deleted, deactivated: acc.deactivated + s.deactivated }),
+          { created: 0, updated: 0, deleted: 0, deactivated: 0 },
+        );
         toast.success(
-          t("bulk.applied", lang) + ": +" + res.summary.created + " / ~" + res.summary.updated + " / -" + res.summary.deleted,
+          t("bulk.applied", lang) + ": +" + total.created + " / ~" + total.updated + " / -" + total.deleted +
+          (total.deactivated ? " (" + total.deactivated + " " + t("bulk.deactivated", lang) + ")" : ""),
         );
         setPreview(null);
         setFile(null);
@@ -88,9 +96,24 @@ export function BulkSetup({ canDelete }: { canDelete: boolean }) {
           <h2 className="font-semibold">{t("bulk.step1", lang)}</h2>
           <p className="mt-1 text-xs text-muted-foreground">{t("bulk.step1-hint", lang)}</p>
         </div>
-        <Button size="sm" variant="outline" onClick={download} disabled={downloading || pending}>
-          <Download className="h-4 w-4" /> {t("bulk.download", lang)}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {branches.length > 1 && (
+            <select
+              value={branchId}
+              onChange={(e) => setBranchId(e.target.value)}
+              disabled={pending}
+              className="h-9 rounded-lg border bg-background px-2 text-sm"
+            >
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>{b.name}</option>
+              ))}
+            </select>
+          )}
+          <Button size="sm" variant="outline" onClick={download} disabled={downloading || pending || !branchId}>
+            <Download className="h-4 w-4" /> {t("bulk.download", lang)}
+          </Button>
+          {branches.length === 1 && <span className="text-xs text-muted-foreground">{branches[0].name}</span>}
+        </div>
       </div>
 
       <div className="rounded-2xl border bg-card p-5 space-y-3">
