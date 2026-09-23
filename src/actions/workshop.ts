@@ -13,6 +13,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { audit } from "@/lib/auth/audit";
 import { can, type PermissionAction } from "@/lib/auth/permissions";
 import { canManageTarget, canAssignRole, canToggleActive, canResetPassword, VALID_ROLES, type StaffActor, type StaffTarget } from "@/lib/auth/staff-policy";
+import { generateTempPassword } from "@/lib/auth/temp-password";
 import { scopedBranchId } from "@/lib/branch-scope";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { createClient } from "@supabase/supabase-js";
@@ -471,4 +472,62 @@ export async function resetStaffPassword(userId: string, password: string) {
   });
   revalidatePath("/", "layout");
   return { ok: true };
+}
+
+/**
+ * 重置某**骑手**（客户）的登录密码 —— 柜台用。
+ *
+ * 为什么需要：手机号+密码的骑手如果既忘了密码、又没有邮箱，自助找回那条路是不通的
+ * （changeRiderPassword 需要先验当前密码，而它又是按邮箱验的）。柜台是唯一的兜底。
+ *
+ * 三道必须自己把的门（Server Action 从来不被路由级中间件覆盖）：
+ *  ① 权限走**矩阵**（CUSTOMERS 模块 edit），不是手写角色清单——矩阵可在 Developer 设置里改；
+ *  ② 目标必须是**客户**，且其 authId 不能是**员工账号**——否则这条"骑手重置"的路就成了
+ *     绕过员工管理权限、直接拿员工账号的后门；
+ *  ③ 密码**只回显一次**、绝不写进审计（审计里只记"谁重置的、是否自动生成"）。
+ *
+ * 客户目录是 org 级共享的（不按分行隔离），所以这里不做分行收窄；审计仍记当前 user 的分行。
+ */
+export async function resetRiderPassword(customerId: string, password?: string) {
+  const session = await getSessionUser();
+  if (session.kind !== "staff" || !session.user) return { ok: false as const, error: "Not signed in" };
+
+  const allowed = await can(
+    { id: session.user.id, role: session.role as never, organisationId: session.orgId },
+    "CUSTOMERS",
+    "edit",
+  );
+  if (!allowed) return { ok: false as const, error: "No permission to reset rider passwords" };
+
+  const customer = await db.customer.findUnique({
+    where: { id: customerId },
+    select: { id: true, name: true, authId: true, email: true },
+  });
+  if (!customer) return { ok: false as const, error: "Customer not found" };
+  if (!customer.authId) {
+    return { ok: false as const, error: "This rider has no login account yet — they can sign up in the app first." };
+  }
+
+  const staffAccount = await db.user.findFirst({ where: { authId: customer.authId }, select: { id: true } });
+  if (staffAccount) {
+    return { ok: false as const, error: "That login belongs to a staff account — reset it from the Staff page instead." };
+  }
+
+  const next = password?.trim() || generateTempPassword();
+  if (next.length < 8) return { ok: false as const, error: "Password must be at least 8 characters" };
+
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+  const { error } = await supabase.auth.admin.updateUserById(customer.authId, { password: next });
+  if (error) return { ok: false as const, error: "Failed to reset password: " + error.message };
+
+  await audit({
+    organisationId: session.orgId, branchId: session.branchId, userId: session.user.id,
+    action: "RIDER_PASSWORD_RESET", entity: "Customer", entityId: customer.id,
+    // 密码本身绝不入审计（审计是长期留存的）；只记"是不是自动生成的"这类事实。
+    after: { resetBy: session.user.id, generated: !password, hadEmail: !!customer.email },
+  });
+  revalidatePath("/", "layout");
+  return { ok: true as const, password: next, generated: !password };
 }

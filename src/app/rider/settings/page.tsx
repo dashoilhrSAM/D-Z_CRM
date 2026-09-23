@@ -8,6 +8,7 @@ import { ProfileForm } from "@/components/rider/profile-form";
 import { LanguageSwitcher } from "@/components/rider/language-switcher";
 import { NotificationPrefsForm } from "@/components/rider/notification-prefs-form";
 import { ChangePasswordForm } from "@/components/rider/change-password-form";
+import { PhoneChangeForm } from "@/components/rider/phone-change-form";
 import { parsePrefs } from "@/lib/rider-prefs";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,19 @@ export default async function RiderSettingsPage() {
             address: customer.address ?? "",
           }}
         />
+      </div>
+
+      {/* 手机号（登录标识：改号必须验证新号码，所以单独一张卡） */}
+      <div className="rounded-2xl border bg-card p-4">
+        <div className="flex items-center gap-2 mb-1">
+          <ShieldCheck className="h-4 w-4 text-primary" />
+          <h2 className="font-semibold">{t("settings.phone-section", lang)}</h2>
+        </div>
+        <p className="text-xs text-muted-foreground mb-3">
+          {customer.phone ? customer.phone + " · " : t("settings.phone-none", lang) + " · "}
+          {t("settings.phone-desc", lang)}
+        </p>
+        <PhoneChangeForm lang={lang} verified={!!customer.authProfile?.phoneVerified} />
       </div>
 
       {/* 语言切换 */}
