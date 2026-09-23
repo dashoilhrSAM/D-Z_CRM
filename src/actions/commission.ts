@@ -267,6 +267,9 @@ export async function setCommissionRuleActive(id: string, active: boolean) {
   return { ok: true as const };
 }
 
+/** 解析顺序：从最具体到兜底（与 resolve.ts 的尝试顺序一致，这里只用于展示轨迹）。 */
+const SCOPES_IN_ORDER = ["PRODUCT", "SERVICE", "PACKAGE", "CATEGORY", "DEFAULT"] as const;
+
 /** 模拟器：给几行明细，算出每行的佣金与「为什么是这个数」。 */
 /**
  * 两个「佣金怎么算」的业务开关（按本项目约定：营收相关行为一律放 Organisation 字段 + 页面开关，
@@ -326,13 +329,33 @@ export async function simulateCommission(lines: { productId?: string | null; ser
   const out = lines.map((l) => {
     const res = resolveCommissionRule(l, likes, now);
     const base = "RM " + (l.baseSen / 100).toFixed(2);
+    // 五层解析轨迹（从最具体到兜底）——**复用同一个解析器**，每次只喂一个作用域的规则：
+    // 某一层能解出来，说明该层就有覆盖这条明细的规则（金额也一并给出，便于对比"换一层会拿多少"）。
+    // 为什么这么做：老板看不懂"为什么是这个数"时，缺的往往不是金额本身，而是**哪一层在起作用**。
+    // 不自己重写一遍"哪条规则生效"的判断（那是第二个实现，早晚会与解析器漂移）。
+    const levels = SCOPES_IN_ORDER.map((scope) => {
+      const scoped = likes.filter((r) => r.scope === scope);
+      const scopedRes = scoped.length ? resolveCommissionRule(l, scoped, now) : null;
+      return {
+        scope,
+        covers: !!(scopedRes && scopedRes.ok),
+        ruleLabel: scopedRes && scopedRes.ok ? describeRule(scopedRes.rule) : null,
+        amountSen: scopedRes && scopedRes.ok ? scopedRes.amountSen : null,
+      };
+    });
     return {
       baseSen: l.baseSen,
       qty: l.qty,
       matchedBy: res.ok ? res.matchedBy : null,
       ruleLabel: res.ok ? describeRule(res.rule) : null,
       amountSen: res.ok ? res.amountSen : 0,
-      ambiguous: res.ok ? res.ambiguous : false,
+      // 规则的结构也一并给出来：界面要写出**算式**（"RM180.00 × 5% = RM9.00"），
+      // 而不是只显示一句"命中了某条规则"。字符串里抠数字是最容易出错的做法。
+      basis: res.ok ? res.rule.basis : null,
+      value: res.ok ? res.rule.value : null,
+      valuePercent: res.ok ? res.rule.valuePercent : null,
+      valueFixedSen: res.ok ? res.rule.valueFixedSen : null,
+      levels,
       explanation: res.ok
         ? "matched " + res.matchedBy + " rule (" + describeRule(res.rule) + ") — base " + base + (l.qty > 1 ? " x " + l.qty : "") + " → RM " + (res.amountSen / 100).toFixed(2)
         : "No rule matched — falls back to the legacy per-staff rule",
