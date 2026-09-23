@@ -28,6 +28,8 @@ async function main() {
   for (const p of r.stats.pending.slice(0, 5)) console.log("      " + p);
   console.log("  ⚠️  未被规则覆盖（按旧的人员级结算走，台账留 0 痕迹）:", r.stats.uncovered.length);
   for (const u of r.stats.uncovered.slice(0, 5)) console.log("      " + u);
+  console.log("  零件行（有价格、且该组织零件计佣开着）:", r.stats.billablePartLines, "| 其中未覆盖:", r.stats.uncoveredParts.length);
+  for (const u of r.stats.uncoveredParts.slice(0, 5)) console.log("      " + u);
 
   console.log("");
   console.log("=== ② 每个结算窗口：佣金 ≤ 营业额（不变量 3）===");

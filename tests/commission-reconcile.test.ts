@@ -23,9 +23,11 @@ const JOB_A = "RC-A-" + tag;
 const PERIOD_START = new Date("2026-09-01T00:00:00Z");
 const WINDOW = "2026-09";
 
-async function ledgerRow(userId: string, kind: string, amountSen: number, earnedAt: Date, windowKey: string) {
+async function ledgerRow(userId: string, kind: string, amountSen: number, earnedAt: Date, windowKey: string, jobId?: string) {
   return db.commissionLedger.create({
-    data: { organisationId: orgId, userId, kind, amountSen, basis: "PERCENT", baseSen: 0, qty: 1, earnedAt, windowKey },
+    // jobId 可选：本文件多数台账行是为"结算对比"写的（不带工单），
+    // 而**覆盖检查**只认带 jobId 的行 —— 两者的用途不同，所以显式可选。
+    data: { organisationId: orgId, userId, kind, amountSen, basis: "PERCENT", baseSen: 0, qty: 1, earnedAt, windowKey, jobId: jobId ?? null },
   });
 }
 
@@ -91,6 +93,7 @@ afterAll(async () => {
       await db.invoice.delete({ where: { id: inv.id } });
     }
     await db.serviceJobItem.deleteMany({ where: { jobId: j.id } });
+    await db.serviceJobPart.deleteMany({ where: { jobId: j.id } });
     await db.serviceReminder.deleteMany({ where: { jobId: j.id } });
     await db.serviceHistory.deleteMany({ where: { jobId: j.id } });
     await db.jobStatusHistory.deleteMany({ where: { jobId: j.id } });
@@ -106,6 +109,7 @@ afterAll(async () => {
   await db.message.deleteMany({ where: { customerId } });
   await db.notification.deleteMany({ where: { customerId } });
   await db.motorcycle.deleteMany({ where: { plate } });
+  await db.product.deleteMany({ where: { organisationId: orgId } });
   await db.customer.deleteMany({ where: { organisationId: orgId } });
   await db.user.deleteMany({ where: { organisationId: orgId } });
   await db.branch.deleteMany({ where: { organisationId: orgId } });
@@ -168,6 +172,49 @@ describe("不变量 3：佣金不得超过营业额", () => {
     const w = r.windows.find((x) => x.windowKey === WINDOW)!;
     expect(w.revenueSen).toBe(20000);
     expect(w.ratioPct! > 100).toBe(true);
+  });
+});
+
+describe("零件行也要覆盖（P4b）", () => {
+  it("开关打开：有价格的零件行没有台账 → 出现在未覆盖清单", async () => {
+    // **自带台账行的独立工单**：覆盖检查只处理"台账里出现过的工单"（没有台账的算历史工单，
+    // 按设计不重算）。本文件顶部夹具的台账行是为"结算对比"写的、**没有 jobId**，
+    // 所以这里另造一张，否则零件根本进不了检查（第一次就是这么写的，断言拿到 0）。
+    const product = await db.product.create({
+      data: { organisationId: orgId, name: "Recon Filter " + tag, sku: "RF-" + tag, sellPriceSen: 2500, costPriceSen: 1500, category: "FILTER" },
+    });
+    const jobNumber = "RC-PART-" + tag;
+    const moto = await db.motorcycle.findFirst({ where: { plate } });
+    const job = await db.serviceJob.create({
+      data: {
+        jobNumber, branchId, customerId, motorcycleId: moto!.id, mileage: 2000, mechanicId: mechA,
+        status: "COMPLETED", completedAt: new Date("2026-09-12T04:00:00Z"),
+      },
+    });
+    await db.serviceJobItem.create({
+      data: { jobId: job.id, description: "Part Coverage Service", kind: "SERVICE", quantity: 1, unitPriceSen: 6000, lineTotalSen: 6000, status: "INCLUDED", source: "COUNTER" },
+    });
+    await ledgerRow(mechA, "BASE", 300, new Date("2026-09-12T04:00:00Z"), WINDOW, job.id);
+    // 有价格的零件行 —— 故意**不给它写台账**，它必须被报出来
+    await db.serviceJobPart.create({
+      data: {
+        jobId: job.id, productId: product.id, quantity: 1, unitCostSen: 1500,
+        unitPriceSen: 2500, lineTotalSen: 2500, status: "ACCEPTED", source: "COUNTER",
+      },
+    });
+    const r = await runCommissionReconciliation({ organisationId: orgId });
+    expect(r.stats.billablePartLines).toBe(1);
+    expect(r.stats.uncoveredParts).toHaveLength(1);
+    expect(r.stats.uncoveredParts[0]).toContain(jobNumber);
+  });
+
+  it("开关关闭：零件行**完全不检查**（否则就是误报，而误报会让真报告失效）", async () => {
+    await db.organisation.update({ where: { id: orgId }, data: { commissionOnParts: false } });
+    const r = await runCommissionReconciliation({ organisationId: orgId });
+    expect(r.stats.billablePartLines).toBe(0);
+    expect(r.stats.uncoveredParts).toHaveLength(0);
+    expect(r.hardFailures.some((f) => /零件/.test(f))).toBe(false);
+    await db.organisation.update({ where: { id: orgId }, data: { commissionOnParts: true } });
   });
 });
 
