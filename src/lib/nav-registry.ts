@@ -124,6 +124,8 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     section: "INVENTORY",
     items: [
       { key: "products", label: "Products", labelKey: "nav.products", href: "/workshop/inventory/products", icon: Boxes, module: "PARTS", access: ["OWNER", "COUNTER_STAFF"] },
+      // P2：批量配置（下载工作簿 → 改 → 上传 → 看差异 → 应用）。只给老板/经理：一次改几百条价格。
+      { key: "setup", label: "Bulk setup", labelKey: "nav.setup", href: "/workshop/setup", icon: Upload, module: "PARTS", access: ["OWNER"] },
       { key: "stock", label: "Stock", labelKey: "nav.stock", href: "/workshop/inventory/stock", icon: Package, module: "INVENTORY", access: ["OWNER", "COUNTER_STAFF"] },
       { key: "alerts", label: "Stock Alerts", labelKey: "nav.alerts", href: "/workshop/inventory/alerts", icon: AlertTriangle, module: "INVENTORY", access: ["OWNER"] },
       { key: "dead-stock", label: "Dead Stock", labelKey: "nav.dead-stock", href: "/workshop/inventory/dead-stock", icon: Archive, module: "INVENTORY", access: ["OWNER"] },
