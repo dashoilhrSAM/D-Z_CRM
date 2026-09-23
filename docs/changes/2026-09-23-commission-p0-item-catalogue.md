@@ -50,7 +50,30 @@ description + 价格，没有 productId / serviceTypeId / packageId —— 系�
 - 迁移已应用到 dev.db 与 e2e.db，列用 pragma table_info 实测存在。
 - tsc 干净；611 测试全绿；报告脚本在 dev.db 上真实跑通。
 
+## P0b：把服务目录统一成一份（同一 PR 的第二部分）
+
+报告里"10 项没有对应 ServiceType"就是 P0b 要解决的事 —— 老板拍板 **A：全部保留**
+（源码 12 项 + 数据库独有的 6 项 = 18 项，历史工单的旧名字仍能对上；合并不可逆，留到以后）。
+
+- **唯一约束**：ServiceType 加 @@unique([organisationId, code])。**这是同步能安全幂等的前提** ——
+  没有它，"先查再插"在并发下会造出重复服务行，而重复的目录行会让佣金配置指向错误的那一行。
+  加之前已实测生产库：8 行、code 全空、无重复（唯一索引允许多个 NULL，旧数据不受影响）。
+- **同步**：src/lib/service-catalogue.ts 的 syncServiceCatalogue() —— 按 code upsert；存量同名行只补
+  code 与**为空**的价格（管理员手工设过的价格永不覆盖）；数据库独有的 6 项按 LEGACY_SERVICE_CODES
+  补固定 code。另有 catalogueDrift() 做漂移检查。
+- **接入点**：seed（新库自动对齐）+ 运维 CLI scripts/commission/sync-service-catalogue.ts（幂等可反复跑）。
+- **写入路径**：柜台表单传 catalogKey，addJobServiceItems 服务端解析成 serviceTypeId 落库 ——
+  柜台卖的每一行因此都能被佣金规则按服务识别，而不是落到 LEGACY。
+- **护栏测试**：tests/service-catalogue.test.ts 4 条（对齐 / 幂等 / 每项都有 code+价格 / 老服务保留）。
+
+实测（dev.db 与 e2e.db 各跑一遍）：
+
+    第一次同步: created 10 / coded 8 / priced 2 / total 18
+    第二次同步: created 0  / coded 0 / priced 0 / total 18   ← 幂等
+    漂移检查: 无
+    归因报告 ③ 目录缺口: 12 项里 0 项缺失（改之前是 10 项缺失）
+
 ## 说明
 
-本 PR **不含任何佣金计算逻辑**（那是 P1/P2），页面行为不变；只是把"这一行是什么"记下来，
-并给出一份能立刻看的现状报告。
+本 PR **不含任何佣金计算逻辑**（那是 P1/P2），页面行为不变；它做的是把"这一行是什么"记下来、
+把服务目录统一成一份，并给出一份能立刻看的现状报告。

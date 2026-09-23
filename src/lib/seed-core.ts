@@ -4,6 +4,7 @@ import { PrismaClient } from "@prisma/client";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { MAIN_BRANCH_ADDRESS, MAIN_BRANCH_CITY, MAIN_BRANCH_NAME } from "@/lib/branch-info";
+import { syncServiceCatalogue } from "@/lib/service-catalogue";
 
 const prisma = new PrismaClient();
 
@@ -841,6 +842,10 @@ export async function runSeed(): Promise<Record<string, number>> {
   for (const [nm, cat, dur] of svcDefs) {
     await prisma.serviceType.create({ data: { organisationId: org.id, name: nm, category: cat, durationMin: dur } });
   }
+  // P0b：把柜台在卖的源码目录（lib/service-catalog，12 项）同步进 ServiceType，并给上面这 8 项补 code/价格。
+  // 于是"每个柜台能卖的服务"都必然有一行可配佣金 —— 补齐后共 18 项（老板 2026-09-23 决定：全部保留）。
+  // 幂等，重复种子不会造出重复服务（code 上有唯一约束兜底）。
+  await syncServiceCatalogue();
   // loyalty tiers + rewards (DATA-034..038)
   const tierDefs: [string, number, string][] = [
     ["Bronze", 0, "Base membership"], ["Silver", 1000, "5% off parts"], ["Gold", 3000, "10% off parts + priority slot"],

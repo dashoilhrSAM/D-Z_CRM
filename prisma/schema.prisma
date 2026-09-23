@@ -1448,6 +1448,11 @@ model ServiceType {
   active         Boolean  @default(true)
   createdAt      DateTime @default(now())
   jobItems       ServiceJobItem[] // P0：工单行可指回服务类型（佣金按服务配置用）
+
+  // P0b：一个 code 只能对应一行 —— 这是"目录只有一份"的数据库层事实，
+  // 也是同步脚本能安全幂等（不会造出重复服务）的前提。code 可空（历史行），
+  // 而 SQLite/Postgres 的唯一索引允许多个 NULL，所以加约束不会挡住旧数据。
+  @@unique([organisationId, code])
 }
 
 model JobStatusHistory {

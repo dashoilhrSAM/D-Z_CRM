@@ -287,14 +287,34 @@ export async function correctMileage(input: { jobId: string; newMileage: number;
 }
 
 /** Add priced service lines to a job (additional services from the market catalogue).
- *  serviceTypeId 可选：柜台选的是**源码目录**（lib/service-catalog）里的条目，暂时没有对应的
- *  ServiceType 行，所以先允许留空（佣金侧按 LEGACY 处理）；等目录统一（P0b）之后这里会填上，
- *  那一行才能真正按服务配佣金。 */
+ *  柜台传的是目录条目的 catalogKey；P0b 之后 key 就是 ServiceType.code，服务端在这里解析成
+ *  serviceTypeId 落库（佣金按服务配置的锚点）。解析不到的留空，按 LEGACY 处理并出现在归因报告里。 */
 export async function addJobServiceItems(input: {
   jobId: string;
-  items: { description: string; priceSen: number; serviceTypeId?: string | null; productId?: string | null }[];
+  items: { description: string; priceSen: number; catalogKey?: string | null; serviceTypeId?: string | null; productId?: string | null }[];
 }) {
   if (input.items.length === 0) return { ok: true };
+
+  // P0b：柜台选的是源码目录条目（带稳定 key），而 key 现在就是 ServiceType.code ——
+  // 这里解析成 serviceTypeId 落库，于是"这一行是什么服务"对佣金引擎是可读的。
+  // 解析不到的（目录还没同步、或条目被停用）就留空，按 LEGACY 处理并出现在归因报告里。
+  const keys = [...new Set(input.items.map((i) => i.catalogKey).filter((k): k is string => !!k))];
+  const byCode = new Map<string, string>();
+  if (keys.length > 0) {
+    const job = await db.serviceJob.findUnique({
+      where: { id: input.jobId },
+      select: { branch: { select: { organisationId: true } } },
+    });
+    const orgId = job?.branch?.organisationId;
+    if (orgId) {
+      const types = await db.serviceType.findMany({
+        where: { organisationId: orgId, code: { in: keys }, active: true },
+        select: { id: true, code: true },
+      });
+      for (const t of types) if (t.code) byCode.set(t.code, t.id);
+    }
+  }
+
   await db.serviceJobItem.createMany({
     data: input.items.map((it) => ({
       jobId: input.jobId,
@@ -305,7 +325,7 @@ export async function addJobServiceItems(input: {
       lineTotalSen: it.priceSen,
       status: "INCLUDED",
       source: "COUNTER",
-      serviceTypeId: it.serviceTypeId ?? null,
+      serviceTypeId: it.serviceTypeId ?? (it.catalogKey ? byCode.get(it.catalogKey) ?? null : null),
       productId: it.productId ?? null,
     })),
   });
