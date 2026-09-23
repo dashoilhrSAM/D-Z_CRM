@@ -4,6 +4,8 @@ import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { listCommissionConfig } from "@/actions/commission";
 import { CommissionConfigView } from "@/components/workshop/commission-config";
+import { TierSetConfig } from "@/components/workshop/tier-set-config";
+import { listCommissionTierSets } from "@/actions/commission-tiers";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +24,7 @@ export default async function CommissionPage() {
       ? await can({ id: session.user.id, role: session.role as never, organisationId: session.orgId }, "TECHNICIANS", "edit")
       : false;
 
-  const data = await listCommissionConfig();
+  const [data, tierData] = await Promise.all([listCommissionConfig(), listCommissionTierSets()]);
 
   return (
     <div className="space-y-5">
@@ -35,6 +37,9 @@ export default async function CommissionPage() {
       ) : (
         <CommissionConfigView items={data.items} rules={data.rules} conflicts={data.conflicts} canEdit={canEdit} />
       )}
+
+      {/* 阶梯组合（P3）：与基础规则同一页 —— "这单本来拿多少" 与 "卖够多少再拿多少" 是同一件事的两半 */}
+      {tierData.ok && canEdit && <TierSetConfig items={tierData.items} catalogue={tierData.catalogue} />}
     </div>
   );
 }
