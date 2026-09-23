@@ -158,6 +158,22 @@ function elapsed(startedAt) {
   return ((Date.now() - startedAt) / 1000).toFixed(1) + "s";
 }
 
+/**
+ * 把连接串（连同其中的密码）从任何准备打印的文本里抹掉。
+ *
+ * 2026-09-23：这里曾经只打印 e.message 的第一行 —— "Command failed: …prisma migrate diff …"，
+ * 真正的 Prisma 错误（P1000 密码错 / P1001 主机不可达 / FATAL ENOTFOUND 区域不对）全被吞掉，
+ * 于是一次"连不上"变成了一条查不出原因的日志，只能靠人肉猜。
+ * 现在 stderr 尾部照样打，但连接串一律脱敏。
+ */
+export function redactSecrets(text, url) {
+  let out = String(text ?? "");
+  if (url) out = out.split(url).join("[REDACTED]");
+  // 兜底：任何残留的 postgres 连接串整体抹掉（含密码与主机）
+  out = out.replace(/postgres(?:ql)?:\/\/[^\s"']+/g, "[REDACTED]");
+  return out;
+}
+
 /** SQL that would take the database from its current state to the schema. */
 export function diffSql(url) {
   return runPrisma(
@@ -218,6 +234,37 @@ export function isTransactionPooler(url) {
   return /:6543\b/.test(url) || /pgbouncer=true/.test(url);
 }
 
+/**
+ * 事务池 URL → 同一个 Supavisor 的**会话端点**。
+ *
+ * 2026-09-23 事故：DATABASE_URL 是 Supavisor 的事务池（6543 / pgbouncer=true）——
+ * 应用运行时用它完全正确（每次查询一个短事务），但 prisma migrate 需要**一条真实会话**，
+ * 在事务池上会挂住，于是构建连续三次卡在 "inspection timed out after 120s"。
+ * Supavisor 的两种接入点是**同主机、同用户、同密码、同库，只有端口不同**（6543 vs 5432），
+ * 所以这个改写是确定性的，不是猜；而且脚本随后**照样会自验**（inspect + 应用后复验），
+ * 验证不通过仍然 fail-closed，安全保证没有被削弱。
+ *
+ * 推导不出来就返回 null（保持原来的 fail-closed 行为）：
+ *  · 主机不是 Supavisor（例如自建 pgbouncer，5432 未必是会话池）；
+ *  · 用户名里没有 project ref（Supavisor 的租户就写在用户名里，缺了就无法定位）。
+ *
+ * 实现上刻意用**字符串改写而不是 new URL()**：密码里可能含 % 等字符，
+ * 交给 URL 解析再 toString() 会把它重新编码一遍 —— 那正是本轮踩到的 P1000「密码错」假象。
+ */
+export function sessionPoolerUrl(url) {
+  if (!url || !isTransactionPooler(url)) return null;
+  if (!/\.pooler\.supabase\.com/i.test(url)) return null;
+  // 用户名后面**可能是 :密码 也可能是 @**（自己的正则曾写死 @，于是带密码的 URL 全部漏掉，
+  // 表现为"推导不出来"，静默退化成原来那条挂住 120s 的路径）。
+  const user = (url.match(/^postgres(?:ql)?:\/\/([^:@/]+)[:@]/) || [])[1];
+  if (!user || !decodeURIComponent(user).includes(".")) return null;
+  return url
+    .replace(/:6543(?=[/?]|$)/, ":5432")
+    .replace(/[?&]pgbouncer=true(?=&|$)/, (m) => (m.startsWith("&") ? "" : "?"))
+    .replace(/\?&/, "?")
+    .replace(/[?&]$/, "");
+}
+
 async function main() {
   const checkOnly = process.argv.includes("--check");
   const isProduction = process.env.VERCEL_ENV === "production";
@@ -230,25 +277,49 @@ async function main() {
   }
   console.log("[schema-sync] database from " + source + " | timeout " + Math.round(COMMAND_TIMEOUT_MS / 1000) + "s per command");
 
+  // 事务池护栏：migrate 命令需要真实会话，在 Supavisor 的事务池上会挂住（不是报错，是挂住）。
+  // 而 Supavisor 的会话端点与它同主机、同用户、同密码、同库，只有端口不同 —— 所以这里**推导出来试一次**，
+  // 而不是把问题丢回给运维去改环境变量（2026-09-23 为此连挂三次构建）。
+  let effective = url;
+  let usedDerivedSession = false;
   if (isTransactionPooler(url) && !process.env.DRIFT_CHECK_URL) {
     console.warn("[schema-sync] WARNING: this looks like a TRANSACTION pooler (port 6543 / pgbouncer=true).");
     console.warn("[schema-sync] Prisma migrate commands need a real session and will hang on one.");
-    console.warn("[schema-sync] Use the Supavisor SESSION pooler instead — same host, port 5432,");
-    console.warn("[schema-sync] user postgres.<project-ref>:");
-    console.warn("[schema-sync]   postgresql://postgres.<ref>:<password>@<region>.pooler.supabase.com:5432/postgres");
-    console.warn("[schema-sync] (Do NOT switch to db.<ref>.supabase.co — that host is IPv6-only and");
-    console.warn("[schema-sync] unreachable from Vercel builds.)");
+    const derived = sessionPoolerUrl(url);
+    if (derived) {
+      console.warn("[schema-sync] Supavisor serves both endpoints from the same host: retrying through the");
+      console.warn("[schema-sync] SESSION endpoint derived from it (port 5432, same host/user/password/database).");
+      console.warn("[schema-sync] Nothing is loosened: the result is still verified before the build continues.");
+      effective = derived;
+      usedDerivedSession = true;
+    } else {
+      console.warn("[schema-sync] Could not derive a session endpoint from it — set DIRECT_URL to the");
+      console.warn("[schema-sync] Supavisor SESSION pooler (same host, port 5432, user postgres.<project-ref>):");
+      console.warn("[schema-sync]   postgresql://postgres.<ref>:<password>@<region>.pooler.supabase.com:5432/postgres");
+      console.warn("[schema-sync] (Do NOT switch to db.<ref>.supabase.co — that host is IPv6-only and");
+      console.warn("[schema-sync] unreachable from Vercel builds.)");
+    }
   }
 
   let sql;
   const inspectStarted = Date.now();
   try {
-    sql = diffSql(url);
+    sql = diffSql(effective);
     console.log("[schema-sync] inspected in " + elapsed(inspectStarted));
   } catch (e) {
-    const why = e instanceof PrismaTimeout
+    const why = (e instanceof PrismaTimeout
       ? "inspection timed out after " + e.seconds + "s"
-      : "could not inspect the database (" + String(e.message).split("\n")[0] + ")";
+      : "could not inspect the database (" + String(e.message).split("\n")[0] + ")")
+      + (usedDerivedSession ? " [also tried the derived SESSION endpoint on port 5432]" : "");
+    // 打印底层 Prisma 错误的尾部：没有这几行，"连不上"就无法区分密码错 / 主机不可达 / 区域不对。
+    const detail = redactSecrets(e.stderr ?? "", url)
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l && !l.toLowerCase().startsWith("warn") && !l.includes("prisma-config"));
+    if (detail.length > 0) {
+      console.error("[schema-sync] prisma said:");
+      for (const l of detail.slice(-6)) console.error("[schema-sync]   " + l);
+    }
     if (isProduction && !checkOnly) {
       // 2026-09-15 生产事故后收紧：以前这里一律 fail-open（"连不上就不检查，让构建继续"），
       // 结果 owner 合并了带 schema 变更的分支后，构建**成功**、站点**全挂**——
@@ -306,7 +377,7 @@ async function main() {
   const applyStarted = Date.now();
   try {
     // Deliberately no --accept-data-loss: let prisma refuse if it sees anything risky.
-    runPrisma(["db", "push", "--schema", SCHEMA, "--skip-generate"], { DATABASE_URL: url, DIRECT_URL: url });
+    runPrisma(["db", "push", "--schema", SCHEMA, "--skip-generate"], { DATABASE_URL: effective, DIRECT_URL: effective });
     console.log("[schema-sync] applied in " + elapsed(applyStarted));
   } catch (e) {
     if (e instanceof PrismaTimeout) {
@@ -339,7 +410,7 @@ async function main() {
     process.exit(1);
   }
 
-  const after = diffSql(url);
+  const after = diffSql(effective);
   if (after) {
     console.error("[schema-sync] schema still differs after sync:\n" + after);
     process.exit(1);

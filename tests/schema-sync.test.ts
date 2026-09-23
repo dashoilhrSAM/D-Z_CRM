@@ -3,7 +3,7 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { parseSchema, ddlFor, resolveUrl, isTransactionPooler } from "../scripts/sync-prod-schema.mjs";
+import { parseSchema, ddlFor, resolveUrl, isTransactionPooler, sessionPoolerUrl } from "../scripts/sync-prod-schema.mjs";
 
 const schemaSrc = readFileSync(path.join(process.cwd(), "prisma/schema.pg.prisma"), "utf8");
 const models = parseSchema(schemaSrc) as Record<string, { column: string; type: string; optional: boolean; ddlDefault: string | null }[]>;
@@ -60,6 +60,46 @@ describe("ddlFor", () => {
  * it happening again: which url migrations are given, and whether a hang is even
  * possible.
  */
+/**
+ * 2026-09-23：DATABASE_URL 是 Supavisor 的**事务池**时，migrate 命令会挂到 120s 超时，
+ * 连续三次把生产构建弄红。会话端点与它同主机、同用户、同密码、同库，只有端口不同，
+ * 所以脚本现在自己推导一次。下面钉住这个推导：**改对了要能推导出来，不该推导的要老实返回 null**
+ * （后者同样重要 —— 对自建 pgbouncer 或非 Supavisor 主机瞎猜端口，只会换来又一次超时）。
+ */
+describe("sessionPoolerUrl", () => {
+  it("把 Supavisor 事务池改成会话端点（端口 6543 → 5432，其余原样）", () => {
+    const pooled = "postgresql://postgres.abcdefghij:p%40ss@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres?pgbouncer=true";
+    expect(sessionPoolerUrl(pooled)).toBe(
+      "postgresql://postgres.abcdefghij:p%40ss@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+    );
+  });
+
+  it("**带密码**的 URL 必须认得出来（自己的正则曾写死 @，于是带密码的全部漏掉）", () => {
+    const withPassword = "postgresql://postgres.abcdefghij:secret@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres";
+    expect(sessionPoolerUrl(withPassword)).toBe(
+      "postgresql://postgres.abcdefghij:secret@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres",
+    );
+  });
+
+  it("密码里的 % 原样保留，不做任何重新编码（二次编码会造成 P1000「密码错」的假象）", () => {
+    const pooled = "postgresql://postgres.abcdefghij:a%2Fb%25c@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres";
+    expect(sessionPoolerUrl(pooled)).toContain(":a%2Fb%25c@");
+  });
+
+  it("已经是会话端点（5432）的 URL 不做任何事", () => {
+    const session = "postgresql://postgres.abcdefghij:pw@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres";
+    expect(sessionPoolerUrl(session)).toBeNull();
+  });
+
+  it("非 Supavisor 主机返回 null（自建 pgbouncer 的 5432 未必是会话池，不能瞎猜）", () => {
+    expect(sessionPoolerUrl("postgresql://u:p@my-pgbouncer.internal:6543/db?pgbouncer=true")).toBeNull();
+  });
+
+  it("用户名里没有 project ref 返回 null（Supavisor 的租户写在用户名里，缺了就无法定位）", () => {
+    expect(sessionPoolerUrl("postgresql://postgres:pw@aws-0-ap-southeast-1.pooler.supabase.com:6543/postgres")).toBeNull();
+  });
+});
+
 describe("resolveUrl", () => {
   it("prefers an explicit diagnostic url above everything", () => {
     expect(resolveUrl({ DRIFT_CHECK_URL: "postgres://x", DIRECT_URL: "postgres://y", DATABASE_URL: "postgres://z" }))
