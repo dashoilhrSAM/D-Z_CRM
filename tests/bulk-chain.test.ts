@@ -49,7 +49,10 @@ beforeAll(async () => {
     },
   });
   // 夹具按**生产形状**造：车主手机号带破折号与空格（生产里三种写法并存）、车牌带空格
-  const owner = await db.customer.create({ data: { organisationId: org.id, name: "Bulk Owner " + tag, phone: "018-492 8009" } });
+  // 生产里 4 个客户有 2 个带邮箱 —— 夹具也带一个，否则"邮箱撞车"那条测试会空跑
+  const owner = await db.customer.create({
+    data: { organisationId: org.id, name: "Bulk Owner " + tag, phone: "018-492 8009", email: "owner" + tag + "@dsh.test" },
+  });
   await db.motorcycle.create({
     data: { customerId: owner.id, plate: "VLL 3302 " + tag, brand: "Honda", model: "EX5 Dream", year: 2017, type: "UNDERBONE", currentMileage: 43215 },
   });
@@ -88,7 +91,7 @@ async function currentProducts() {
 
 async function planFromFile() {
   const { planSheet } = await import("@/modules/bulk/diff");
-  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
+  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET } = await import("@/modules/bulk/sheets");
 
   const parsed = await parse(await build({ organisationId: orgId, branchId }));
   const products = (await currentProducts()).map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" }));
@@ -98,6 +101,7 @@ async function planFromFile() {
   const suppliers = await db.supplier.findMany({ where: { organisationId: orgId } });
   const serviceTypes = await db.serviceType.findMany({ where: { organisationId: orgId, code: { not: null } } });
   const motorcycles = await db.motorcycle.findMany({ where: { customer: { organisationId: orgId } }, include: { customer: { select: { phone: true } } } });
+  const customers = await db.customer.findMany({ where: { organisationId: orgId, phone: { not: null } } });
 
   const existingBySheet: Record<string, Record<string, unknown>[]> = {
     products,
@@ -106,6 +110,11 @@ async function planFromFile() {
     campaigns: campaigns as unknown as Record<string, unknown>[],
     suppliers: suppliers as unknown as Record<string, unknown>[],
     serviceTypes: serviceTypes as unknown as Record<string, unknown>[],
+    // 客户：现状行用**库里的原样手机号**（键的归一化由 SheetDef.keyTransform 负责）
+    customers: customers.map((c) => ({
+      name: c.name, phone: c.phone ?? "", email: c.email ?? "",
+      address: c.address ?? "", tags: c.tags ?? "", notes: c.notes ?? "",
+    })),
     motorcycles: motorcycles.map((m) => ({
       plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
       brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
@@ -115,7 +124,7 @@ async function planFromFile() {
   const defs: Record<string, typeof PRODUCTS_SHEET> = {
     products: PRODUCTS_SHEET, packages: PACKAGES_SHEET, packageItems: PACKAGE_ITEMS_SHEET,
     campaigns: CAMPAIGNS_SHEET, suppliers: SUPPLIERS_SHEET, serviceTypes: SERVICE_TYPES_SHEET,
-    motorcycles: MOTORCYCLES_SHEET,
+    motorcycles: MOTORCYCLES_SHEET, customers: CUSTOMERS_SHEET,
   };
 
   const out = new Map<string, ReturnType<typeof planSheet>>();
@@ -132,9 +141,10 @@ describe("往返一致：导出的文件原样导入 = 零改动", () => {
     expect(parsed.branchId).toBe(branchId);
     expect(parsed.versionOk).toBe(true);
     // **先证明四张表都被读进来了** —— 否则"零改动"可能只是"根本没读到"（探针假阳性）
-    expect([...plans.keys()].sort()).toEqual(["campaigns", "motorcycles", "packageItems", "packages", "products", "serviceTypes", "suppliers"]);
-    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(7);
+    expect([...plans.keys()].sort()).toEqual(["campaigns", "customers", "motorcycles", "packageItems", "packages", "products", "serviceTypes", "suppliers"]);
+    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(8);
     expect(plans.get("motorcycles")!.summary.skip).toBe(1);
+    expect(plans.get("customers")!.summary.skip).toBe(1);
     // 每张表都要有真实读数 —— 只断言"存在"可能掩盖"零行"
     expect(plans.get("suppliers")!.summary.skip).toBe(1);
     expect(plans.get("serviceTypes")!.summary.skip).toBe(1);
@@ -412,5 +422,96 @@ describe("车辆（P3 续）——每一辆的修理方式不一样，所以车�
     expect(summary.error).toBe(1);
     expect(plans[0].errors.join(" ")).toContain("unknown value (NONSENSE)");
     expect(plans[0].errors.join(" ")).toContain("allowed");
+  });
+});
+describe("客户表（P3 收尾）——判重规则按老板确认的四条", () => {
+  const NEW_PHONE = "012-777 8899";
+
+  it("**没有手机号的客户不导出**（手机号是键，导出了也认不出，会挡住整份文件）", async () => {
+    const c = await db.customer.create({ data: { organisationId: orgId, name: "No Phone " + tag } });
+    try {
+      const parsed = await parse(await build({ organisationId: orgId, branchId }));
+      const sheet = parsed.sheets.find((s) => s.key === "customers")!;
+      expect(sheet.rows.every((r) => String(r.cells.phone ?? "").trim() !== "")).toBe(true);
+      expect(sheet.rows.length).toBe(1);   // 只有夹具里那位有手机号的客户
+    } finally {
+      await db.customer.delete({ where: { id: c.id } });
+    }
+  });
+
+  it("**新建客户 + 同一份文件里挂他的车**（客户必须先处理，且建完要更新映射）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { CUSTOMERS_SHEET, MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
+    const { applyPlans } = await import("@/modules/bulk/apply");
+
+    const customers = await db.customer.findMany({ where: { organisationId: orgId, phone: { not: null } } });
+    const motos = await db.motorcycle.findMany({ where: { customer: { organisationId: orgId } } });
+    const customerPlans = planSheet({
+      def: CUSTOMERS_SHEET,
+      incoming: [{ rowNumber: 2, cells: { name: "New Rider " + tag, phone: NEW_PHONE, email: "rider" + tag + "@dsh.test" } }],
+      existing: customers,
+    }).plans;
+    const motoPlans = planSheet({
+      def: MOTORCYCLES_SHEET,
+      incoming: [{ rowNumber: 2, cells: { plate: "NEW 1234", type: "SCOOTER", customerPhone: NEW_PHONE, brand: "Yamaha", model: "NVX", year: 2024 } }],
+      existing: motos,
+    }).plans;
+    expect(customerPlans[0].action).toBe("create");
+    expect(motoPlans[0].action).toBe("create");
+
+    // 车辆在前、客户在后 —— 应用时必须自己按「客户→车辆」重排
+    const res = await applyPlans({ organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null, plans: [...motoPlans, ...customerPlans] });
+    expect(res.ok, res.ok ? "" : res.error).toBe(true);
+    const bike = await db.motorcycle.findFirst({ where: { plate: "NEW 1234" }, include: { customer: { select: { name: true, phone: true } } } });
+    expect(bike).not.toBeNull();
+    expect(bike!.customer.phone).toBe(NEW_PHONE);     // 挂上了**刚建出来**的那位客户
+    expect(bike!.customer.name).toBe("New Rider " + tag);
+  });
+
+  it("改客户资料（姓名/地址）→ update，手机号写法不同也能匹配", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { CUSTOMERS_SHEET } = await import("@/modules/bulk/sheets");
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const customers = await db.customer.findMany({ where: { organisationId: orgId, phone: { not: null } } });
+    const phone = customers.find((c) => c.phone === NEW_PHONE)!.phone as string;
+    const { plans, summary } = planSheet({
+      def: CUSTOMERS_SHEET,
+      incoming: [{ rowNumber: 2, cells: { phone: "+60" + phone.replace(/\D/g, "").replace(/^0/, ""), address: "12 Jalan Baru" } }],
+      existing: customers,
+    });
+    expect(summary.error).toBe(0);
+    expect(summary.create).toBe(0);            // 认出来了，不是新建
+    expect(summary.update).toBe(1);
+    const res = await applyPlans({ organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null, plans });
+    expect(res.ok, res.ok ? "" : res.error).toBe(true);
+    const after = await db.customer.findFirst({ where: { id: customers.find((c) => c.phone === NEW_PHONE)!.id } });
+    expect(after!.address).toBe("12 Jalan Baru");
+  });
+
+  it("**邮箱撞上另一个客户 → 报错，不自动合并**（自动合并会在换号写错时并错人）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const withEmail = await db.customer.findFirst({ where: { organisationId: orgId, email: { not: null } } });
+    expect(withEmail?.email, "夹具必须有一个带邮箱的客户，否则这条测试是空跑").toBeTruthy();
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null,
+      plans: [{
+        sheet: "customers", rowNumber: 9, key: "0198887777", action: "update",
+        values: { email: withEmail!.email as string }, changes: [], errors: [],
+      }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("already belongs to");
+  });
+
+  it("**有车的客户不能删**（先查引用再决定）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const owner = await db.customer.findFirst({ where: { organisationId: orgId, name: "Bulk Owner " + tag } });
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null,
+      plans: [{ sheet: "customers", rowNumber: 2, key: owner!.phone as string, action: "delete", values: {}, changes: [], errors: [] }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("cannot be deleted");
+    expect(await db.customer.findFirst({ where: { id: owner!.id } })).not.toBeNull();
   });
 });
