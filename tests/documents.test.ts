@@ -44,7 +44,10 @@ beforeAll(async () => {
 
   const mk = async (org: string, branch: string | null, role: "OWNER" | "MANAGER" | "MECHANIC", name: string) =>
     (await db.user.create({
-      data: { organisationId: org, branchId: branch, name, email: name.toLowerCase().replace(/[^a-z]/g, "") + "-" + tag + "@dsh.test", role },
+      // 注意保留数字：原来写的是 [^a-z]（连数字也去掉），于是 DocMgrA1 / DocMgrA2
+      // 会生成**同一个邮箱** —— 以前只是悄悄建出两行（正是生产上那个重复身份的微缩版），
+      // 加了邮箱唯一约束之后它立刻暴露了。
+      data: { organisationId: org, branchId: branch, name, email: name.toLowerCase().replace(/[^a-z0-9]/g, "") + "-" + tag + "@dsh.test", role },
     })).id;
 
   ownerA = await mk(orgA, branchA1, "OWNER", "DocOwnerA");

@@ -292,7 +292,7 @@ model User {
   branch         Branch?  @relation(fields: [branchId], references: [id])
   name           String
   phone          String?
-  email          String?
+  email          String?  @unique
   role           Role     @default(MECHANIC)
   active         Boolean  @default(true)
   // SUPABASE AUTH: auth.users.id (production login); null = demo-only user

@@ -15,6 +15,7 @@ import { can, type PermissionAction } from "@/lib/auth/permissions";
 import { canManageTarget, canAssignRole, canToggleActive, canResetPassword, VALID_ROLES, type StaffActor, type StaffTarget } from "@/lib/auth/staff-policy";
 import { generateTempPassword } from "@/lib/auth/temp-password";
 import { scopedBranchId } from "@/lib/branch-scope";
+import { normalizeEmail } from "@/lib/staff-identity";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { createClient } from "@supabase/supabase-js";
 
@@ -403,9 +404,25 @@ export async function createStaff(input: { name: string; role: string; phone?: s
   // 分行归属：优先创建者所在分行（branch 级 manager/mechanic 建到本分行）；org 级无分支回退主店
   const branch = (session.branchId ? await db.branch.findUnique({ where: { id: session.branchId } }) : null)
     ?? await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  // **先查重**：这封邮件已经有员工档案就不要再建一行（生产上出现过同邮箱两条 User 行，
+  // 同一个技师的两张工单被拆到两个身份、登录后只看得到一半 —— 见 lib/staff-identity.ts）。
+  // 查重忽略大小写：老数据里存进了大写邮箱，只按小写匹配会漏。
+  const email = normalizeEmail(input.email);
+  if (email) {
+    const existing = (await db.user.findMany({
+      where: { organisationId: org!.id, email: { not: null } },
+      select: { id: true, name: true, email: true, active: true },
+    })).find((u) => normalizeEmail(u.email) === email);
+    if (existing) {
+      return {
+        ok: false as const,
+        error:
+          "This email already belongs to " + existing.name + " — edit that person instead of creating a second account.",
+      };
+    }
+  }
   // 若提供 email + password：创建 Supabase auth 账号（staff 可登录），并绑定 User.authId。
   let authId: string | null = null;
-  const email = (input.email ?? "").trim();
   if (email && input.password && input.password.length >= 6) {
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -428,7 +445,7 @@ export async function createStaff(input: { name: string; role: string; phone?: s
       name: input.name.trim(),
       role: input.role as never, // 已由 canAssignRole 校验：合法角色，且不高于调用者能授予的高度
       phone: input.phone || null,
-      email: input.email || null,
+      email,   // 小写存储：归一化只在写入时做一次
       active: true,
       authId,
     },

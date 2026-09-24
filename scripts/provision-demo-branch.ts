@@ -4,6 +4,7 @@
 // 幂等：branch 按名称查重；staff 按 email 查重；auth 账号邮箱已存在则复用。
 // 只建一间 testing 分行：按名称唯一（DEMO_BRANCH_NAME）守卫。
 // 生产环境默认拒绝（与 seed 一致），除非 PROVISION_ALLOWED=1。
+import { normalizeEmail } from "../src/lib/staff-identity";
 import { PrismaClient } from "@prisma/client";
 import { createClient } from "@supabase/supabase-js";
 import { DEMO_BRANCH_ADDRESS, DEMO_BRANCH_COORDS, DEMO_BRANCH_CITY } from "../src/lib/branch-info";
@@ -98,9 +99,15 @@ async function main() {
   console.log("[slots] created " + slotCount + " (existing skipped)");
 
   // 3) Staff（按 email 幂等；auth 账号复用）
+  // **查重必须忽略大小写**：老数据里存过大写邮箱（MechanicDemo@gmail.com），
+  // 只按精确匹配会漏判 → 又建一行 → 同一个人的工单被拆到两个身份（生产真实事故）。
   const report: string[] = [];
+  const existingStaff = await prisma.user.findMany({
+    where: { organisationId: org.id, email: { not: null } },
+    select: { id: true, email: true, authId: true, branchId: true },
+  });
   for (const s of STAFF) {
-    let user = await prisma.user.findFirst({ where: { organisationId: org.id, email: s.email } });
+    let user = existingStaff.find((u) => normalizeEmail(u.email) === normalizeEmail(s.email)) ?? null;
     if (user) { report.push(s.email + " (exists)"); continue; }
     const authId = await ensureAuthUser(supabase, s.email, s.password, s.name);
     user = await prisma.user.create({
