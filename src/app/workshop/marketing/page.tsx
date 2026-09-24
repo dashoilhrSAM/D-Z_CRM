@@ -11,6 +11,7 @@ import { formatRM } from "@/lib/money";
 import { fmtDate } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
+import { MessagingStatusNote } from "@/components/workshop/messaging-status-note";
 
 export const dynamic = "force-dynamic";
 
@@ -63,6 +64,9 @@ export default async function MarketingOverviewPage() {
           tpl("ws.mkt.overview.revenue-line", lang, { v: formatRM(totals.revenueSen) }),
         ].join(" · ")}
       />
+
+      {/* 消息还没接通时把话说清楚：现在点发送不会真的发到客户手机 */}
+      <MessagingStatusNote />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {cards.map((c) => (

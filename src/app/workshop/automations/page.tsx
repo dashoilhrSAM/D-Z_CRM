@@ -3,6 +3,7 @@ import { AutomationManager, ToggleRule } from "@/components/workshop/automation-
 import { fmtDateTime } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
+import { MessagingStatusNote } from "@/components/workshop/messaging-status-note";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +28,9 @@ export default async function AutomationsPage() {
         <p className="text-sm text-muted-foreground">{t("autom.subtitle", lang)}</p>
       </div>
       <AutomationManager templates={templates} />
+      {/* 消息还没接通时把话说清楚：现在点发送不会真的发到客户手机 */}
+      <MessagingStatusNote />
+
       <div className="rounded-xl border bg-card divide-y">
         {rules.map((r) => (
           <div key={r.id} className="px-4 py-3 flex items-center gap-3 flex-wrap">

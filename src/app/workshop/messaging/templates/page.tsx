@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { TemplateManager } from "@/components/workshop/template-manager";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
+import { MessagingStatusNote } from "@/components/workshop/messaging-status-note";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,9 @@ export default async function TemplatesPage() {
         <p className="text-sm text-muted-foreground">{t("msg.placeholders-label", lang)} {"{name}"} {"{service}"} {"{bike}"} {"{branch}"} {"{date}"} {"{time}"} {"{ref}"} {"{link}"} {"{invoice}"} {"{total}"}</p>
       </div>
       <TemplateManager />
+      {/* 消息还没接通时把话说清楚：现在点发送不会真的发到客户手机 */}
+      <MessagingStatusNote />
+
       <div className="rounded-xl border bg-card overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
