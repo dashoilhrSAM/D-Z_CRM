@@ -155,6 +155,19 @@ export const leadsModule = {
     });
     if (data.stageId && data.stageId !== before.stageId) {
       await db.leadActivity.create({ data: { leadId: id, type: "STAGE_CHANGED", note: "Stage changed", userId: data.assignedUserId ?? null } });
+      // LEAD_STAGE_CHANGED 触发器（以前 UI 里能选、但代码里没有任何地方会触发它 ✗）
+      // 去重键带上目标阶段：同一条线索**每个阶段只触发一次**，来回拖不会重复发消息。
+      // 与上面 LEAD_CREATED 一样包在 try 里 —— 自动化出问题绝不能把线索更新搞崩。
+      try {
+        const { automationModule } = await import("@/modules/automation/service");
+        await automationModule.run(before.organisationId, "LEAD_STAGE_CHANGED", {
+          leadId: id,
+          assignedUserId: data.assignedUserId ?? before.assignedUserId ?? undefined,
+          dedupeKey: id + ":" + data.stageId,
+          relatedType: "LEAD",
+          relatedId: id,
+        });
+      } catch { /* automation must never break the lead update */ }
     }
     if (data.assignedUserId && data.assignedUserId !== before.assignedUserId) {
       await db.leadActivity.create({ data: { leadId: id, type: "ASSIGNED", note: "Lead reassigned", userId: data.assignedUserId } });

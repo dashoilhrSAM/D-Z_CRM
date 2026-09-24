@@ -1931,6 +1931,7 @@ export const DICT: Dict = {
   "autom.col-error": { en: "Error", zh: "错误", ms: "Ralat" },
   "autom.failed": { en: "✗ FAILED", zh: "✗ 失败", ms: "✗ GAGAL" },
   "autom.no-executions": { en: "No executions yet.", zh: "暂无执行记录。", ms: "Tiada pelaksanaan lagi." },
+  "autom.trigger-unavailable": { en: "not wired yet", zh: "尚未接通（选了不会触发）", ms: "belum disambung" },
   "autom.trigger.LEAD_CREATED": { en: "Lead created", zh: "创建线索", ms: "Prospek dicipta" },
   "autom.trigger.LEAD_STAGE_CHANGED": { en: "Lead stage changed", zh: "线索阶段变更", ms: "Peringkat prospek berubah" },
   "autom.trigger.BOOKING_CREATED": { en: "Booking created", zh: "预约已创建", ms: "Tempahan dicipta" },

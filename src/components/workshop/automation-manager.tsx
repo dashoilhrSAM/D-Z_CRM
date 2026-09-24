@@ -8,6 +8,16 @@ import { t } from "@/lib/i18n";
 
 const TRIGGERS = ["LEAD_CREATED", "LEAD_STAGE_CHANGED", "BOOKING_CREATED", "BOOKING_APPROACHING", "SERVICE_COMPLETED", "SERVICE_DUE", "JOB_READY", "CUSTOMER_INACTIVE", "LOYALTY_EVENT", "LOW_STOCK"];
 
+/**
+ * **还没有事件点的触发器** —— 选了也不会触发，所以标出来并禁选。
+ *
+ * 教训来自「自动化盘点」：原先 10 个触发器里有 6 个是死的（能选、能建、显示 Active、
+ * 但日志永远空白）。现在另外 4 个已接事件点、3 个接了每日扫描，
+ * 只剩这两个要等「积分事件」与「库存告警」两处加上调用才能真正工作。
+ * 与其让人建一条永远不跑的规则，不如先禁掉。
+ */
+const UNAVAILABLE_TRIGGERS = ["LOYALTY_EVENT", "LOW_STOCK"];
+
 export function AutomationManager({ templates }: { templates: { id: string; name: string }[] }) {
   const router = useRouter();
   const lang = useLang();
@@ -40,7 +50,14 @@ export function AutomationManager({ templates }: { templates: { id: string; name
       <div>
         <label className={labelCls}>{t("autom.col-trigger", lang)}</label>
         <select className={inputCls} value={f.trigger} onChange={(e) => setF({ ...f, trigger: e.target.value })}>
-          {TRIGGERS.map((tr) => <option key={tr} value={tr}>{t("autom.trigger." + tr, lang)}</option>)}
+          {TRIGGERS.map((tr) => {
+            const off = UNAVAILABLE_TRIGGERS.includes(tr);
+            return (
+              <option key={tr} value={tr} disabled={off}>
+                {t("autom.trigger." + tr, lang) + (off ? " — " + t("autom.trigger-unavailable", lang) : "")}
+              </option>
+            );
+          })}
         </select>
       </div>
       <div>
