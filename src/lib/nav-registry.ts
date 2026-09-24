@@ -124,7 +124,11 @@ export const NAV_SECTIONS: readonly NavSection[] = [
     section: "INVENTORY",
     items: [
       { key: "products", label: "Products", labelKey: "nav.products", href: "/workshop/inventory/products", icon: Boxes, module: "PARTS", access: ["OWNER", "COUNTER_STAFF"] },
-      // P2：批量配置（下载工作簿 → 改 → 上传 → 看差异 → 应用）。只给老板/经理：一次改几百条价格。
+      // P2/P3：批量配置（下载工作簿 → 改 → 上传 → 逐条审 → 应用）。给老板与经理：一次改几百条价格。
+      // **注意 access 里写的是 persona 不是角色名** —— MANAGER 的 persona 就是 OWNER（见 session-user.ts），
+      // 所以这一项本来就对经理可见（曾误以为只有老板能看到，白查一轮）。
+      // **删行仍然只有 OWNER**：那条门槛在服务端按**角色**判定（actions/bulk.ts 的 ORG_LEVEL），
+      // 经理的删除行在预览里就会变成报错，不因为能看到这一页而放宽。
       { key: "setup", label: "Bulk setup", labelKey: "nav.setup", href: "/workshop/setup", icon: Upload, module: "PARTS", access: ["OWNER"] },
       { key: "stock", label: "Stock", labelKey: "nav.stock", href: "/workshop/inventory/stock", icon: Package, module: "INVENTORY", access: ["OWNER", "COUNTER_STAFF"] },
       { key: "alerts", label: "Stock Alerts", labelKey: "nav.alerts", href: "/workshop/inventory/alerts", icon: AlertTriangle, module: "INVENTORY", access: ["OWNER"] },
