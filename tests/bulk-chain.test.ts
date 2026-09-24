@@ -605,3 +605,33 @@ describe("审核台该显示哪些表（老板「删了一行没反应」的直�
     expect(shouldShowSheet(0, 0)).toBe(false);
   });
 });
+describe("批量配置入口的可见性（我误判过一次，所以钉住机制）", () => {
+  it("MANAGER 本来就看得见 —— 因为它的 persona 是 OWNER（不能只看 access 数组）", async () => {
+    const { NAV_SECTIONS, personaSees } = await import("@/lib/nav-registry");
+    const { personaForRole } = await import("@/lib/session-user");
+    const item = NAV_SECTIONS.flatMap((s) => s.items).find((i) => i.key === "setup");
+    expect(item, "Bulk setup 导航项应当存在").toBeTruthy();
+
+    // 老板批准的口径：OWNER + MANAGER（本店）都能审
+    expect(personaForRole("OWNER")).toBe("OWNER");
+    expect(personaForRole("MANAGER")).toBe("OWNER");
+    expect(personaSees(personaForRole("MANAGER"), item!.access)).toBe(true);
+
+    // 反向：柜台与技师不该看到（一个断言如果不可能失败，它就不是断言）
+    expect(personaSees(personaForRole("COUNTER_STAFF"), item!.access)).toBe(false);
+    expect(personaSees(personaForRole("MECHANIC"), item!.access)).toBe(false);
+    expect(personaForRole("MECHANIC")).toBe("MECHANIC");
+
+    // 顺带记录一条**没改**的行为：未知角色默认落到 OWNER persona（＝看到全套导航）。
+    // 这不构成越权（页面本身另有 can(module,"view") 门禁，且非员工会话根本进不到这里），
+    // 但它是「宁可多给」的默认值 —— 写下来，免得下次有人以为这是漏判。
+    expect(personaForRole("SOME_FUTURE_ROLE")).toBe("OWNER");
+  });
+
+  it("但删除的门槛不随入口放宽：应用时按角色再挡一次", async () => {
+    const src = await import("node:fs/promises").then((fs) => fs.readFile("src/actions/bulk.ts", "utf8"));
+    // 入口放开时把写入门槛也放开，是这一节最该防的事
+    expect(src).toContain("ORG_LEVEL.includes(me.role)");
+    expect(src).toContain("Only the owner can delete rows");
+  });
+});
