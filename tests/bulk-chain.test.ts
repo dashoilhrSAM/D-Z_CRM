@@ -635,3 +635,21 @@ describe("批量配置入口的可见性（我误判过一次，所以钉住机�
     expect(src).toContain("Only the owner can delete rows");
   });
 });
+
+describe("审核台的行数上限（超出的行批不了 → 必须能展开）", () => {
+  it("默认只列前 200 行，展开后列全部", async () => {
+    const { ROW_PAGE, visibleRowCount } = await import("@/modules/bulk/diff");
+    expect(ROW_PAGE).toBe(200);
+    expect(visibleRowCount(50, false)).toBe(50);
+    expect(visibleRowCount(300, false)).toBe(200);
+    expect(visibleRowCount(300, true)).toBe(300);
+  });
+
+  it("反向：展开必须真的能看到被截掉的那些行（否则等于静默丢弃改动）", async () => {
+    const { visibleRowCount } = await import("@/modules/bulk/diff");
+    const total = 1234;
+    // 未展开 ≠ 全部；展开 = 全部。这两条一起才说明「截掉的部分是可恢复的」
+    expect(visibleRowCount(total, false)).toBeLessThan(total);
+    expect(visibleRowCount(total, true)).toBe(total);
+  });
+});

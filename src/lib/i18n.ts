@@ -2305,6 +2305,7 @@ export const DICT: Dict = {
   "bulk.rows-in-file": { en: "in file", zh: "文件里", ms: "dalam fail" },
   "bulk.rows-in-db": { en: "in database", zh: "库里", ms: "dalam pangkalan data" },
   "bulk.missing-rows": { en: "row(s) in the database are NOT in this file. They will NOT be deleted — rows missing from a file are never deleted. To delete one, put delete in its _action cell (the first column).", zh: "行不在这个文件里。它们**不会被删除** —— 文件里没有的行永远不删。要删某一行，请在该行**第一列 _action** 写 delete。", ms: "baris tidak ada dalam fail ini — tidak akan dipadam." },
+  "bulk.show-all": { en: "Show all rows", zh: "显示全部", ms: "Tunjuk semua" },
   "bulk.template-only": { en: "Template only (headers, no data)", zh: "只要模板（只有表头，不带数据）", ms: "Templat sahaja" },
   "bulk.review-title": { en: "Review changes", zh: "审核改动", ms: "Semak perubahan" },
   "bulk.approved": { en: "approved", zh: "已批准", ms: "diluluskan" },

@@ -53,6 +53,18 @@ export function shouldShowSheet(actionableRows: number, missing: number): boolea
   return actionableRows > 0 || missing > 0;
 }
 
+/**
+ * 审核台每张表一次列多少行（界面「显示全部」按钮的第一段）。
+ *
+ * 为什么不能只是「切掉多余的行」：**没列出来的行你批不了**，
+ * 而应用时只写已批准的行 —— 于是它们**静默地没被写入**，界面却像全都处理完了。
+ * 所以超出部分必须能展开。
+ */
+export const ROW_PAGE = 200;
+export function visibleRowCount(total: number, showAll: boolean): number {
+  return showAll ? total : Math.min(total, ROW_PAGE);
+}
+
 export interface SheetSummary {
   create: number;
   update: number;

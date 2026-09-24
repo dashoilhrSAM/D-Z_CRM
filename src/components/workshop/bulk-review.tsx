@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 import {
   applySetupSession, cancelSetupSession, saveSetupDecisions, type SheetColumnMeta,
 } from "@/actions/bulk";
-import { rowKeyOf, shouldShowSheet, type RowPlan } from "@/modules/bulk/diff";
+import { ROW_PAGE, rowKeyOf, shouldShowSheet, visibleRowCount, type RowPlan } from "@/modules/bulk/diff";
 
 /**
  * 改动审核台（P2 + P3）。
@@ -54,6 +54,8 @@ export function BulkReview(props: Props) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  /** 每张表是否展开全部（默认只列前 200 行）—— 没列出来的行批不了，所以必须能展开 */
+  const [expandedSheet, setExpandedSheet] = useState<Record<string, boolean>>({});
   const [summary, setSummary] = useState<string | null>(null);
   const dirty = useRef(false);
   const readOnly = props.status !== "DRAFT";
@@ -228,7 +230,10 @@ export function BulkReview(props: Props) {
               {t("bulk.cancel-import", lang)}
             </Button>
             <Button size="sm" onClick={apply} disabled={pending || approved.length === 0}>
-              {t("bulk.apply-approved", lang) + " (" + approved.length + ")"}
+              {t("bulk.apply-approved", lang) + " (" + approved.length + ")" +
+                (actionable.length - approved.length > 0
+                  ? " · " + (actionable.length - approved.length) + " " + t("bulk.not-decided", lang)
+                  : "")}
             </Button>
           </>
         )}
@@ -272,7 +277,7 @@ export function BulkReview(props: Props) {
               </div>
             )}
             <div className="divide-y">
-              {rows.slice(0, 200).map((p) => {
+              {rows.slice(0, visibleRowCount(rows.length, expandedSheet[sheet.key] ?? false)).map((p) => {
                 const k = rowKeyOf(p.sheet, p.rowNumber);
                 const d = decisionOf(p);
                 const expanded = open[k] ?? (p.action === "error" || p.changes.length > 0 || p.action === "create");
@@ -358,8 +363,18 @@ export function BulkReview(props: Props) {
                   </div>
                 );
               })}
-              {rows.length > 200 && (
-                <div className="px-4 py-2 text-xs text-muted-foreground">… {rows.length - 200} {t("bulk.more-rows", lang)}</div>
+              {rows.length > ROW_PAGE && !(expandedSheet[sheet.key] ?? false) && (
+                <div className="flex items-center gap-3 px-4 py-2 text-xs">
+                  <span className="text-muted-foreground">
+                    … {rows.length - ROW_PAGE} {t("bulk.more-rows", lang)}
+                  </span>
+                  <Button
+                    size="sm" variant="outline"
+                    onClick={() => setExpandedSheet((prev) => ({ ...prev, [sheet.key]: true }))}
+                  >
+                    {t("bulk.show-all", lang) + " (" + rows.length + ")"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>
