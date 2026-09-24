@@ -41,6 +41,18 @@ export interface RowPlan {
  */
 export const rowKeyOf = (sheet: string, rowNumber: number) => sheet + "#" + rowNumber;
 
+/**
+ * 审核台里「这张表要不要显示」。
+ *
+ * 规则：**有改动，或者文件里比库里少行** —— 后者正是老板「删掉一行」的场景，
+ * 那时候零改动，而提示恰恰最需要出现。
+ * （生产验证抓到过：原来的判断只看「有没有改动」，所以那种情况什么都不显示。
+ *  抽成纯函数就是为了让这条规则可以被测。）
+ */
+export function shouldShowSheet(actionableRows: number, missing: number): boolean {
+  return actionableRows > 0 || missing > 0;
+}
+
 export interface SheetSummary {
   create: number;
   update: number;

@@ -9,7 +9,7 @@ import { t } from "@/lib/i18n";
 import {
   applySetupSession, cancelSetupSession, saveSetupDecisions, type SheetColumnMeta,
 } from "@/actions/bulk";
-import { rowKeyOf, type RowPlan } from "@/modules/bulk/diff";
+import { rowKeyOf, shouldShowSheet, type RowPlan } from "@/modules/bulk/diff";
 
 /**
  * 改动审核台（P2 + P3）。
@@ -242,12 +242,14 @@ export function BulkReview(props: Props) {
 
       {props.sheets.map((sheet) => {
         const rows = actionable.filter((p) => p.sheet === sheet.key);
-        if (rows.length === 0) return null;
-        const cols = props.columns[sheet.key] ?? [];
-        const skips = props.plans.filter((p) => p.sheet === sheet.key && p.action === "skip").length;
         const fileRows = props.plans.filter((p) => p.sheet === sheet.key).length;
         const dbRows = props.existingCounts[sheet.key] ?? 0;
         const missing = dbRows - fileRows;
+        // **即使没有任何改动也要显示**：老板「删掉一行」的典型情况就是零改动，
+        // 而这正是提示最该出现的时候（规则见 diff.ts 的 shouldShowSheet）
+        if (!shouldShowSheet(rows.length, missing)) return null;
+        const cols = props.columns[sheet.key] ?? [];
+        const skips = props.plans.filter((p) => p.sheet === sheet.key && p.action === "skip").length;
         return (
           <div key={sheet.key} className="rounded-2xl border bg-card">
             <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
