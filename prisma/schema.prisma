@@ -1911,3 +1911,31 @@ model Document {
   @@index([invoiceId])
   @@index([retainUntil])
 }
+
+/// 批量配置的导入会话（P3）。
+/// 上传即建草稿，可以分几次审完再应用 —— 审到一半关掉页面不会丢。
+/// plans 存差异快照（每条自带旧值），应用时拿旧值与当前库比对，不一致就拒绝那一行。
+model BulkImportSession {
+  id             String    @id @default(cuid())
+  organisationId String
+  branchId       String
+  /// 上传的文件名与内容哈希（同一份文件反复上传能认出来）
+  fileName       String
+  fileHash       String
+  uploadedBy     String
+  uploadedAt     DateTime  @default(now())
+  /// DRAFT（在审）| APPLIED（已应用）| CANCELLED（已取消）
+  status         String    @default("DRAFT")
+  /// 文件声明包含哪些 sheet（逗号分隔）—— 没包含的表这次不涉及，不是空表
+  declaredSheets String?
+  /// 差异计划快照（RowPlan[]）
+  plans          Json?
+  /// 每一条的决定：批准 / 拒绝 / 就地修改过的值
+  decisions      Json?
+  /// 应用结果：逐 sheet 计数 + 被服务端拒绝的行
+  appliedSummary Json?
+  appliedAt      DateTime?
+
+  @@index([organisationId, branchId, status])
+  @@index([organisationId, uploadedAt])
+}

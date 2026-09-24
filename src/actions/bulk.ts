@@ -10,6 +10,12 @@ import { buildSetupWorkbook } from "@/modules/bulk/export";
 import { buildExistingRows, sheetColumns, type SheetColumnMeta } from "@/modules/bulk/existing";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
+import { audit } from "@/lib/auth/audit";
+import {
+  createImportSession, findDraftSession, loadImportSession, saveImportDecisions,
+  markImportApplied, cancelImportSession, listImportSessions, rowKeyOf,
+  type SessionView, type SessionHistoryRow,
+} from "@/modules/bulk/sessions";
 
 /**
  * 批量配置（P2）的写入口。
@@ -237,4 +243,169 @@ export async function applySetupImport(input: {
     revalidatePath("/workshop/setup");
   }
   return res;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P3：导入会话（审到一半可以关掉页面，回来接着审）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** 本会话默认盯着的分店（分行级用户＝自己的店，org 级＝主店） */
+async function defaultBranchId(me: { organisationId: string; branchId: string | null }) {
+  if (me.branchId) return me.branchId;
+  const main = await db.branch.findFirst({
+    where: { organisationId: me.organisationId, isMain: true },
+    select: { id: true },
+  });
+  return main?.id ?? null;
+}
+
+/** 打开页面时接上「上次没审完的那一份」 */
+export async function resumeSetupImport(): Promise<
+  { ok: true; session: SessionView | null; columns: Record<string, SheetColumnMeta[]> } | { ok: false; error: string }
+> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+  const branchId = await defaultBranchId(me);
+  if (!branchId) return { ok: false, error: "No branch" };
+  return { ok: true, session: await findDraftSession(me.organisationId, branchId, me.userId), columns: sheetColumns() };
+}
+
+/** 载入某一份会话（历史里点进去） */
+export async function loadSetupImport(sessionId: string): Promise<
+  { ok: true; session: SessionView; columns: Record<string, SheetColumnMeta[]> } | { ok: false; error: string }
+> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+  const session = await loadImportSession(sessionId, me.organisationId);
+  if (!session) return { ok: false, error: "Session not found" };
+  return { ok: true, session, columns: sheetColumns() };
+}
+
+/** 上传即建草稿：解析 + 差异 → 整份存下来 */
+export async function startSetupImport(formData: FormData): Promise<
+  | { ok: true; sessionId: string; columns: Record<string, SheetColumnMeta[]>; preview: PreviewResult }
+  | { ok: false; error: string }
+> {
+  const file = formData.get("file");
+  if (!(file instanceof File)) return { ok: false, error: "No file" };
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  // 内容哈希：历史里看得出「这是同一份文件」重复上传过
+  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+  const fileHash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 16);
+
+  // 复用同一套解析与差异（权限、分店、三条安全规则都在里面）
+  const fd = new FormData();
+  fd.set("file", new File([bytes], file.name, { type: file.type || "application/octet-stream" }));
+  const preview = await previewSetupImport(fd);
+  if (!preview.ok) return { ok: false, error: preview.error };
+
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+
+  const session = await createImportSession({
+    organisationId: me.organisationId,
+    branchId: preview.branchId,
+    fileName: file.name,
+    fileHash,
+    uploadedBy: me.userId,
+    declaredSheets: preview.declaredSheets,
+    plans: preview.plans,
+  });
+  return { ok: true, sessionId: session.id, columns: sheetColumns(), preview };
+}
+
+/** 存决定（关掉页面也不会丢） */
+export async function saveSetupDecisions(input: {
+  sessionId: string;
+  decisions: Record<string, { decision: "approved" | "declined"; edits?: Record<string, unknown> }>;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+  const saved = await saveImportDecisions(input.sessionId, me.organisationId, input.decisions);
+  if (!saved) return { ok: false, error: "This import is no longer a draft (already applied or cancelled)" };
+  return { ok: true };
+}
+
+/** 应用：只写**已批准**的行，然后把这个会话标记成 APPLIED */
+export async function applySetupSession(input: { sessionId: string }): Promise<
+  | { ok: true; summary: Record<string, { created: number; updated: number; deleted: number; deactivated: number }>; refused: { sheet: string; key: string; fields: string[] }[] }
+  | { ok: false; error: string }
+> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+
+  const session = await loadImportSession(input.sessionId, me.organisationId);
+  if (!session) return { ok: false, error: "Session not found" };
+  if (session.status !== "DRAFT") return { ok: false, error: "This import was already " + session.status.toLowerCase() };
+
+  const approved: RowPlan[] = [];
+  const edits: Record<string, Record<string, unknown>> = {};
+  for (const p of session.plans) {
+    if (p.action === "skip" || p.action === "error") continue;   // 出错的行不能被批准（界面上也按不了）
+    const d = session.decisions[rowKeyOf(p.sheet, p.rowNumber)];
+    if (d?.decision !== "approved") continue;
+    approved.push(p);
+    if (d.edits && Object.keys(d.edits).length > 0) edits[rowKeyOf(p.sheet, p.rowNumber)] = d.edits;
+  }
+  if (approved.length === 0) return { ok: false, error: "Nothing approved yet" };
+
+  const res = await applyPlans({
+    organisationId: me.organisationId,
+    branchId: session.branchId,
+    userId: me.userId,
+    sessionBranchId: me.branchId,
+    plans: approved,
+    edits,
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  await markImportApplied(session.id, me.organisationId, res);
+  await audit({
+    organisationId: me.organisationId,
+    branchId: session.branchId,
+    userId: me.userId,
+    action: "bulk.import.applied",
+    entity: "BulkImportSession",
+    entityId: session.id,
+    after: { file: session.fileName, approvedRows: approved.length, sheets: session.declaredSheets },
+  });
+
+  const summary: Record<string, { created: number; updated: number; deleted: number; deactivated: number }> = {};
+  for (const [sheet, s] of Object.entries(res.summary)) {
+    summary[sheet] = { created: s.created, updated: s.updated, deleted: s.deleted, deactivated: s.deactivated };
+  }
+  revalidatePath("/workshop/setup");
+  return { ok: true, summary, refused: res.refused };
+}
+
+/** 取消：什么都不写 */
+export async function cancelSetupSession(input: { sessionId: string }): Promise<{ ok: true } | { ok: false; error: string }> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+  const done = await cancelImportSession(input.sessionId, me.organisationId);
+  if (!done) return { ok: false, error: "This import is no longer a draft" };
+  revalidatePath("/workshop/setup");
+  return { ok: true };
+}
+
+/** 历史：每次导入改了什么、谁批的 */
+export async function setupSessionHistory(): Promise<
+  { ok: true; rows: SessionHistoryRow[] } | { ok: false; error: string }
+> {
+  const me = await actor();
+  if (!me) return { ok: false, error: "Not signed in" };
+  if (!(await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit")))
+    return { ok: false, error: "No permission to import" };
+  return { ok: true, rows: await listImportSessions(me.organisationId) };
 }
