@@ -43,6 +43,7 @@ export default async function SetupPage() {
                 status: draft.status,
                 plans: draft.plans,
                 decisions: draft.decisions,
+                declaredSheets: draft.declaredSheets,
               }
             : null
         }

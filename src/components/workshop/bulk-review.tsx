@@ -9,7 +9,9 @@ import { t } from "@/lib/i18n";
 import {
   applySetupSession, cancelSetupSession, saveSetupDecisions, type SheetColumnMeta,
 } from "@/actions/bulk";
-import { ROW_PAGE, rowKeyOf, shouldShowSheet, visibleRowCount, type RowPlan } from "@/modules/bulk/diff";
+import {
+  ROW_PAGE, isSheetDeclared, missingRows, rowKeyOf, shouldShowSheet, visibleRowCount, type RowPlan,
+} from "@/modules/bulk/diff";
 
 /**
  * 改动审核台（P2 + P3）。
@@ -39,6 +41,8 @@ interface Props {
   sheets: { key: string; title: string }[];
   /** 每张表库里有多少行 —— 用来对照「文件里少了几行」，并把「不会删除」讲清楚 */
   existingCounts: Record<string, number>;
+  /** 文件声明包含哪些表（空/缺省＝老文件没写，按全都算处理）。**没声明的表＝这次不涉及** */
+  declaredSheets: string[] | null;
   onChanged: () => void;
 }
 
@@ -79,6 +83,8 @@ export function BulkReview(props: Props) {
     return () => clearTimeout(timer);
   }, [decisions, props.sessionId, readOnly]);
 
+  // 文件里没有的那些表：只在这里汇总一行，不逐张弹提示（否则只传部分表时会满屏假警报）
+  const skippedSheets = props.sheets.filter((s) => !isSheetDeclared(props.declaredSheets, s.key));
   const actionable = props.plans.filter((p) => p.action !== "skip");
   const hasError = (p: RowPlan) => p.action === "error";
   const decisionOf = (p: RowPlan) => decisions[rowKeyOf(p.sheet, p.rowNumber)] ?? {};
@@ -239,6 +245,12 @@ export function BulkReview(props: Props) {
         )}
       </div>
 
+      {skippedSheets.length > 0 && (
+        <div className="rounded-2xl border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          {t("bulk.not-in-file", lang) + " " + skippedSheets.map((s) => s.title).join(" · ")}
+        </div>
+      )}
+
       {summary && (
         <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-xs font-medium text-emerald-800">
           {summary}
@@ -249,7 +261,9 @@ export function BulkReview(props: Props) {
         const rows = actionable.filter((p) => p.sheet === sheet.key);
         const fileRows = props.plans.filter((p) => p.sheet === sheet.key).length;
         const dbRows = props.existingCounts[sheet.key] ?? 0;
-        const missing = dbRows - fileRows;
+        // **没声明包含的表不算「少了行」** —— 否则只上传部分表时，每张没勾的表都会弹假警报
+        const missing = missingRows(props.declaredSheets, sheet.key, fileRows, dbRows);
+        if (!isSheetDeclared(props.declaredSheets, sheet.key)) return null;
         // **即使没有任何改动也要显示**：老板「删掉一行」的典型情况就是零改动，
         // 而这正是提示最该出现的时候（规则见 diff.ts 的 shouldShowSheet）
         if (!shouldShowSheet(rows.length, missing)) return null;

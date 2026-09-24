@@ -653,3 +653,26 @@ describe("审核台的行数上限（超出的行批不了 → 必须能展开�
     expect(visibleRowCount(total, true)).toBe(total);
   });
 });
+describe("只上传部分表时不能弹假警报（老板反馈的回归）", () => {
+  it("**没声明包含的表，缺行数必须是 0**（否则每张没勾的表都会报「少了 82 行」）", async () => {
+    const { missingRows, isSheetDeclared } = await import("@/modules/bulk/diff");
+    const declared = ["products", "suppliers", "customers"];
+
+    // 声明了的 → 正常算缺行
+    expect(isSheetDeclared(declared, "products")).toBe(true);
+    expect(missingRows(declared, "products", 80, 82)).toBe(2);
+
+    // **没声明的 → 一律 0**（文件里当然 0 行，但那是「这次不涉及」）
+    expect(isSheetDeclared(declared, "packages")).toBe(false);
+    expect(missingRows(declared, "packages", 0, 3)).toBe(0);
+    expect(missingRows(declared, "serviceTypes", 0, 18)).toBe(0);
+    expect(missingRows(declared, "motorcycles", 0, 7)).toBe(0);
+  });
+
+  it("老文件没写声明（null/空）→ 按「全都算包含」处理（向后兼容）", async () => {
+    const { isSheetDeclared, missingRows } = await import("@/modules/bulk/diff");
+    expect(isSheetDeclared(null, "products")).toBe(true);
+    expect(isSheetDeclared([], "products")).toBe(true);
+    expect(missingRows(null, "products", 80, 82)).toBe(2);
+  });
+});
