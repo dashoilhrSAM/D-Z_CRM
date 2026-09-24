@@ -6,6 +6,7 @@
 //  ② 组合键（套餐明细＝套餐名 + 项目名）：同名项目在不同套餐里必须互不干扰。
 //  ③ 分店：文件里写着哪个分店，就只动那个分店的数据。
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { normalizePhone } from "@/modules/bulk/sheets";
 
 const saved = { databaseUrl: process.env.DATABASE_URL };
 const tag = "blk" + Date.now().toString(36);
@@ -47,6 +48,11 @@ beforeAll(async () => {
       },
     },
   });
+  // 夹具按**生产形状**造：车主手机号带破折号与空格（生产里三种写法并存）、车牌带空格
+  const owner = await db.customer.create({ data: { organisationId: org.id, name: "Bulk Owner " + tag, phone: "018-492 8009" } });
+  await db.motorcycle.create({
+    data: { customerId: owner.id, plate: "VLL 3302 " + tag, brand: "Honda", model: "EX5 Dream", year: 2017, type: "UNDERBONE", currentMileage: 43215 },
+  });
   await db.serviceType.create({
     data: { organisationId: org.id, name: "Engine Oil Change", code: "ENGINE_OIL-" + tag, category: "ENGINE", durationMin: 30, priceSen: 8000, active: true },
   });
@@ -61,6 +67,9 @@ afterAll(async () => {
   await db.auditLog.deleteMany({ where: { organisationId: orgId } });
   // 服务目录行挂着 organisation 外键 —— 不先删就删不掉组织
   await db.serviceType.deleteMany({ where: { organisationId: orgId } });
+  // 车辆挂着客户外键 —— 顺序：车辆 → 客户，否则删不掉
+  await db.motorcycle.deleteMany({ where: { customer: { organisationId: orgId } } });
+  await db.customer.deleteMany({ where: { organisationId: orgId } });
   await db.servicePackageItem.deleteMany({ where: { package: { branchId } } });
   await db.servicePackage.deleteMany({ where: { branchId } });
   await db.campaign.deleteMany({ where: { branchId } });
@@ -79,7 +88,7 @@ async function currentProducts() {
 
 async function planFromFile() {
   const { planSheet } = await import("@/modules/bulk/diff");
-  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET } = await import("@/modules/bulk/sheets");
+  const { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
 
   const parsed = await parse(await build({ organisationId: orgId, branchId }));
   const products = (await currentProducts()).map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" }));
@@ -88,6 +97,7 @@ async function planFromFile() {
   const campaigns = await db.campaign.findMany({ where: { branchId } });
   const suppliers = await db.supplier.findMany({ where: { organisationId: orgId } });
   const serviceTypes = await db.serviceType.findMany({ where: { organisationId: orgId, code: { not: null } } });
+  const motorcycles = await db.motorcycle.findMany({ where: { customer: { organisationId: orgId } }, include: { customer: { select: { phone: true } } } });
 
   const existingBySheet: Record<string, Record<string, unknown>[]> = {
     products,
@@ -96,10 +106,16 @@ async function planFromFile() {
     campaigns: campaigns as unknown as Record<string, unknown>[],
     suppliers: suppliers as unknown as Record<string, unknown>[],
     serviceTypes: serviceTypes as unknown as Record<string, unknown>[],
+    motorcycles: motorcycles.map((m) => ({
+      plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
+      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
+    })),
   };
   const defs: Record<string, typeof PRODUCTS_SHEET> = {
     products: PRODUCTS_SHEET, packages: PACKAGES_SHEET, packageItems: PACKAGE_ITEMS_SHEET,
     campaigns: CAMPAIGNS_SHEET, suppliers: SUPPLIERS_SHEET, serviceTypes: SERVICE_TYPES_SHEET,
+    motorcycles: MOTORCYCLES_SHEET,
   };
 
   const out = new Map<string, ReturnType<typeof planSheet>>();
@@ -116,8 +132,9 @@ describe("往返一致：导出的文件原样导入 = 零改动", () => {
     expect(parsed.branchId).toBe(branchId);
     expect(parsed.versionOk).toBe(true);
     // **先证明四张表都被读进来了** —— 否则"零改动"可能只是"根本没读到"（探针假阳性）
-    expect([...plans.keys()].sort()).toEqual(["campaigns", "packageItems", "packages", "products", "serviceTypes", "suppliers"]);
-    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(6);
+    expect([...plans.keys()].sort()).toEqual(["campaigns", "motorcycles", "packageItems", "packages", "products", "serviceTypes", "suppliers"]);
+    expect(parsed.sheets.filter((s) => s.found)).toHaveLength(7);
+    expect(plans.get("motorcycles")!.summary.skip).toBe(1);
     // 每张表都要有真实读数 —— 只断言"存在"可能掩盖"零行"
     expect(plans.get("suppliers")!.summary.skip).toBe(1);
     expect(plans.get("serviceTypes")!.summary.skip).toBe(1);
@@ -312,5 +329,88 @@ describe("供应商与服务项目（P3）", () => {
     const after = await db.serviceType.findFirst({ where: { organisationId: orgId, code: "ENGINE_OIL-" + tag } });
     expect(after!.priceSen).toBe(9500);
     expect(after!.durationMin).toBe(45);
+  });
+});
+
+describe("车辆（P3 续）——每一辆的修理方式不一样，所以车型必须准", () => {
+  const PLATE = "VLL 3302 " + tag;
+
+  it("**手机号写法不同也能找到车主**（生产里 +60 / 0 / 破折号三种并存）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const { parsed } = await planFromFile();
+
+    const sheet = parsed.sheets.find((s) => s.key === "motorcycles")!;
+    // 库里存的是 018-492 8009，文件里改写成 +60 形式 —— 必须仍然匹配（归一化）
+    const rows = sheet.rows.map((r) => ({ ...r, cells: { ...r.cells, customerPhone: "+60184928009", currentMileage: 45000 } }));
+    const existing = (await db.motorcycle.findMany({ where: { customer: { organisationId: orgId } }, include: { customer: { select: { phone: true } } } })).map((m) => ({
+      plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
+      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
+    }));
+    const { plans, summary } = planSheet({ def: MOTORCYCLES_SHEET, incoming: rows, existing });
+    expect(summary.error).toBe(0);
+    expect(summary.update).toBe(1);            // 只有里程变了
+    expect(plans[0].changes.map((c) => c.field)).toEqual(["currentMileage"]);  // 手机号不该被当成改动
+
+    const res = await applyPlans({ organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null, plans });
+    expect(res.ok, res.ok ? "" : res.error).toBe(true);
+    const after = await db.motorcycle.findFirst({ where: { plate: PLATE } });
+    expect(after!.currentMileage).toBe(45000);
+  });
+
+  it("**车牌大小写与空格不同也能匹配**（存进去的仍是你写的写法）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
+    const { parsed } = await planFromFile();
+    const sheet = parsed.sheets.find((s) => s.key === "motorcycles")!;
+    const rows = sheet.rows.map((r) => ({ ...r, cells: { ...r.cells, plate: "vll3302" + tag.toLowerCase() } }));
+    // **现状行必须与预览里构造的方式一致**（含手机号归一化）——
+    // 少做一步就会出现"假改动"，这正是生产上踩过一次的那个坑（导出写了供应商名而现状里没有）
+    const existing = (await db.motorcycle.findMany({
+      where: { customer: { organisationId: orgId } },
+      include: { customer: { select: { phone: true } } },
+    })).map((m) => ({
+      plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
+      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
+    }));
+    const { plans, summary } = planSheet({ def: MOTORCYCLES_SHEET, incoming: rows, existing });
+    expect(summary.create).toBe(0);  // 认出来了，不是新建
+    expect(summary.error).toBe(0);
+    expect(plans[0].action).toBe("skip");
+  });
+
+  it("**车主不存在 → 报错且不写**（车辆表不建客户 —— 那正是产生重复客户的方式）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const before = await db.motorcycle.count({ where: { customer: { organisationId: orgId } } });
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: "test-user", sessionBranchId: null,
+      plans: [{
+        sheet: "motorcycles", rowNumber: 9, key: "NEW 9999", action: "create",
+        values: { plate: "NEW 9999", type: "SCOOTER", customerPhone: "19999999999", brand: "Yamaha", model: "X", year: 2024 },
+        changes: [], errors: [],
+      }],
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.error).toContain("add the customer first");
+    expect(await db.motorcycle.count({ where: { customer: { organisationId: orgId } } })).toBe(before);
+  });
+
+  it("**车型填错 → 报错并列出允许值**（填错不会报错、只会让该做的服务不出现，所以必须挡）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const { MOTORCYCLES_SHEET } = await import("@/modules/bulk/sheets");
+    const existing = await db.motorcycle.findMany({ where: { customer: { organisationId: orgId } } });
+    const { plans, summary } = planSheet({
+      def: MOTORCYCLES_SHEET,
+      // 注意 CUB 是**故意接受**的别名（映射到 LIFESTYLE_CUB，老板模板里用的就是这个词）；
+      // 这里用一个真正不存在的值来验证"填错必须挡下来"
+      incoming: [{ rowNumber: 2, cells: { plate: PLATE, type: "NONSENSE" } }],
+      existing,
+    });
+    expect(summary.error).toBe(1);
+    expect(plans[0].errors.join(" ")).toContain("unknown value (NONSENSE)");
+    expect(plans[0].errors.join(" ")).toContain("allowed");
   });
 });

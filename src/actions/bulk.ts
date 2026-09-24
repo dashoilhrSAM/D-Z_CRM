@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { planSheet, type RowPlan, type SheetSummary } from "@/modules/bulk/diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET } from "@/modules/bulk/sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, normalizePhone } from "@/modules/bulk/sheets";
 import { buildSetupWorkbook } from "@/modules/bulk/export";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
@@ -102,7 +102,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true, organisationId: true } });
   if (!branch || branch.organisationId !== me.organisationId) return { ok: false, error: "The branch in this file is not in your organisation" };
 
-  const [products, packages, packageItems, campaigns, suppliers, serviceTypes] = await Promise.all([
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles] = await Promise.all([
     db.product.findMany({
       where: { organisationId: me.organisationId },
       // **必须带上供应商名**：导出的文件里写着供应商名，现状里没有的话，
@@ -126,6 +126,10 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
       where: { organisationId: me.organisationId, code: { not: null } },
       select: { code: true, name: true, category: true, durationMin: true, priceSen: true, active: true },
     }),
+    db.motorcycle.findMany({
+      where: { customer: { organisationId: me.organisationId } },
+      include: { customer: { select: { phone: true } } },
+    }),
   ]);
   const existingBySheet: Record<string, Record<string, unknown>[]> = {
     [PRODUCTS_SHEET.key]: products.map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" })),
@@ -138,6 +142,12 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     [SUPPLIERS_SHEET.key]: suppliers,
     // 服务目录只比对有 code 的行（没有 code 的无法作为键，也确实不该被 Excel 改）
     [SERVICE_TYPES_SHEET.key]: serviceTypes,
+    // 手机号在这里也归一化 —— 导入时会归一化文件里的值，两边必须同一套算法才比得上
+    [MOTORCYCLES_SHEET.key]: motorcycles.map((m) => ({
+      plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
+      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
+    })),
   };
   const defBySheet: Record<string, typeof PRODUCTS_SHEET> = {
     [PRODUCTS_SHEET.key]: PRODUCTS_SHEET,
@@ -146,6 +156,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     [CAMPAIGNS_SHEET.key]: CAMPAIGNS_SHEET,
     [SUPPLIERS_SHEET.key]: SUPPLIERS_SHEET,
     [SERVICE_TYPES_SHEET.key]: SERVICE_TYPES_SHEET,
+    [MOTORCYCLES_SHEET.key]: MOTORCYCLES_SHEET,
   };
 
   const canDelete = ORG_LEVEL.includes(me.role);
