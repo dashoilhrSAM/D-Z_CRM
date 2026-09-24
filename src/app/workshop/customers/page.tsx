@@ -35,7 +35,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
           <input name="q" defaultValue={q ?? ""} placeholder={t("ws.customers.search-placeholder", lang)} className="h-9 w-full rounded-lg border bg-card pl-9 pr-3 text-sm outline-none focus:ring-2 focus:ring-ring" />
         </PendingForm>
         <ExportCsvButton href="/api/export?type=customers" className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent" />
-        <Link href="/workshop/import" className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent">{t("ws.customers.import-csv", lang)}</Link>
+        <Link href="/workshop/setup" className="rounded-lg border px-3 py-2 text-sm font-medium hover:bg-accent">{t("nav.setup", lang)}</Link>
       </div>
 
       <div data-tut="customers-list" className="dz-panel overflow-x-auto">
