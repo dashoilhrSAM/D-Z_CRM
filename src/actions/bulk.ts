@@ -87,6 +87,7 @@ export async function exportSetupWorkbook(input: {
 }
 
 export type { SheetColumnMeta } from "@/modules/bulk/existing";
+export type { SessionHistoryRow } from "@/modules/bulk/sessions";
 
 export interface PreviewResult {
   ok: true;
@@ -322,7 +323,7 @@ export async function startSetupImport(formData: FormData): Promise<
 /** 存决定（关掉页面也不会丢） */
 export async function saveSetupDecisions(input: {
   sessionId: string;
-  decisions: Record<string, { decision: "approved" | "declined"; edits?: Record<string, unknown> }>;
+  decisions: Record<string, { decision?: "approved" | "declined"; edits?: Record<string, string> }>;
 }): Promise<{ ok: true } | { ok: false; error: string }> {
   const me = await actor();
   if (!me) return { ok: false, error: "Not signed in" };

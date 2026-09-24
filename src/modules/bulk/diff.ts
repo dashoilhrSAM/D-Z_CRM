@@ -35,6 +35,12 @@ export interface RowPlan {
   errors: string[];
 }
 
+/**
+ * 行的标识：**界面与服务器必须用同一套算法**（决定存下来之后是按这个键找回来的）。
+ * 放在这里而不是 sessions.ts，因为客户端组件也要用它 —— 而 sessions.ts 会拖进 prisma。
+ */
+export const rowKeyOf = (sheet: string, rowNumber: number) => sheet + "#" + rowNumber;
+
 export interface SheetSummary {
   create: number;
   update: number;

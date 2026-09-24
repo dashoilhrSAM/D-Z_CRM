@@ -1,46 +1,104 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Download, Upload } from "lucide-react";
+import { Download, History, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
-import { exportSetupWorkbook, previewSetupImport, type PreviewResult } from "@/actions/bulk";
+import {
+  exportSetupWorkbook, loadSetupImport, resumeSetupImport, setupSessionHistory, startSetupImport,
+  type SheetColumnMeta, type SessionHistoryRow,
+} from "@/actions/bulk";
 import { BulkReview } from "@/components/workshop/bulk-review";
+import type { RowPlan } from "@/modules/bulk/diff";
 
 /**
- * 批量配置（P1 选择性下载 + P2 审核台）。
+ * 批量配置（P1 选择性下载 + P2 审核台 + P3 导入会话）。
  *
  * 流程：**挑要下哪几张 → 改 → 传回来 → 逐条 批准/拒绝/修改 → 应用**。
  *
- * 两个刻意的设计：
- *  ① 下载可以只挑几张，而且**这份清单会写进文件** —— 导入时只处理文件里有的部分，
- *     不会把没勾的表当成「空的」；
- *  ② 上传只解析与校验，**审核台**才决定写什么（只有你批准的行会落库）。
+ * P3 之后有一件事与以前不同：**审到一半可以关掉页面**。
+ * 打开这一页会自动接上「上次没审完的那一份」（草稿会话存在服务器上）。
  */
+
+interface Desk {
+  sessionId: string;
+  fileName: string;
+  uploadedAt: string;
+  status: "DRAFT" | "APPLIED" | "CANCELLED";
+  plans: RowPlan[];
+  decisions: Record<string, { decision?: "approved" | "declined"; edits?: Record<string, string> }>;
+}
+
+/** 服务端已经把「上次没审完的那一份」读出来了，这里直接接上（客户端不拉、无 effect） */
+export interface InitialSession {
+  id: string;
+  fileName: string;
+  uploadedAt: string;
+  status: "DRAFT" | "APPLIED" | "CANCELLED";
+  plans: RowPlan[];
+  decisions: Record<string, { decision?: "approved" | "declined"; edits?: Record<string, string> }>;
+}
 
 export function BulkSetup({
   canDelete,
   branches,
   sheets,
+  initialSession,
+  initialColumns,
 }: {
   canDelete: boolean;
   branches: { id: string; name: string }[];
   sheets: { key: string; title: string }[];
+  initialSession: InitialSession | null;
+  initialColumns: Record<string, SheetColumnMeta[]>;
 }) {
   const lang = useLang();
   const router = useRouter();
   const [pending, start] = useTransition();
+  const [desk, setDesk] = useState<Desk | null>(
+    initialSession
+      ? {
+          sessionId: initialSession.id,
+          fileName: initialSession.fileName,
+          uploadedAt: initialSession.uploadedAt,
+          status: initialSession.status,
+          plans: initialSession.plans,
+          decisions: initialSession.decisions,
+        }
+      : null,
+  );
+  const [columns, setColumns] = useState<Record<string, SheetColumnMeta[]>>(initialColumns);
+  const [resumed, setResumed] = useState(initialSession !== null);
   const [file, setFile] = useState<File | null>(null);
-  const [preview, setPreview] = useState<PreviewResult | null>(null);
   const [downloading, setDownloading] = useState(false);
-  // 套餐与促销按分店存，所以必须明确「这一份文件属于哪个分店」——文件里也会写明
+  const [history, setHistory] = useState<SessionHistoryRow[] | null>(null);
   const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
-  // 要下载哪几张（默认全选）
   const [selected, setSelected] = useState<string[]>(sheets.map((s) => s.key));
   const [templateOnly, setTemplateOnly] = useState(false);
+
+  /** 接上「上次没审完的那一份」（打开页面时自动做一次） */
+  const resume = useCallback(async () => {
+    const res = await resumeSetupImport();
+    if (!res.ok) return;
+    setColumns(res.columns);
+    if (res.session) {
+      setDesk({
+        sessionId: res.session.id,
+        fileName: res.session.fileName,
+        uploadedAt: res.session.uploadedAt,
+        status: res.session.status,
+        plans: res.session.plans,
+        decisions: res.session.decisions,
+      });
+      setResumed(true);
+    }
+  }, []);
+
+  // 注意：这里**故意不在 effect 里拉数据** —— 草稿会话由服务端读好传进来（见 page.tsx）。
+  // resume() 只在应用/取消之后用（那时机是事件回调，不是 effect）。
 
   const toggleSheet = (key: string) =>
     setSelected((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
@@ -66,19 +124,61 @@ export function BulkSetup({
     }
   };
 
-  const runPreview = () => {
+  const upload = () => {
     if (!file) return;
     const fd = new FormData();
     fd.set("file", file);
     start(async () => {
-      const res = await previewSetupImport(fd);
+      const res = await startSetupImport(fd);
       if (!res.ok) {
         toast.error(res.error);
-        setPreview(null);
         return;
       }
-      setPreview(res);
+      setColumns(res.columns);
+      setResumed(false);
+      setDesk({
+        sessionId: res.sessionId,
+        fileName: file.name,
+        uploadedAt: new Date().toISOString(),
+        status: "DRAFT",
+        plans: res.preview.plans,
+        decisions: {},
+      });
+      setHistory(null);
+      toast.success(t("bulk.uploaded", lang));
     });
+  };
+
+  const openHistory = () =>
+    start(async () => {
+      const res = await setupSessionHistory();
+      setHistory(res.ok ? res.rows : []);
+    });
+
+  const openSession = (id: string) =>
+    start(async () => {
+      const res = await loadSetupImport(id);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      setColumns(res.columns);
+      setResumed(false);
+      setDesk({
+        sessionId: res.session.id,
+        fileName: res.session.fileName,
+        uploadedAt: res.session.uploadedAt,
+        status: res.session.status,
+        plans: res.session.plans,
+        decisions: res.session.decisions,
+      });
+    });
+
+  const onChanged = () => {
+    setResumed(false);
+    setHistory(null);
+    void resume();
+    router.refresh();
   };
 
   return (
@@ -105,7 +205,12 @@ export function BulkSetup({
         </div>
 
         <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <input type="checkbox" checked={templateOnly} disabled={pending || downloading} onChange={(e) => setTemplateOnly(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={templateOnly}
+            disabled={pending || downloading}
+            onChange={(e) => setTemplateOnly(e.target.checked)}
+          />
           {t("bulk.template-only", lang)}
         </label>
 
@@ -122,12 +227,53 @@ export function BulkSetup({
               ))}
             </select>
           )}
-          <Button size="sm" variant="outline" onClick={download} disabled={downloading || pending || !branchId || selected.length === 0}>
+          <Button
+            size="sm" variant="outline" onClick={download}
+            disabled={downloading || pending || !branchId || selected.length === 0}
+          >
             <Download className="h-4 w-4" /> {t("bulk.download", lang) + " (" + selected.length + ")"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={openHistory} disabled={pending}>
+            <History className="h-4 w-4" /> {t("bulk.history", lang)}
           </Button>
           {branches.length === 1 && <span className="text-xs text-muted-foreground">{branches[0].name}</span>}
         </div>
       </div>
+
+      {/* 历史（点一次才拉，不占页面加载） */}
+      {history && (
+        <div className="rounded-2xl border bg-card p-4 space-y-2">
+          <h2 className="text-sm font-semibold">{t("bulk.history", lang)}</h2>
+          {history.length === 0 && <p className="text-xs text-muted-foreground">{t("bulk.history-empty", lang)}</p>}
+          <div className="divide-y text-xs">
+            {history.map((h) => (
+              <div key={h.id} className="flex flex-wrap items-center gap-2 py-1.5">
+                <span className="min-w-[120px] text-muted-foreground">{h.uploadedAt.slice(0, 16).replace("T", " ")}</span>
+                <span className="min-w-[140px] font-medium">{h.fileName}</span>
+                <span className="text-muted-foreground">
+                  {h.total} {t("bulk.rows-to-decide", lang)} · {h.approved} {t("bulk.approved", lang)} · {h.declined} {t("bulk.declined", lang)}
+                </span>
+                {h.appliedSummary && (
+                  <span className="text-emerald-700">
+                    +{h.appliedSummary.created} / ~{h.appliedSummary.updated} / -{h.appliedSummary.deleted}
+                    {h.appliedSummary.refused ? " | " + h.appliedSummary.refused + " " + t("bulk.refused-short", lang) : ""}
+                  </span>
+                )}
+                <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground">
+                  {h.status === "DRAFT" ? t("bulk.status-draft", lang)
+                    : h.status === "APPLIED" ? t("bulk.status-applied", lang)
+                    : t("bulk.status-cancelled", lang)}
+                </span>
+                <span className="text-muted-foreground">{h.uploadedByName}</span>
+                <span className="flex-1" />
+                <Button size="sm" variant="ghost" onClick={() => openSession(h.id)} disabled={pending}>
+                  {t("bulk.open", lang)}
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 2. 上传（不写库） */}
       <div className="rounded-2xl border bg-card p-5 space-y-3">
@@ -140,30 +286,36 @@ export function BulkSetup({
             type="file"
             accept=".xlsx"
             disabled={pending}
-            onChange={(e) => {
-              setFile(e.target.files?.[0] ?? null);
-              setPreview(null);
-            }}
+            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="text-xs"
           />
-          <Button size="sm" onClick={runPreview} disabled={pending || !file}>
+          <Button size="sm" onClick={upload} disabled={pending || !file}>
             <Upload className="h-4 w-4" /> {t("bulk.preview", lang)}
           </Button>
         </div>
       </div>
 
-      {/* 3. 审核台：逐条 批准 / 拒绝 / 修改 */}
-      {preview && (
+      {/* 3. 审核台：逐条 批准 / 拒绝 / 修改（决定存在服务器上） */}
+      {resumed && desk && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/5 px-4 py-2 text-xs text-amber-800">
+          {t("bulk.resumed", lang) + " " + desk.uploadedAt.slice(0, 16).replace("T", " ")}
+        </div>
+      )}
+      {desk && (
         <BulkReview
-          preview={preview}
-          onDone={() => {
-            setFile(null);
-            router.refresh();
-          }}
+          sessionId={desk.sessionId}
+          fileName={desk.fileName}
+          uploadedAt={desk.uploadedAt}
+          status={desk.status}
+          plans={desk.plans}
+          decisions={desk.decisions}
+          columns={columns}
+          sheets={sheets}
+          onChanged={onChanged}
         />
       )}
 
-      {preview && (
+      {desk && (
         <p className="text-xs text-muted-foreground">
           {canDelete ? t("bulk.apply-hint", lang) : t("bulk.apply-hint-noDelete", lang)}
         </p>

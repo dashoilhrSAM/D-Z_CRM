@@ -1,59 +1,120 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { Check, ChevronDown, ChevronRight, TriangleAlert, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Download, TriangleAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
-import { applySetupImport, type PreviewResult, type SheetColumnMeta } from "@/actions/bulk";
-import type { RowPlan } from "@/modules/bulk/diff";
+import {
+  applySetupSession, cancelSetupSession, saveSetupDecisions, type SheetColumnMeta,
+} from "@/actions/bulk";
+import { rowKeyOf, type RowPlan } from "@/modules/bulk/diff";
 
 /**
- * 改动审核台（P2）。
+ * 改动审核台（P2 + P3）。
  *
- * 这一屏是老板要的那件事：**上传之后不是只有「全部应用」一个按钮** ——
- * 每一行可以 批准 / 拒绝 / 就地修改，出错的改对就能批，改错了不用回 Excel。
+ * P3 之后这一屏是**接着会话干活**的：决定存在服务器上，关掉页面回来还在。
+ * 与上一版的三处不同：
+ *   ① 决定与「就地修改」合成一个对象，改完**自动存回**（600ms 合并一次，不是每次按键都打服务器）；
+ *   ② 顶部显示**上次保存于** —— 老板要能确信「我批的这些没丢」；
+ *   ③ 已应用/已取消的会话打开时**只读**（终态不许再改，历史才可信）。
  *
- * 三条与 Excel 端一致的语义（界面不发明新规则）：
- *   · 输入框留空 = **不动**（不是清成 0）—— 空白处的占位文字显示库里现在的值
- *   · 出错的行**不能被批准**（要么改对、要么拒绝）
- *   · 只有你批准的行才会写库
+ * 与 Excel 端一致的语义（界面不发明新规则）：
+ *   · 输入框留空 = 不动（占位文字显示库里现在的值）
+ *   · 出错的行不能被批准
+ *   · 只有批准的行才会写库
  */
 
-type Decision = "approved" | "declined";
+type Decision = { decision?: "approved" | "declined"; edits?: Record<string, string> };
 
-export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone: () => void }) {
+interface Props {
+  sessionId: string;
+  fileName: string;
+  uploadedAt: string;
+  status: "DRAFT" | "APPLIED" | "CANCELLED";
+  plans: RowPlan[];
+  decisions: Record<string, Decision>;
+  columns: Record<string, SheetColumnMeta[]>;
+  sheets: { key: string; title: string }[];
+  onChanged: () => void;
+}
+
+function csvCell(v: unknown) {
+  const s = v === null || v === undefined ? "" : String(v);
+  return '"' + s.split('"').join('""') + '"';
+}
+
+export function BulkReview(props: Props) {
   const lang = useLang();
   const [pending, start] = useTransition();
-  const [decisions, setDecisions] = useState<Record<string, Decision>>({});
-  const [edits, setEdits] = useState<Record<string, Record<string, string>>>({});
+  const [decisions, setDecisions] = useState<Record<string, Decision>>(props.decisions ?? {});
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [savedAt, setSavedAt] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [refused, setRefused] = useState<{ sheet: string; key: string; fields: string[] }[] | null>(null);
+  const [summary, setSummary] = useState<string | null>(null);
+  const dirty = useRef(false);
+  const readOnly = props.status !== "DRAFT";
 
-  const rowKey = (p: RowPlan) => p.sheet + "#" + p.rowNumber;
+  // 改完自动存回（合并 600ms 内的连续修改）
+  useEffect(() => {
+    if (!dirty.current || readOnly) return;
+    const timer = setTimeout(() => {
+      setSaveState("saving");
+      void saveSetupDecisions({ sessionId: props.sessionId, decisions }).then((res) => {
+        if (res.ok) {
+          setSaveState("saved");
+          setSavedAt(new Date().toLocaleTimeString());
+          dirty.current = false;
+        } else {
+          setSaveState("error");
+          toast.error(res.error);
+        }
+      });
+    }, 600);
+    return () => clearTimeout(timer);
+  }, [decisions, props.sessionId, readOnly]);
+
+  const actionable = props.plans.filter((p) => p.action !== "skip");
   const hasError = (p: RowPlan) => p.action === "error";
-  const actionable = preview.plans.filter((p) => p.action !== "skip");
-  const approved = actionable.filter((p) => decisions[rowKey(p)] === "approved" && !hasError(p));
+  const decisionOf = (p: RowPlan) => decisions[rowKeyOf(p.sheet, p.rowNumber)] ?? {};
+  const approved = actionable.filter((p) => decisionOf(p).decision === "approved" && !hasError(p));
 
-  const setDecision = (p: RowPlan, d: Decision) =>
-    setDecisions((prev) => ({ ...prev, [rowKey(p)]: prev[rowKey(p)] === d ? "declined" : d })) as never;
+  const setDecision = (p: RowPlan, d: "approved" | "declined") => {
+    dirty.current = true;
+    setDecisions((prev) => {
+      const k = rowKeyOf(p.sheet, p.rowNumber);
+      const cur = prev[k] ?? {};
+      return { ...prev, [k]: { ...cur, decision: cur.decision === d ? undefined : d } };
+    });
+  };
 
-  const bulk = (d: Decision | "clean") =>
+  const bulk = (mode: "approved" | "declined") => {
+    dirty.current = true;
     setDecisions((prev) => {
       const next = { ...prev };
       for (const p of actionable) {
-        if (d === "clean") next[rowKey(p)] = hasError(p) ? next[rowKey(p)] : "approved";
-        else next[rowKey(p)] = hasError(p) && d === "approved" ? next[rowKey(p)] : d;
+        const k = rowKeyOf(p.sheet, p.rowNumber);
+        const cur = next[k] ?? {};
+        // 「批准没出错的」不会把出错的行也批了
+        if (mode === "approved" && hasError(p)) continue;
+        next[k] = { ...cur, decision: mode };
       }
       return next;
     });
+  };
 
-  const setEdit = (p: RowPlan, field: string, value: string) =>
-    setEdits((prev) => ({ ...prev, [rowKey(p)]: { ...(prev[rowKey(p)] ?? {}), [field]: value } }));
+  const setEdit = (p: RowPlan, field: string, value: string) => {
+    dirty.current = true;
+    setDecisions((prev) => {
+      const k = rowKeyOf(p.sheet, p.rowNumber);
+      const cur = prev[k] ?? {};
+      return { ...prev, [k]: { ...cur, edits: { ...(cur.edits ?? {}), [field]: value } } };
+    });
+  };
 
   const valueOf = (p: RowPlan, c: SheetColumnMeta): string => {
-    const edited = edits[rowKey(p)]?.[c.field];
+    const edited = decisionOf(p).edits?.[c.field];
     if (edited !== undefined) return edited;
     const v = p.values[c.field];
     if (v === undefined || v === null) return "";
@@ -68,14 +129,7 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
 
   const apply = () =>
     start(async () => {
-      // 只送**已批准**的行；界面里「就地修改」的原始值单独送出（由服务端解析 + 复验）
-      const plans = approved;
-      const editsOut: Record<string, Record<string, unknown>> = {};
-      for (const p of approved) {
-        const edited = edits[rowKey(p)];
-        if (edited && Object.keys(edited).length > 0) editsOut[rowKey(p)] = edited;
-      }
-      const res = await applySetupImport({ plans, branchId: preview.branchId, edits: editsOut });
+      const res = await applySetupSession({ sessionId: props.sessionId });
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -87,71 +141,123 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
         }),
         { created: 0, updated: 0, deleted: 0, deactivated: 0 },
       );
-      toast.success(
-        t("bulk.applied", lang) + ": +" + total.created + " / ~" + total.updated + " / -" + total.deleted,
+      const refused = res.refused?.length ?? 0;
+      setSummary(
+        t("bulk.applied", lang) + ": +" + total.created + " / ~" + total.updated + " / -" + total.deleted +
+        (total.deactivated ? " (" + total.deactivated + " " + t("bulk.deactivated", lang) + ")" : "") +
+        (refused ? " | " + refused + " " + t("bulk.refused-short", lang) : ""),
       );
-      setRefused(res.refused ?? []);
-      onDone();
+      toast.success(t("bulk.applied", lang));
+      props.onChanged();
     });
+
+  const cancel = () =>
+    start(async () => {
+      const res = await cancelSetupSession({ sessionId: props.sessionId });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(t("bulk.cancelled", lang));
+      props.onChanged();
+    });
+
+  /** 导出本次变更清单（给会计/老板看的那种）——纯客户端，不动服务器 */
+  const exportCsv = () => {
+    const lines: string[] = [["sheet", "action", "key", "field", "before", "after"].map(csvCell).join(",")];
+    for (const p of approved) {
+      if (p.changes.length === 0) {
+        lines.push([p.sheet, p.action, p.key, "", "", ""].map(csvCell).join(","));
+        continue;
+      }
+      for (const c of p.changes) {
+        lines.push([p.sheet, p.action, p.key, c.field, oldValueOf(p, c.field), String(c.to ?? "")].map(csvCell).join(","));
+      }
+    }
+    const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "import-changes-" + props.uploadedAt.slice(0, 10) + ".csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const chip = (label: string, tone: string) => (
     <span className={"rounded px-1.5 py-0.5 text-[11px] font-medium " + tone}>{label}</span>
   );
 
+  const saveLabel =
+    saveState === "saving" ? t("bulk.saving", lang)
+    : saveState === "saved" ? t("bulk.saved-at", lang) + " " + (savedAt ?? "")
+    : saveState === "error" ? t("bulk.save-failed", lang)
+    : "";
+
   return (
     <div className="space-y-3">
-      {/* 顶部：读数 + 批量 + 应用 */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border bg-card px-4 py-3">
-        <span className="text-sm font-semibold">{t("bulk.review-title", lang)}</span>
+        <span className="text-sm font-semibold">{props.fileName}</span>
+        {readOnly
+          ? chip(
+              props.status === "APPLIED" ? t("bulk.status-applied", lang) : t("bulk.status-cancelled", lang),
+              props.status === "APPLIED" ? "bg-emerald-500/10 text-emerald-700" : "bg-muted text-muted-foreground",
+            )
+          : chip(t("bulk.status-draft", lang), "bg-amber-500/10 text-amber-700")}
         {chip(approved.length + " " + t("bulk.approved", lang), "bg-emerald-500/10 text-emerald-700")}
         {chip(actionable.length - approved.length + " " + t("bulk.not-decided", lang), "bg-muted text-muted-foreground")}
+        {saveLabel && <span className="text-[11px] text-muted-foreground">{saveLabel}</span>}
         <span className="flex-1" />
-        <Button size="sm" variant="outline" onClick={() => bulk("approved")} disabled={pending}>{t("bulk.approve-clean", lang)}</Button>
-        <Button size="sm" variant="outline" onClick={() => bulk("declined")} disabled={pending}>{t("bulk.decline-all", lang)}</Button>
-        <Button size="sm" onClick={apply} disabled={pending || approved.length === 0}>
-          {t("bulk.apply-approved", lang) + " (" + approved.length + ")"}
+        {!readOnly && (
+          <>
+            <Button size="sm" variant="outline" onClick={() => bulk("approved")} disabled={pending}>
+              {t("bulk.approve-clean", lang)}
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => bulk("declined")} disabled={pending}>
+              {t("bulk.decline-all", lang)}
+            </Button>
+          </>
+        )}
+        <Button size="sm" variant="outline" onClick={exportCsv} disabled={approved.length === 0}>
+          <Download className="h-4 w-4" /> {t("bulk.export-changes", lang)}
         </Button>
+        {!readOnly && (
+          <>
+            <Button size="sm" variant="ghost" onClick={cancel} disabled={pending}>
+              {t("bulk.cancel-import", lang)}
+            </Button>
+            <Button size="sm" onClick={apply} disabled={pending || approved.length === 0}>
+              {t("bulk.apply-approved", lang) + " (" + approved.length + ")"}
+            </Button>
+          </>
+        )}
       </div>
 
-      {refused && refused.length > 0 && (
-        <div className="rounded-2xl border border-destructive/40 bg-destructive/5 px-4 py-3 text-xs">
-          <p className="font-medium text-destructive">{t("bulk.refused-title", lang)}</p>
-          <ul className="mt-1 space-y-0.5 text-muted-foreground">
-            {refused.map((r, i) => (
-              <li key={i}>· {r.key}: {r.fields.join("; ")}</li>
-            ))}
-          </ul>
+      {summary && (
+        <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-xs font-medium text-emerald-800">
+          {summary}
         </div>
       )}
 
-      {/* 逐张 sheet */}
-      {preview.sheets.map((sheet) => {
+      {props.sheets.map((sheet) => {
         const rows = actionable.filter((p) => p.sheet === sheet.key);
-        if (!sheet.found) {
-          return (
-            <div key={sheet.key} className="rounded-2xl border bg-card px-4 py-3 text-xs">
-              <span className="font-medium">{sheet.title}</span>
-              <span className="ml-2 text-muted-foreground">{t("bulk.sheet-missing", lang)}</span>
-            </div>
-          );
-        }
         if (rows.length === 0) return null;
-        const cols = preview.columns[sheet.key] ?? [];
+        const cols = props.columns[sheet.key] ?? [];
+        const skips = props.plans.filter((p) => p.sheet === sheet.key && p.action === "skip").length;
         return (
           <div key={sheet.key} className="rounded-2xl border bg-card">
             <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
               <span className="font-semibold">{sheet.title}</span>
               <span className="text-muted-foreground">
-                {rows.length} {t("bulk.rows-to-decide", lang)} · {sheet.summary.skip} {t("bulk.nochange", lang)}
+                {rows.length} {t("bulk.rows-to-decide", lang)} · {skips} {t("bulk.nochange", lang)}
               </span>
             </div>
             <div className="divide-y">
               {rows.slice(0, 200).map((p) => {
-                const k = rowKey(p);
-                const decision = decisions[k];
+                const k = rowKeyOf(p.sheet, p.rowNumber);
+                const d = decisionOf(p);
                 const expanded = open[k] ?? (p.action === "error" || p.changes.length > 0 || p.action === "create");
                 return (
-                  <div key={k} className={decision === "declined" ? "opacity-45" : ""}>
+                  <div key={k} className={d.decision === "declined" ? "opacity-45" : ""}>
                     <div className="flex flex-wrap items-center gap-2 px-4 py-2 text-sm">
                       <button
                         className="text-muted-foreground"
@@ -171,16 +277,23 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
                         </span>
                       )}
                       <span className="flex-1" />
-                      <Button
-                        size="sm" variant="ghost" disabled={pending || hasError(p)}
-                        onClick={() => setDecision(p, "approved")}
-                        title={hasError(p) ? t("bulk.fix-first", lang) : t("bulk.approve", lang)}
-                      >
-                        <Check className={"h-4 w-4 " + (decision === "approved" ? "text-emerald-600" : "text-muted-foreground")} />
-                      </Button>
-                      <Button size="sm" variant="ghost" disabled={pending} onClick={() => setDecision(p, "declined")} title={t("bulk.decline", lang)}>
-                        <X className={"h-4 w-4 " + (decision === "declined" ? "text-destructive" : "text-muted-foreground")} />
-                      </Button>
+                      {!readOnly && (
+                        <>
+                          <Button
+                            size="sm" variant="ghost" disabled={pending || hasError(p)}
+                            onClick={() => setDecision(p, "approved")}
+                            title={hasError(p) ? t("bulk.fix-first", lang) : t("bulk.approve", lang)}
+                          >
+                            <Check className={"h-4 w-4 " + (d.decision === "approved" ? "text-emerald-600" : "text-muted-foreground")} />
+                          </Button>
+                          <Button
+                            size="sm" variant="ghost" disabled={pending}
+                            onClick={() => setDecision(p, "declined")} title={t("bulk.decline", lang)}
+                          >
+                            <X className={"h-4 w-4 " + (d.decision === "declined" ? "text-destructive" : "text-muted-foreground")} />
+                          </Button>
+                        </>
+                      )}
                     </div>
 
                     {expanded && (
@@ -197,7 +310,7 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
                                 <select
                                   className="mt-0.5 h-8 w-full rounded-lg border bg-background px-2"
                                   value={valueOf(p, c)}
-                                  disabled={pending}
+                                  disabled={pending || readOnly}
                                   onChange={(e) => setEdit(p, c.field, e.target.value)}
                                 >
                                   <option value="">{old ? "(" + old + ")" : "—"}</option>
@@ -210,7 +323,7 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
                                   className="mt-0.5 h-8 w-full rounded-lg border bg-background px-2"
                                   value={valueOf(p, c)}
                                   placeholder={old ? "(" + old + ")" : ""}
-                                  disabled={pending}
+                                  disabled={pending || readOnly}
                                   onChange={(e) => setEdit(p, c.field, e.target.value)}
                                 />
                               )}
@@ -225,7 +338,9 @@ export function BulkReview({ preview, onDone }: { preview: PreviewResult; onDone
                   </div>
                 );
               })}
-              {rows.length > 200 && <div className="px-4 py-2 text-xs text-muted-foreground">… {rows.length - 200} {t("bulk.more-rows", lang)}</div>}
+              {rows.length > 200 && (
+                <div className="px-4 py-2 text-xs text-muted-foreground">… {rows.length - 200} {t("bulk.more-rows", lang)}</div>
+              )}
             </div>
           </div>
         );

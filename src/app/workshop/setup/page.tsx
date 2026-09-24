@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
-import { setupBranches } from "@/actions/bulk";
+import { resumeSetupImport, setupBranches } from "@/actions/bulk";
 import { SHEETS } from "@/modules/bulk/sheets";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +22,10 @@ export default async function SetupPage() {
   );
   if (!allowed) redirect("/workshop/dashboard");
   const canDelete = ["OWNER", "SUPER_ADMIN"].includes(session.role as string);
+  // **在服务端读出「上次没审完的那一份」** —— 客户端就不必用 effect 去拉，
+  // 也不会先闪一下空页面再填上内容。
+  const resume = await resumeSetupImport();
+  const draft = resume.ok ? resume.session : null;
 
   return (
     <div className="space-y-4">
@@ -30,6 +34,19 @@ export default async function SetupPage() {
         canDelete={canDelete}
         branches={await setupBranches()}
         sheets={SHEETS.map((s) => ({ key: s.key, title: s.title }))}
+        initialSession={
+          draft
+            ? {
+                id: draft.id,
+                fileName: draft.fileName,
+                uploadedAt: draft.uploadedAt,
+                status: draft.status,
+                plans: draft.plans,
+                decisions: draft.decisions,
+              }
+            : null
+        }
+        initialColumns={resume.ok ? resume.columns : {}}
       />
     </div>
   );
