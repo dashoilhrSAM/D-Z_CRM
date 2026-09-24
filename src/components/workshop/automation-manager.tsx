@@ -21,7 +21,7 @@ const UNAVAILABLE_TRIGGERS = ["LOYALTY_EVENT", "LOW_STOCK"];
 export function AutomationManager({ templates }: { templates: { id: string; name: string }[] }) {
   const router = useRouter();
   const lang = useLang();
-  const [f, setF] = useState({ name: "", trigger: "LEAD_CREATED", actionType: "CREATE_TASK", title: t("autom.follow-up", lang), dueInDays: "2", templateId: "" });
+  const [f, setF] = useState({ name: "", trigger: "LEAD_CREATED", actionType: "CREATE_TASK", title: t("autom.follow-up", lang), dueInDays: "2", templateId: "", delayDays: "0" });
   const [busy, setBusy] = useState(false);
   const inputCls = "w-full rounded-md border bg-background px-3 py-1.5 text-sm";
   const labelCls = "text-[11px] font-medium text-muted-foreground mb-0.5 block";
@@ -34,10 +34,15 @@ export function AutomationManager({ templates }: { templates: { id: string; name
       action.title = f.title || undefined;
       action.dueInDays = parseInt(f.dueInDays) || undefined;
     }
-    if (f.actionType === "SEND_MESSAGE") action.templateId = f.templateId;
+    if (f.actionType === "SEND_MESSAGE") {
+      action.templateId = f.templateId;
+      // 0 = 立刻发；大于 0 = 排队到 N 天后（由每日 cron 发出）
+      const delay = parseInt(f.delayDays) || 0;
+      if (delay > 0) action.delayDays = delay;
+    }
     await createAutomationRule({ name: f.name, trigger: f.trigger, actionsJson: JSON.stringify([action]) });
     setBusy(false);
-    setF({ name: "", trigger: "LEAD_CREATED", actionType: "CREATE_TASK", title: t("autom.follow-up", lang), dueInDays: "2", templateId: "" });
+    setF({ name: "", trigger: "LEAD_CREATED", actionType: "CREATE_TASK", title: t("autom.follow-up", lang), dueInDays: "2", templateId: "", delayDays: "0" });
     router.refresh();
   }
 
@@ -75,6 +80,12 @@ export function AutomationManager({ templates }: { templates: { id: string; name
             <option value="" disabled>{t("autom.template-placeholder", lang)}</option>
             {templates.map((tp) => <option key={tp.id} value={tp.id}>{tp.name}</option>)}
           </select>
+          {/* 延迟发送：0 立刻发；大于 0 先排队，由每日扫描发出 */}
+          <label className={labelCls + " mt-2"}>{t("autom.delay-days", lang)}</label>
+          <input
+            className={inputCls} type="number" min="0" max="365"
+            value={f.delayDays} onChange={(e) => setF({ ...f, delayDays: e.target.value })}
+          />
         </div>
       ) : (
         <div>

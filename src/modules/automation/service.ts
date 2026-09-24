@@ -1,6 +1,8 @@
 // Automation engine — event-triggered rules with logged executions (AUTO-001..024).
 import { db } from "@/lib/db";
 import { messagingModule, type TemplateVars } from "@/modules/messaging/service";
+import { sendAtFor } from "./scan";
+import type { Prisma } from "@prisma/client";
 
 /** Extract scalar (string/number/boolean) values from a context so template tokens resolve safely. */
 function scalarVars(ctx: Record<string, unknown>): TemplateVars {
@@ -31,14 +33,17 @@ export const automationModule = {
     for (const rule of rules) {
       const dedupeKey = trigger + ":" + String(context.dedupeKey ?? context.entityId ?? context.leadId ?? context.jobId ?? "x");
       const existing = await db.automationExecution.findFirst({
-        where: { ruleId: rule.id, trigger, error: dedupeKey },
+        // 去重键现在有自己的列 —— 以前塞在 error 字段里，导致「按错误排查」会被干扰 ✗
+        where: { ruleId: rule.id, trigger, dedupeKey },
         select: { id: true },
       }).catch(() => null);
       if (existing) continue; // AUTO-024: prevent duplicate / circular execution
       try {
         const actions = JSON.parse(rule.actions) as AutomationAction[];
-        for (const a of actions) await this.executeAction(a, context);
-        await db.automationExecution.create({ data: { ruleId: rule.id, trigger, status: "SUCCESS", error: dedupeKey } });
+        // 把规则 id 一并交给动作：延迟发送要记下「是谁排的」，便于排查
+        const ctx = { ...context, ruleId: rule.id };
+        for (const a of actions) await this.executeAction(a, ctx);
+        await db.automationExecution.create({ data: { ruleId: rule.id, trigger, status: "SUCCESS", dedupeKey } });
       } catch (e) {
         await db.automationExecution.create({ data: { ruleId: rule.id, trigger, status: "FAILED", error: String((e as Error).message).slice(0, 500) } });
       }
@@ -75,6 +80,25 @@ export const automationModule = {
         // honoring marketing opt-out and persisting the real status + externalId.
         const customerId = ctx.customerId ? String(ctx.customerId) : null;
         const templateId = a.templateId ? String(a.templateId) : null;
+        const delayDays = Number(a.delayDays ?? 0);
+        // **延迟发送**：N 天后才发 → 先排队（ScheduledMessage），由每日 cron 发出。
+        // 以前只能「立刻发」，而「服务完成后 3 天问一句满意吗」这类是最常用的形态之一。
+        if (customerId && templateId && delayDays > 0) {
+          await db.scheduledMessage.create({
+            data: {
+              organisationId: org.id,
+              branchId: ctx.branchId ? String(ctx.branchId) : null,
+              customerId,
+              templateId,
+              vars: (a.vars as Prisma.InputJsonValue | undefined) ?? {},
+              sendAt: sendAtFor(new Date(), delayDays),
+              isMarketing: Boolean(a.isMarketing),
+              jobId: ctx.jobId ? String(ctx.jobId) : null,
+              sourceRuleId: ctx.ruleId ? String(ctx.ruleId) : null,
+            },
+          });
+          break;
+        }
         if (customerId && templateId) {
           const vars: TemplateVars = {
             ...scalarVars(ctx),

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireCronSecret } from "@/lib/api-auth";
-import { runTimeBasedAutomations } from "@/modules/automation/scan";
+import { runTimeBasedAutomations, sendDueScheduledMessages } from "@/modules/automation/scan";
 
 /**
  * Vercel Cron 入口：每天扫一遍**时间类**的自动化触发器。
@@ -19,7 +19,9 @@ export async function GET(req: NextRequest) {
   if (denied) return denied;
   try {
     const result = await runTimeBasedAutomations();
-    return NextResponse.json({ ok: true, ...result });
+    // 同一个 cron 顺手把到期的**延迟消息**发出去（自动化动作里的「N 天后发」）
+    const delivered = await sendDueScheduledMessages();
+    return NextResponse.json({ ok: true, ...result, ...delivered });
   } catch (e) {
     return NextResponse.json({ ok: false, error: (e as Error).message }, { status: 500 });
   }

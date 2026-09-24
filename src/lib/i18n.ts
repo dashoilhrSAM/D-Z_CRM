@@ -2464,7 +2464,7 @@ export const DICT: Dict = {
   "autom.rule-name-placeholder": { en: "e.g. Auto-follow-up on new lead", zh: "例如：新线索自动跟进", ms: "cth. Auto-susulan pada prospek baharu" },
   "autom.action": { en: "Action", zh: "动作", ms: "Tindakan" },
   "autom.action-assign-lead": { en: "Assign lead", zh: "分配线索", ms: "Agih prospek" },
-  "autom.action-send-message": { en: "Send message", zh: "发送消息", ms: "Hantar mesej" },
+  "autom.delay-days": { en: "Send after (days; 0 = immediately)", zh: "延迟发送（天；0 = 立刻发）", ms: "Hantar selepas (hari)" },  "autom.action-send-message": { en: "Send message", zh: "发送消息", ms: "Hantar mesej" },
   "autom.action-schedule-reminder": { en: "Schedule reminder", zh: "设置提醒", ms: "Jadual peringatan" },
   "autom.action-update-tags": { en: "Update tags", zh: "更新标签", ms: "Kemas kini tag" },
   "autom.template": { en: "Message template", zh: "消息模板", ms: "Templat mesej" },
