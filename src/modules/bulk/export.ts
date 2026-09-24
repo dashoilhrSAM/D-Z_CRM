@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import {
   META_SHEET, SHEETS, PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET,
-  SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, WORKBOOK_VERSION, type SheetDef,
+  SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, WORKBOOK_VERSION, type SheetDef,
 } from "./sheets";
 
 /**
@@ -83,7 +83,7 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   meta.addRow(["branchId", scope.branchId]);
   meta.addRow(["branchName", branch.name]);
 
-  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles] = await Promise.all([
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles, customers] = await Promise.all([
     db.product.findMany({
       where: { organisationId: scope.organisationId },
       include: { supplier: { select: { name: true } } },
@@ -104,6 +104,12 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
       where: { customer: { organisationId: scope.organisationId } },
       include: { customer: { select: { phone: true } } },
       orderBy: { plate: "asc" },
+    }),
+    // **手机号是键**：没有手机号的客户导出了也无法被识别（会变成一行错误，把整份文件挡住），
+    // 所以不导出它们 —— 与服务目录里"没有 code 的行不导出"同一条处理
+    db.customer.findMany({
+      where: { organisationId: scope.organisationId, phone: { not: null } },
+      orderBy: { name: "asc" },
     }),
   ]);
 
@@ -143,6 +149,13 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
     brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
     vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
   })));
+
+  addDataSheet(wb, CUSTOMERS_SHEET, customers
+    .filter((c) => (c.phone ?? "").trim() !== "")
+    .map((c) => ({
+      name: c.name, phone: c.phone ?? "", email: c.email ?? "",
+      address: c.address ?? "", tags: c.tags ?? "", notes: c.notes ?? "",
+    })));
 
   addMappingSheet(wb);
   const out = await wb.xlsx.writeBuffer();
