@@ -9,7 +9,9 @@ import { t } from "@/lib/i18n";
 import {
   applySetupSession, cancelSetupSession, saveSetupDecisions, type SheetColumnMeta,
 } from "@/actions/bulk";
-import { rowKeyOf, shouldShowSheet, type RowPlan } from "@/modules/bulk/diff";
+import {
+  ROW_PAGE, isSheetDeclared, missingRows, rowKeyOf, shouldShowSheet, visibleRowCount, type RowPlan,
+} from "@/modules/bulk/diff";
 
 /**
  * 改动审核台（P2 + P3）。
@@ -39,6 +41,8 @@ interface Props {
   sheets: { key: string; title: string }[];
   /** 每张表库里有多少行 —— 用来对照「文件里少了几行」，并把「不会删除」讲清楚 */
   existingCounts: Record<string, number>;
+  /** 文件声明包含哪些表（空/缺省＝老文件没写，按全都算处理）。**没声明的表＝这次不涉及** */
+  declaredSheets: string[] | null;
   onChanged: () => void;
 }
 
@@ -54,6 +58,8 @@ export function BulkReview(props: Props) {
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
+  /** 每张表是否展开全部（默认只列前 200 行）—— 没列出来的行批不了，所以必须能展开 */
+  const [expandedSheet, setExpandedSheet] = useState<Record<string, boolean>>({});
   const [summary, setSummary] = useState<string | null>(null);
   const dirty = useRef(false);
   const readOnly = props.status !== "DRAFT";
@@ -77,6 +83,8 @@ export function BulkReview(props: Props) {
     return () => clearTimeout(timer);
   }, [decisions, props.sessionId, readOnly]);
 
+  // 文件里没有的那些表：只在这里汇总一行，不逐张弹提示（否则只传部分表时会满屏假警报）
+  const skippedSheets = props.sheets.filter((s) => !isSheetDeclared(props.declaredSheets, s.key));
   const actionable = props.plans.filter((p) => p.action !== "skip");
   const hasError = (p: RowPlan) => p.action === "error";
   const decisionOf = (p: RowPlan) => decisions[rowKeyOf(p.sheet, p.rowNumber)] ?? {};
@@ -228,11 +236,20 @@ export function BulkReview(props: Props) {
               {t("bulk.cancel-import", lang)}
             </Button>
             <Button size="sm" onClick={apply} disabled={pending || approved.length === 0}>
-              {t("bulk.apply-approved", lang) + " (" + approved.length + ")"}
+              {t("bulk.apply-approved", lang) + " (" + approved.length + ")" +
+                (actionable.length - approved.length > 0
+                  ? " · " + (actionable.length - approved.length) + " " + t("bulk.not-decided", lang)
+                  : "")}
             </Button>
           </>
         )}
       </div>
+
+      {skippedSheets.length > 0 && (
+        <div className="rounded-2xl border bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+          {t("bulk.not-in-file", lang) + " " + skippedSheets.map((s) => s.title).join(" · ")}
+        </div>
+      )}
 
       {summary && (
         <div className="rounded-2xl border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-xs font-medium text-emerald-800">
@@ -244,7 +261,9 @@ export function BulkReview(props: Props) {
         const rows = actionable.filter((p) => p.sheet === sheet.key);
         const fileRows = props.plans.filter((p) => p.sheet === sheet.key).length;
         const dbRows = props.existingCounts[sheet.key] ?? 0;
-        const missing = dbRows - fileRows;
+        // **没声明包含的表不算「少了行」** —— 否则只上传部分表时，每张没勾的表都会弹假警报
+        const missing = missingRows(props.declaredSheets, sheet.key, fileRows, dbRows);
+        if (!isSheetDeclared(props.declaredSheets, sheet.key)) return null;
         // **即使没有任何改动也要显示**：老板「删掉一行」的典型情况就是零改动，
         // 而这正是提示最该出现的时候（规则见 diff.ts 的 shouldShowSheet）
         if (!shouldShowSheet(rows.length, missing)) return null;
@@ -272,7 +291,7 @@ export function BulkReview(props: Props) {
               </div>
             )}
             <div className="divide-y">
-              {rows.slice(0, 200).map((p) => {
+              {rows.slice(0, visibleRowCount(rows.length, expandedSheet[sheet.key] ?? false)).map((p) => {
                 const k = rowKeyOf(p.sheet, p.rowNumber);
                 const d = decisionOf(p);
                 const expanded = open[k] ?? (p.action === "error" || p.changes.length > 0 || p.action === "create");
@@ -358,8 +377,18 @@ export function BulkReview(props: Props) {
                   </div>
                 );
               })}
-              {rows.length > 200 && (
-                <div className="px-4 py-2 text-xs text-muted-foreground">… {rows.length - 200} {t("bulk.more-rows", lang)}</div>
+              {rows.length > ROW_PAGE && !(expandedSheet[sheet.key] ?? false) && (
+                <div className="flex items-center gap-3 px-4 py-2 text-xs">
+                  <span className="text-muted-foreground">
+                    … {rows.length - ROW_PAGE} {t("bulk.more-rows", lang)}
+                  </span>
+                  <Button
+                    size="sm" variant="outline"
+                    onClick={() => setExpandedSheet((prev) => ({ ...prev, [sheet.key]: true }))}
+                  >
+                    {t("bulk.show-all", lang) + " (" + rows.length + ")"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>

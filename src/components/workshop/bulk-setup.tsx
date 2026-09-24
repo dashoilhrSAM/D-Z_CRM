@@ -30,6 +30,8 @@ interface Desk {
   status: "DRAFT" | "APPLIED" | "CANCELLED";
   plans: RowPlan[];
   decisions: Record<string, { decision?: "approved" | "declined"; edits?: Record<string, string> }>;
+  /** 文件声明包含哪些表（没声明的＝这次不涉及）*/
+  declaredSheets: string[] | null;
 }
 
 /** 服务端已经把「上次没审完的那一份」读出来了，这里直接接上（客户端不拉、无 effect） */
@@ -40,6 +42,8 @@ export interface InitialSession {
   status: "DRAFT" | "APPLIED" | "CANCELLED";
   plans: RowPlan[];
   decisions: Record<string, { decision?: "approved" | "declined"; edits?: Record<string, string> }>;
+  /** 文件声明包含哪些表（没声明的＝这次不涉及）*/
+  declaredSheets: string[] | null;
 }
 
 export function BulkSetup({
@@ -69,6 +73,7 @@ export function BulkSetup({
           status: initialSession.status,
           plans: initialSession.plans,
           decisions: initialSession.decisions,
+          declaredSheets: initialSession.declaredSheets,
         }
       : null,
   );
@@ -96,6 +101,7 @@ export function BulkSetup({
         status: res.session.status,
         plans: res.session.plans,
         decisions: res.session.decisions,
+        declaredSheets: res.session.declaredSheets,
       });
       setResumed(true);
     }
@@ -148,6 +154,7 @@ export function BulkSetup({
         status: "DRAFT",
         plans: res.preview.plans,
         decisions: {},
+        declaredSheets: res.preview.declaredSheets,
       });
       setHistory(null);
       toast.success(t("bulk.uploaded", lang));
@@ -177,6 +184,7 @@ export function BulkSetup({
         status: res.session.status,
         plans: res.session.plans,
         decisions: res.session.decisions,
+        declaredSheets: res.session.declaredSheets,
       });
     });
 
@@ -318,6 +326,7 @@ export function BulkSetup({
           columns={columns}
           sheets={sheets}
           existingCounts={existingCounts}
+          declaredSheets={desk.declaredSheets}
           onChanged={onChanged}
         />
       )}

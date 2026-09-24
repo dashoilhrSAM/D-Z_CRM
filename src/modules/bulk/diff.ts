@@ -42,6 +42,29 @@ export interface RowPlan {
 export const rowKeyOf = (sheet: string, rowNumber: number) => sheet + "#" + rowNumber;
 
 /**
+ * 这张表在**文件声明**的范围内吗？
+ *
+ * declared 为空（老文件没写元数据）＝ 按「全都算包含」处理（向后兼容）。
+ * 这一条是老板反馈后的修复：上传只含部分表的文件时，**没勾选的表在文件里当然是 0 行**，
+ * 如果照「库里 82 行、文件里 0 行」去算，每张没勾的表都会弹「少了 82 行」——一堆假警报。
+ * 没勾的表是「**这次不涉及**」，不是「少了行」。
+ */
+export function isSheetDeclared(declared: string[] | null | undefined, key: string): boolean {
+  return !declared || declared.length === 0 || declared.includes(key);
+}
+
+/** 缺行数：**只在文件声明包含这张表时**才算（否则一律 0，避免上面那种假警报） */
+export function missingRows(
+  declared: string[] | null | undefined,
+  key: string,
+  fileRows: number,
+  dbRows: number,
+): number {
+  if (!isSheetDeclared(declared, key)) return 0;
+  return Math.max(0, dbRows - fileRows);
+}
+
+/**
  * 审核台里「这张表要不要显示」。
  *
  * 规则：**有改动，或者文件里比库里少行** —— 后者正是老板「删掉一行」的场景，
@@ -51,6 +74,18 @@ export const rowKeyOf = (sheet: string, rowNumber: number) => sheet + "#" + rowN
  */
 export function shouldShowSheet(actionableRows: number, missing: number): boolean {
   return actionableRows > 0 || missing > 0;
+}
+
+/**
+ * 审核台每张表一次列多少行（界面「显示全部」按钮的第一段）。
+ *
+ * 为什么不能只是「切掉多余的行」：**没列出来的行你批不了**，
+ * 而应用时只写已批准的行 —— 于是它们**静默地没被写入**，界面却像全都处理完了。
+ * 所以超出部分必须能展开。
+ */
+export const ROW_PAGE = 200;
+export function visibleRowCount(total: number, showAll: boolean): number {
+  return showAll ? total : Math.min(total, ROW_PAGE);
 }
 
 export interface SheetSummary {
