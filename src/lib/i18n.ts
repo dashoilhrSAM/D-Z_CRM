@@ -1914,6 +1914,10 @@ export const DICT: Dict = {
   "slot.empty": { en: "No slots yet — generate them below.", zh: "暂无时段——请在下方生成。", ms: "Tiada slot lagi — jana di bawah." },
 
   // automations
+  "msgstatus.title": { en: "Messages are not being sent yet", zh: "消息目前不会真的发出去", ms: "Mesej belum dihantar" },
+  "msgstatus.body": { en: "WhatsApp credentials are not configured yet, so every send goes to the mock channel: it is recorded in the app and shows as sent, but nothing reaches the customer phone. Templates, automations and broadcasts can all be prepared now — they will start delivering as soon as the credentials are in place, no code change needed.", zh: "WhatsApp 凭据还没配置，所以所有发送都走模拟通道：App 里会记录、也会显示已发送，但**客户手机上收不到任何东西**。模板、自动化、群发现在都可以先准备好 —— 凭据配好后会自动开始真的发送，代码不用改。", ms: "Kelayakan WhatsApp belum disediakan; semua penghantaran masuk saluran tiruan dan tidak sampai kepada pelanggan." },
+  "msgstatus.missing": { en: "Missing:", zh: "还缺：", ms: "Belum ada:" },
+  "msgstatus.no-receipts": { en: "delivery receipts will not be received either", zh: "（送达回执也收不到）", ms: "(resit penghantaran juga tidak diterima)" },
   "autom.title": { en: "Automations", zh: "自动化", ms: "Automasi" },
   "autom.subtitle": { en: "Event-triggered rules: create tasks, assign leads, send messages, schedule reminders, update tags", zh: "事件触发规则：创建任务、分配线索、发送消息、设置提醒、更新标签", ms: "Peraturan dipicu peristiwa: cipta tugas, agihkan prospek, hantar mesej, jadualkan peringatan, kemas kini tag" },
   "autom.active": { en: "Active", zh: "启用", ms: "Aktif" },
