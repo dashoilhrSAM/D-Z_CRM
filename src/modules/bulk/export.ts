@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
+import { ACTION_COLUMN } from "./diff";
 import {
   META_SHEET, SHEETS, PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET,
   SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, WORKBOOK_VERSION, type SheetDef,
@@ -30,20 +31,21 @@ function toDisplay(def: SheetDef, field: string, value: unknown): unknown {
 
 function addDataSheet(wb: ExcelJS.Workbook, def: SheetDef, rows: Record<string, unknown>[]) {
   const ws = wb.addWorksheet(def.title.slice(0, 31));
-  ws.addRow(def.columns.map((c) => c.header));
+  // **_action 放第一列**：它原本在最右边，老板删了一行却「没检测到」——
+  // 因为规则是「删行要在这里写 delete」，而那一列太容易被滑过去（这一条是真实反馈）。
+  ws.addRow([ACTION_COLUMN, ...def.columns.map((c) => c.header)]);
   ws.getRow(1).font = { bold: true };
+  ws.getCell(1, 1).font = { bold: true, color: { argb: "FFB45309" } };
   // **不要在数据表里加第二行中文表头** —— 解析器把表头之后的一切都当数据，
   // 那一行会变成一条假记录（闭环测试第一次跑就是这么红的）。
   // 中文列名统一放在「列对照」sheet 里，与老板现有模板的写法一致。
   for (const r of rows) {
-    ws.addRow(def.columns.map((c) => toDisplay(def, c.field, r[c.field])));
+    // 第一格留空 = 新增或修改；写 delete 才删
+    ws.addRow(["", ...def.columns.map((c) => toDisplay(def, c.field, r[c.field]))]);
   }
   ws.columns.forEach((col) => {
     col.width = 18;
   });
-  // _action 列：留空=新增或修改；写 delete 才删
-  ws.getCell(1, def.columns.length + 1).value = "_action";
-  ws.getCell(1, def.columns.length + 1).font = { bold: true, color: { argb: "FFB45309" } };
   return ws;
 }
 
@@ -55,7 +57,10 @@ function addMappingSheet(wb: ExcelJS.Workbook, sheets: SheetDef[]) {
     for (const c of def.columns) {
       ws.addRow([def.title, c.header, c.zh, c.field, c.note ?? ""]);
     }
-    ws.addRow([def.title, "_action", "操作", "_action", "留空=新增/修改; delete=删除"]);
+    ws.addRow([
+      def.title, "_action", "操作（第一列）", "_action",
+      "留空=新增/修改；写 delete 才删除。文件里没有的行永远不会被删除（只看这一列）",
+    ]);
   }
   ws.columns.forEach((c) => {
     c.width = 22;

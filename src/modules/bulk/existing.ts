@@ -83,6 +83,38 @@ export async function buildExistingRows(scope: BulkScope): Promise<Record<string
   };
 }
 
+/**
+ * 每张表「库里有多少行」—— 只数个数，不取数据（页面加载时用它做对照）。
+ *
+ * **筛选条件必须与 buildExistingRows / 导出完全一致**，否则数字对不上：
+ * 没有 code 的服务项、没有手机号的客户本来就不会被导出，把它们算进来会凭空多出「少了几行」的假警报。
+ * tests/bulk-chain.test.ts 里有一条断言逼着这两处保持一致。
+ */
+export async function countExistingBySheet(scope: BulkScope): Promise<Record<string, number>> {
+  const { organisationId, branchId } = scope;
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles, customers] =
+    await Promise.all([
+      db.product.count({ where: { organisationId } }),
+      db.servicePackage.count({ where: { branchId } }),
+      db.servicePackageItem.count({ where: { package: { branchId } } }),
+      db.campaign.count({ where: { branchId } }),
+      db.supplier.count({ where: { organisationId } }),
+      db.serviceType.count({ where: { organisationId, code: { not: null } } }),
+      db.motorcycle.count({ where: { customer: { organisationId } } }),
+      db.customer.count({ where: { organisationId, phone: { not: null } } }),
+    ]);
+  return {
+    [PRODUCTS_SHEET.key]: products,
+    [PACKAGES_SHEET.key]: packages,
+    [PACKAGE_ITEMS_SHEET.key]: packageItems,
+    [CAMPAIGNS_SHEET.key]: campaigns,
+    [SUPPLIERS_SHEET.key]: suppliers,
+    [SERVICE_TYPES_SHEET.key]: serviceTypes,
+    [MOTORCYCLES_SHEET.key]: motorcycles,
+    [CUSTOMERS_SHEET.key]: customers,
+  };
+}
+
 /** 给界面渲染「就地修改」的输入控件用的列元数据 */
 export interface SheetColumnMeta {
   field: string;

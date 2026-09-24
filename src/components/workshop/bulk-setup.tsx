@@ -48,12 +48,14 @@ export function BulkSetup({
   sheets,
   initialSession,
   initialColumns,
+  initialCounts,
 }: {
   canDelete: boolean;
   branches: { id: string; name: string }[];
   sheets: { key: string; title: string }[];
   initialSession: InitialSession | null;
   initialColumns: Record<string, SheetColumnMeta[]>;
+  initialCounts: Record<string, number>;
 }) {
   const lang = useLang();
   const router = useRouter();
@@ -71,6 +73,7 @@ export function BulkSetup({
       : null,
   );
   const [columns, setColumns] = useState<Record<string, SheetColumnMeta[]>>(initialColumns);
+  const [existingCounts, setExistingCounts] = useState<Record<string, number>>(initialCounts);
   const [resumed, setResumed] = useState(initialSession !== null);
   const [file, setFile] = useState<File | null>(null);
   const [downloading, setDownloading] = useState(false);
@@ -84,6 +87,7 @@ export function BulkSetup({
     const res = await resumeSetupImport();
     if (!res.ok) return;
     setColumns(res.columns);
+    setExistingCounts(res.existingCounts);
     if (res.session) {
       setDesk({
         sessionId: res.session.id,
@@ -135,6 +139,7 @@ export function BulkSetup({
         return;
       }
       setColumns(res.columns);
+      setExistingCounts(res.preview.existingCounts);
       setResumed(false);
       setDesk({
         sessionId: res.sessionId,
@@ -163,6 +168,7 @@ export function BulkSetup({
         return;
       }
       setColumns(res.columns);
+      setExistingCounts(res.existingCounts);
       setResumed(false);
       setDesk({
         sessionId: res.session.id,
@@ -311,6 +317,7 @@ export function BulkSetup({
           decisions={desk.decisions}
           columns={columns}
           sheets={sheets}
+          existingCounts={existingCounts}
           onChanged={onChanged}
         />
       )}

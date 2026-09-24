@@ -47,6 +47,7 @@ export default async function SetupPage() {
             : null
         }
         initialColumns={resume.ok ? resume.columns : {}}
+        initialCounts={resume.ok ? resume.existingCounts : {}}
       />
     </div>
   );

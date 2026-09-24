@@ -515,3 +515,80 @@ describe("客户表（P3 收尾）——判重规则按老板确认的四条", (
     expect(await db.customer.findFirst({ where: { id: owner!.id } })).not.toBeNull();
   });
 });
+describe("删除行为（老板反馈「删了一行没检测到」之后补的交叉检查）", () => {
+  it("**每一张表**：_action 写 delete 都能被检测为删除（服务目录除外，它故意不让删）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const sheetsMod = await import("@/modules/bulk/sheets");
+    const { parsed } = await planFromFile();
+    // 现状行用**共用模块**取（界面与脚本用的是同一份 —— 这正是「只允许有一份构造」的意义）
+    const { buildExistingRows } = await import("@/modules/bulk/existing");
+    const existingBySheet = await buildExistingRows({ organisationId: orgId, branchId });
+
+    const report: string[] = [];
+    for (const def of sheetsMod.SHEETS) {
+      const existing = existingBySheet[def.key] ?? [];
+      if (existing.length === 0) continue;
+      const fileRow = parsed.sheets.find((s) => s.key === def.key)?.rows[0];
+      expect(fileRow, def.key + " 在导出文件里应当有数据行").toBeTruthy();
+      const { plans } = planSheet({
+        def,
+        // 只保留键的字段 + _action=delete：这正是老板该做的操作
+        incoming: [{ rowNumber: 2, cells: fileRow!.cells, action: "delete" as const }],
+        existing,
+      });
+      const deleted = plans.filter((p) => p.action === "delete").length;
+      const errored = plans.filter((p) => p.action === "error").length;
+      report.push(def.key + ":" + (deleted ? "delete" : "error"));
+      if (def.key === sheetsMod.SERVICE_TYPES_SHEET.key) {
+        // 服务目录由代码定义 —— 故意不允许删，而且要**报错**（不能静默什么都不做）
+        expect(deleted, "服务目录不该被删").toBe(0);
+        expect(errored, "服务目录删行必须报错").toBe(1);
+        expect(plans[0].errors.join(" ")).toContain("does not allow deleting");
+      } else {
+        expect(deleted, def.key + " 应当检测为删除（实际：" + JSON.stringify(plans[0]?.action) + "）").toBe(1);
+      }
+    }
+    // 每一张表都要有结论，不能有表被悄悄跳过
+    expect(report.length).toBeGreaterThanOrEqual(7);
+  });
+
+  it("**每一张表**：文件里少了行 → 绝不删除（这是最强的安全规则）", async () => {
+    const { planSheet } = await import("@/modules/bulk/diff");
+    const sheetsMod = await import("@/modules/bulk/sheets");
+    const { parsed } = await planFromFile();
+    // 现状行用**共用模块**取（界面与脚本用的是同一份 —— 这正是「只允许有一份构造」的意义）
+    const { buildExistingRows } = await import("@/modules/bulk/existing");
+    const existingBySheet = await buildExistingRows({ organisationId: orgId, branchId });
+    for (const def of sheetsMod.SHEETS) {
+      const existing = existingBySheet[def.key] ?? [];
+      if (existing.length < 2) continue;
+      const rows = parsed.sheets.find((s) => s.key === def.key)?.rows ?? [];
+      // 故意去掉第一行（＝老板在 Excel 里把它删了）
+      const { plans } = planSheet({ def, incoming: rows.slice(1), existing });
+      expect(plans.filter((p) => p.action === "delete").length, def.key + " 不该因为文件里少了行就删除").toBe(0);
+    }
+  });
+
+  it("库里的行数（给界面做对照用）必须与「现状行」一致", async () => {
+    const { buildExistingRows, countExistingBySheet } = await import("@/modules/bulk/existing");
+    const { SHEETS } = await import("@/modules/bulk/sheets");
+    const rows = await buildExistingRows({ organisationId: orgId, branchId });
+    const counts = await countExistingBySheet({ organisationId: orgId, branchId });
+    for (const def of SHEETS) {
+      expect(counts[def.key], def.key + " 的计数与现状行数不一致（会让界面报出假的「少了几行」）")
+        .toBe((rows[def.key] ?? []).length);
+    }
+  });
+
+  it("**_action 在第一列**（老板删行没被检测到，就是因为它在最右边被滑过去了）", async () => {
+    const ExcelJS = (await import("exceljs")).default;
+    const bytes = await build({ organisationId: orgId, branchId });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(bytes as never);
+    for (const title of ["产品目录 Products", "供应商 Suppliers", "套餐明细 Items"]) {
+      const ws = wb.getWorksheet(title);
+      expect(ws, title + " 应当存在").toBeTruthy();
+      expect(String(ws!.getCell(1, 1).value), title + " 的第一列必须是 _action").toBe("_action");
+    }
+  });
+});

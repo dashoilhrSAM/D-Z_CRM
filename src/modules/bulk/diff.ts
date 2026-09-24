@@ -207,14 +207,21 @@ export function planSheet(input: {
     }
     if (key) seen.add(matchKey);
 
-    {
-      const missingKeyParts = (def.extraKeyFields ?? []).filter((f) => !String(values[f] ?? "").trim());
-      if (missingKeyParts.length) errors.push("missing key column(s): " + missingKeyParts.join(", "));
-    }
+    const missingKeyParts = (def.extraKeyFields ?? []).filter((f) => !String(values[f] ?? "").trim());
+    if (missingKeyParts.length) errors.push("missing key column(s): " + missingKeyParts.join(", "));
     const current = key ? byKey.get(matchKey) : undefined;
 
     if (row.action === "delete") {
-      if (!allowDelete) errors.push("rows in this sheet cannot be deleted on their own");
+      // 报错要说人话：老板删了一行没检测到，就是因为规则没被讲清楚
+      if (!allowDelete) {
+        errors.push("This sheet does not allow deleting rows (" + def.title + ") — it is maintained inside the app");
+      }
+      if (missingKeyParts.length) {
+        errors.push(
+          "to delete a row, keep its key column(s) filled: " + missingKeyParts.join(", ") +
+          " (only the _action cell needs \"delete\")",
+        );
+      }
       if (key && !current) errors.push("nothing to delete: " + key + " does not exist");
       plans.push({
         sheet: def.key, rowNumber: row.rowNumber, key,

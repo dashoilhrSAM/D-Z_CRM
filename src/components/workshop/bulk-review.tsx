@@ -37,6 +37,8 @@ interface Props {
   decisions: Record<string, Decision>;
   columns: Record<string, SheetColumnMeta[]>;
   sheets: { key: string; title: string }[];
+  /** 每张表库里有多少行 —— 用来对照「文件里少了几行」，并把「不会删除」讲清楚 */
+  existingCounts: Record<string, number>;
   onChanged: () => void;
 }
 
@@ -243,6 +245,9 @@ export function BulkReview(props: Props) {
         if (rows.length === 0) return null;
         const cols = props.columns[sheet.key] ?? [];
         const skips = props.plans.filter((p) => p.sheet === sheet.key && p.action === "skip").length;
+        const fileRows = props.plans.filter((p) => p.sheet === sheet.key).length;
+        const dbRows = props.existingCounts[sheet.key] ?? 0;
+        const missing = dbRows - fileRows;
         return (
           <div key={sheet.key} className="rounded-2xl border bg-card">
             <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-xs">
@@ -250,7 +255,20 @@ export function BulkReview(props: Props) {
               <span className="text-muted-foreground">
                 {rows.length} {t("bulk.rows-to-decide", lang)} · {skips} {t("bulk.nochange", lang)}
               </span>
+              <span className="text-muted-foreground">
+                {t("bulk.rows-in-file", lang) + " " + fileRows} · {t("bulk.rows-in-db", lang) + " " + dbRows}
+              </span>
             </div>
+            {missing > 0 && (
+              // 老板删了一行却「什么都没发生」—— 因为规则是「文件里没有的行不删」，
+              // 而没人告诉过他。这里把数字和规则直接摆出来。
+              <div className="flex items-start gap-2 border-b bg-amber-500/5 px-4 py-2 text-xs text-amber-800">
+                <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  {missing} {t("bulk.missing-rows", lang)}
+                </span>
+              </div>
+            )}
             <div className="divide-y">
               {rows.slice(0, 200).map((p) => {
                 const k = rowKeyOf(p.sheet, p.rowNumber);
