@@ -47,11 +47,11 @@ function addDataSheet(wb: ExcelJS.Workbook, def: SheetDef, rows: Record<string, 
   return ws;
 }
 
-function addMappingSheet(wb: ExcelJS.Workbook) {
+function addMappingSheet(wb: ExcelJS.Workbook, sheets: SheetDef[]) {
   const ws = wb.addWorksheet("列对照");
   ws.addRow(["Sheet", "Column (EN)", "Column (中文)", "System field", "Note"]);
   ws.getRow(1).font = { bold: true };
-  for (const def of SHEETS) {
+  for (const def of sheets) {
     for (const c of def.columns) {
       ws.addRow([def.title, c.header, c.zh, c.field, c.note ?? ""]);
     }
@@ -66,6 +66,14 @@ export interface ExportScope {
   organisationId: string;
   /** 套餐/促销所属分店（产品不需要） */
   branchId: string;
+  /**
+   * 只导出这几张 sheet（缺省＝全部）。
+   * **这份清单会写进文件的元数据** —— 导入时只处理文件里有的部分：
+   * 「没包含」是「这次不涉及」，不是「这张表是空的」。
+   */
+  sheets?: string[];
+  /** 只要模板：只有表头与列对照，不带任何数据行 */
+  templateOnly?: boolean;
 }
 
 export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array> {
@@ -76,12 +84,18 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   const branch = await db.branch.findUnique({ where: { id: scope.branchId }, select: { name: true, organisationId: true } });
   if (!branch || branch.organisationId !== scope.organisationId) throw new Error("Branch not found in this organisation");
 
+  // 这次导出包含哪些 sheet（导入时按它判断"这份文件覆盖了哪些部分"）
+  const wanted = scope.sheets && scope.sheets.length > 0 ? SHEETS.filter((s) => scope.sheets!.includes(s.key)) : SHEETS;
+  if (wanted.length === 0) throw new Error("Pick at least one sheet to export");
+
   const meta = wb.addWorksheet(META_SHEET);
   meta.state = "hidden";
   meta.addRow(["version", WORKBOOK_VERSION]);
   meta.addRow(["exportedAt", new Date().toISOString()]);
   meta.addRow(["branchId", scope.branchId]);
   meta.addRow(["branchName", branch.name]);
+  meta.addRow(["sheets", wanted.map((s) => s.key).join(",")]);
+  meta.addRow(["templateOnly", scope.templateOnly ? "1" : "0"]);
 
   const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles, customers] = await Promise.all([
     db.product.findMany({
@@ -113,51 +127,49 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
     }),
   ]);
 
-  addDataSheet(wb, PRODUCTS_SHEET, products.map((p) => ({
-    sku: p.sku, name: p.name, category: p.category ?? "", brand: p.brand ?? "", unit: p.unit,
-    sellPriceSen: p.sellPriceSen, costPriceSen: p.costPriceSen, minStock: p.minStock, safetyStock: p.safetyStock,
-    leadTimeDays: p.leadTimeDays, barcode: p.barcode ?? "", manufacturerPartNo: p.manufacturerPartNo ?? "",
-    compatibleModels: p.compatibleModels ?? "", supplierName: p.supplier?.name ?? "",
-  })));
-
-  addDataSheet(wb, PACKAGES_SHEET, packages.map((p) => ({
-    name: p.name, tier: p.tier, priceSen: p.priceSen, description: p.description ?? "", isBestValue: p.isBestValue,
-  })));
-
-  addDataSheet(wb, PACKAGE_ITEMS_SHEET, packageItems.map((i) => ({
-    packageName: i.package.name, itemName: i.name, kind: i.kind, productSku: i.product?.sku ?? "",
-    defaultQty: i.defaultQty, priceSen: i.priceSen,
-  })));
-
-  addDataSheet(wb, CAMPAIGNS_SHEET, campaigns.map((c) => ({
-    name: c.name, type: c.type, status: c.status, startDate: c.startDate, endDate: c.endDate,
-    discountPercent: c.discountPercent ?? "", pointsBonus: c.pointsBonus ?? "", audience: c.audience ?? "",
-  })));
-
-  addDataSheet(wb, SUPPLIERS_SHEET, suppliers.map((s) => ({
-    name: s.name, contactName: s.contactName ?? "", phone: s.phone ?? "", email: s.email ?? "",
-    address: s.address ?? "", leadTimeDays: s.leadTimeDays,
-  })));
-
-  addDataSheet(wb, SERVICE_TYPES_SHEET, serviceTypes.map((s) => ({
-    code: s.code, name: s.name, category: s.category ?? "", durationMin: s.durationMin ?? "",
-    priceSen: s.priceSen ?? "", active: s.active,
-  })));
-
-  addDataSheet(wb, MOTORCYCLES_SHEET, motorcycles.map((m) => ({
-    plate: m.plate, type: m.type, customerPhone: m.customer.phone ?? "",
-    brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
-    vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
-  })));
-
-  addDataSheet(wb, CUSTOMERS_SHEET, customers
-    .filter((c) => (c.phone ?? "").trim() !== "")
-    .map((c) => ({
+  // ── 只导出被勾选的 sheet；「只要模板」时不带数据行 ───────────────────────
+  const dataBySheet: { def: SheetDef; rows: Record<string, unknown>[] }[] = [
+    { def: PRODUCTS_SHEET, rows: products.map((p) => ({
+      sku: p.sku, name: p.name, category: p.category ?? "", brand: p.brand ?? "", unit: p.unit,
+      sellPriceSen: p.sellPriceSen, costPriceSen: p.costPriceSen, minStock: p.minStock, safetyStock: p.safetyStock,
+      leadTimeDays: p.leadTimeDays, barcode: p.barcode ?? "", manufacturerPartNo: p.manufacturerPartNo ?? "",
+      compatibleModels: p.compatibleModels ?? "", supplierName: p.supplier?.name ?? "",
+    })) },
+    { def: PACKAGES_SHEET, rows: packages.map((p) => ({
+      name: p.name, tier: p.tier, priceSen: p.priceSen, description: p.description ?? "", isBestValue: p.isBestValue,
+    })) },
+    { def: PACKAGE_ITEMS_SHEET, rows: packageItems.map((i) => ({
+      packageName: i.package.name, itemName: i.name, kind: i.kind, productSku: i.product?.sku ?? "",
+      defaultQty: i.defaultQty, priceSen: i.priceSen,
+    })) },
+    { def: CAMPAIGNS_SHEET, rows: campaigns.map((c) => ({
+      name: c.name, type: c.type, status: c.status, startDate: c.startDate, endDate: c.endDate,
+      discountPercent: c.discountPercent ?? "", pointsBonus: c.pointsBonus ?? "", audience: c.audience ?? "",
+    })) },
+    { def: SUPPLIERS_SHEET, rows: suppliers.map((s) => ({
+      name: s.name, contactName: s.contactName ?? "", phone: s.phone ?? "", email: s.email ?? "",
+      address: s.address ?? "", leadTimeDays: s.leadTimeDays,
+    })) },
+    { def: SERVICE_TYPES_SHEET, rows: serviceTypes.map((s) => ({
+      code: s.code, name: s.name, category: s.category ?? "", durationMin: s.durationMin ?? "",
+      priceSen: s.priceSen ?? "", active: s.active,
+    })) },
+    { def: CUSTOMERS_SHEET, rows: customers.filter((c) => (c.phone ?? "").trim() !== "").map((c) => ({
       name: c.name, phone: c.phone ?? "", email: c.email ?? "",
       address: c.address ?? "", tags: c.tags ?? "", notes: c.notes ?? "",
-    })));
+    })) },
+    { def: MOTORCYCLES_SHEET, rows: motorcycles.map((m) => ({
+      plate: m.plate, type: m.type, customerPhone: m.customer.phone ?? "",
+      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
+    })) },
+  ];
+  for (const entry of dataBySheet) {
+    if (!wanted.some((w) => w.key === entry.def.key)) continue;
+    addDataSheet(wb, entry.def, scope.templateOnly ? [] : entry.rows);
+  }
 
-  addMappingSheet(wb);
+  addMappingSheet(wb, wanted);
   const out = await wb.xlsx.writeBuffer();
   return new Uint8Array(out as ArrayBuffer);
 }

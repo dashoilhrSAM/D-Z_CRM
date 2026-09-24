@@ -6,6 +6,7 @@ import { can } from "@/lib/auth/permissions";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { setupBranches } from "@/actions/bulk";
+import { SHEETS } from "@/modules/bulk/sheets";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,11 @@ export default async function SetupPage() {
   return (
     <div className="space-y-4">
       <PageHeader title={t("bulk.title", lang)} subtitle={t("bulk.subtitle", lang)} backHref="/workshop/inventory/products" />
-      <BulkSetup canDelete={canDelete} branches={await setupBranches()} />
+      <BulkSetup
+        canDelete={canDelete}
+        branches={await setupBranches()}
+        sheets={SHEETS.map((s) => ({ key: s.key, title: s.title }))}
+      />
     </div>
   );
 }

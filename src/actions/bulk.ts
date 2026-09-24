@@ -7,6 +7,7 @@ import { db } from "@/lib/db";
 import { planSheet, type RowPlan, type SheetSummary } from "@/modules/bulk/diff";
 import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePhone } from "@/modules/bulk/sheets";
 import { buildSetupWorkbook } from "@/modules/bulk/export";
+import { SHEETS, type FieldType } from "@/modules/bulk/sheets";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
 
@@ -43,10 +44,17 @@ export async function setupBranches(): Promise<{ id: string; name: string }[]> {
   return db.branch.findMany({ where, select: { id: true, name: true }, orderBy: { name: "asc" } });
 }
 
-/** 下载当前配置（工作簿）。套餐/促销按分店，所以必须指定分店 —— 文件里会写明是哪一个。 */
-export async function exportSetupWorkbook(input: { branchId?: string }): Promise<
-  { ok: true; base64: string; fileName: string } | { ok: false; error: string }
-> {
+/**
+ * 下载当前配置（工作簿）。
+ *
+ * @param input.sheets 只导出这几张（缺省＝全部）—— 这份清单会写进文件元数据，导入时只处理文件里有的部分
+ * @param input.templateOnly 只要模板（只有表头与列对照，适合全新配置）
+ */
+export async function exportSetupWorkbook(input: {
+  branchId?: string;
+  sheets?: string[];
+  templateOnly?: boolean;
+}): Promise<{ ok: true; base64: string; fileName: string } | { ok: false; error: string }> {
   const me = await actor();
   if (!me) return { ok: false, error: "Not signed in" };
   const allowed = await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit");
@@ -61,16 +69,35 @@ export async function exportSetupWorkbook(input: { branchId?: string }): Promise
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { name: true, organisationId: true } });
   if (!branch || branch.organisationId !== me.organisationId) return { ok: false, error: "Branch not found" };
 
-  const bytes = await buildSetupWorkbook({ organisationId: me.organisationId, branchId });
+  const bytes = await buildSetupWorkbook({
+    organisationId: me.organisationId,
+    branchId,
+    sheets: input.sheets,
+    templateOnly: input.templateOnly,
+  });
   const date = new Date().toISOString().slice(0, 10);
   const slug = branch.name.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-|-$/g, "").toLowerCase() || "branch";
   return { ok: true, base64: Buffer.from(bytes).toString("base64"), fileName: "workshop-setup-" + slug + "-" + date + ".xlsx" };
+}
+
+/** 给界面渲染编辑器用的列元数据（类型、是否必填、枚举可选值） */
+export interface SheetColumnMeta {
+  field: string;
+  header: string;
+  zh: string;
+  type: FieldType;
+  required: boolean;
+  options?: string[];
 }
 
 export interface PreviewResult {
   ok: true;
   versionOk: boolean;
   warnings: string[];
+  /** 文件声明包含哪些 sheet（null＝老文件没写，按全都算处理） */
+  declaredSheets: string[] | null;
+  /** 每张表的列定义 —— 界面据此渲染「就地修改」的输入控件 */
+  columns: Record<string, SheetColumnMeta[]>;
   /** 文件属于哪个分店（套餐/促销按它落库） */
   branchId: string;
   branchName: string | null;
@@ -210,11 +237,47 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     return { ok: false, error: "This file has no sheet I can read — export a fresh copy from this page" };
   }
 
-  return { ok: true, versionOk: parsed.versionOk, warnings: parsed.warnings, branchId, branchName: branch.name, sheets, plans };
+  // 列元数据：枚举列把 enumMap 的**取值**去重后给界面当选项（界面只看得到规范值，与库里一致）
+  const columns: Record<string, SheetColumnMeta[]> = {};
+  for (const def of SHEETS) {
+    columns[def.key] = def.columns.map((c) => ({
+      field: c.field,
+      header: c.header,
+      zh: c.zh,
+      type: c.type,
+      required: c.required ?? false,
+      options: c.type === "enum" ? [...new Set(Object.values(c.enumMap ?? {}))] : undefined,
+    }));
+  }
+
+  return {
+    ok: true,
+    versionOk: parsed.versionOk,
+    warnings: parsed.warnings,
+    declaredSheets: parsed.declaredSheets,
+    columns,
+    branchId,
+    branchName: branch.name,
+    sheets,
+    plans,
+  };
 }
 
 /** 应用（只有点击确认才会走到这里）。 */
-export async function applySetupImport(input: { plans: RowPlan[]; branchId: string }): Promise<{ ok: true; summary: Record<string, { created: number; updated: number; deleted: number; deactivated: number; skipped: number }> } | { ok: false; error: string }> {
+export async function applySetupImport(input: {
+  plans: RowPlan[];
+  branchId: string;
+  /** 界面里「就地修改」的原始值（键 "sheet#行号"）——由服务端解析与复验 */
+  edits?: Record<string, Record<string, unknown>>;
+}): Promise<
+  {
+    ok: true;
+    summary: Record<string, { created: number; updated: number; deleted: number; deactivated: number; skipped: number; stale: number }>;
+    /** 服务端拒绝的行（值不合法 / 预览已过期）—— 界面要把它显示出来 */
+    refused: { sheet: string; key: string; fields: string[] }[];
+  }
+  | { ok: false; error: string }
+> {
   const me = await actor();
   if (!me) return { ok: false, error: "Not signed in" };
   const allowed = await can({ id: me.userId, role: me.role as never, organisationId: me.organisationId }, "PARTS", "edit");
@@ -235,6 +298,7 @@ export async function applySetupImport(input: { plans: RowPlan[]; branchId: stri
     userId: me.userId,
     sessionBranchId: me.branchId,
     plans: input.plans,
+    edits: input.edits,
   });
   if (res.ok) {
     revalidatePath("/workshop/inventory/products");
