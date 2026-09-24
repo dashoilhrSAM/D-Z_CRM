@@ -131,7 +131,11 @@ export function parseIncomingRow(
   for (const col of def.columns) {
     const res = cellToValue(col, row.cells[col.field]);
     if (!res.ok) errors.push(col.header + ": " + res.error);
-    else if (res.value !== undefined) values[col.field] = res.value;
+    else if (res.value !== undefined) {
+      // transform：把值归一化到**和数据库一致的形式**再做比较与匹配
+      // （例：车牌大小写/空格、车主手机号的 +60 与 0 前缀、破折号空格 —— 生产里三种写法都真实存在）
+      values[col.field] = col.transform && typeof res.value === "string" ? col.transform(res.value) : res.value;
+    }
   }
   return { values, errors };
 }
@@ -174,8 +178,9 @@ export function planSheet(input: {
   const { def, incoming, existing } = input;
   const allowDelete = input.allowDelete ?? def.allowDelete;
   // 键可能是复合的（套餐明细＝套餐名 + 项目名）—— 一律走 keyOf，别在两处各拼一遍
+  const normKey = (k: string) => (def.keyTransform ? def.keyTransform(k) : k).toLowerCase();
   const byKey = new Map<string, Record<string, unknown>>();
-  for (const e of existing) byKey.set(keyOf(def, e).toLowerCase(), e);
+  for (const e of existing) byKey.set(normKey(keyOf(def, e)), e);
 
   const plans: RowPlan[] = [];
   const seen = new Set<string>();
@@ -183,22 +188,23 @@ export function planSheet(input: {
   for (const row of incoming) {
     const { values, errors } = parseIncomingRow(def, row);
     const key = keyOf(def, values);
+    const matchKey = normKey(key);
 
     if (row.action === "skip") {
       plans.push({ sheet: def.key, rowNumber: row.rowNumber, key, action: "skip", values: {}, changes: [], errors: [] });
       continue;
     }
     if (!key) errors.push(def.keyHeader + " is required (it is how a row is matched)");
-    if (key && seen.has(key.toLowerCase()) && row.action !== "delete") {
+    if (key && seen.has(matchKey) && row.action !== "delete") {
       errors.push("duplicate row in this file: " + key);
     }
-    if (key) seen.add(key.toLowerCase());
+    if (key) seen.add(matchKey);
 
     {
       const missingKeyParts = (def.extraKeyFields ?? []).filter((f) => !String(values[f] ?? "").trim());
       if (missingKeyParts.length) errors.push("missing key column(s): " + missingKeyParts.join(", "));
     }
-    const current = key ? byKey.get(key.toLowerCase()) : undefined;
+    const current = key ? byKey.get(matchKey) : undefined;
 
     if (row.action === "delete") {
       if (!allowDelete) errors.push("rows in this sheet cannot be deleted on their own");
@@ -240,7 +246,11 @@ export function planSheet(input: {
 
     const changes: { field: string; from: unknown; to: unknown }[] = [];
     const next: Record<string, unknown> = {};
+    const keyNames = [def.keyField, ...(def.extraKeyFields ?? [])];
     for (const [field, value] of Object.entries(values)) {
+      // **键字段是身份，不是数据**：车牌/手机号的写法差异（大小写、空格）不该被当成一次修改，
+      // 否则库里那句 VLL 3302 会被文件里的 vll3302 覆盖掉 —— 看不出错，但格式会慢慢变味。
+      if (keyNames.includes(field)) continue;
       const col = def.columns.find((c) => c.field === field);
       const equal = col?.type === "date" ? sameDay(current[field], value) : sameValue(current[field], value);
       if (!equal) {

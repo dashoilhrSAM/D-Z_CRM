@@ -52,6 +52,12 @@ export interface ColumnDef {
   /** enum 归一：模板里写 "Good"，系统存 "GOOD" */
   enumMap?: Record<string, string>;
   note?: string;
+  /**
+   * 把值归一化到与数据库一致的形式，再做比较与匹配。
+   * 用途：车牌的空格/大小写、手机号的 +60 与 0 前缀与破折号 —— 这些在**生产数据里三种写法都真实存在**，
+   * 不归一化就会得到「车主不存在」这种莫名其妙的报错。
+   */
+  transform?: (value: string) => string;
 }
 
 export interface SheetDef {
@@ -73,6 +79,12 @@ export interface SheetDef {
   createAllowed?: boolean;
   /** 这一张 sheet 是否按分店（套餐/促销是；零件不是） */
   branchScoped?: boolean;
+  /**
+   * 只用于**比对**的键归一化（不改写写入值）。
+   * 例：车牌匹配时忽略大小写与空格 —— 但存进去的仍然是你写的那个写法，
+   * 不然新车会变成 VLL3302 而老车是 VLL 3302，看着像两套格式。
+   */
+  keyTransform?: (key: string) => string;
 }
 
 /** 该 sheet 的完整键字段列表 */
@@ -228,8 +240,74 @@ export const SERVICE_TYPES_SHEET: SheetDef = {
   ],
 };
 
+/** 车牌归一：大写 + 去掉所有空格（生产里 VLL 3302 与 PRY 6474 XX 这种写法都真实存在） */
+export function normalizePlate(raw: string): string {
+  return raw.toUpperCase().replace(/\s+/g, "");
+}
+
+/**
+ * 手机号归一：只留数字，再去掉开头的 60 或 0。
+ * 生产实测三种写法并存：+601127322148 / 60102032797 / 018-492 8009 —— 归一后都是同一个键。
+ */
+export function normalizePhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  return digits.replace(/^60/, "").replace(/^0/, "");
+}
+
+/** 车辆类型：**以代码为准**（src/lib/motorcycle-types.ts 的 12 个键）——
+ *  老板模板里的 Sport/Scooter/Cub/Others 已经过时（Cub、Others 在代码里都不存在）。 */
+export const MOTORCYCLE_TYPE_LABELS: Record<string, string> = {
+  underbone: "UNDERBONE", kapcai: "UNDERBONE", "弯梁": "UNDERBONE",
+  lifestyle_cub: "LIFESTYLE_CUB", cub: "LIFESTYLE_CUB",
+  scooter: "SCOOTER", "踏板": "SCOOTER", skuter: "SCOOTER",
+  premium_scooter: "PREMIUM_SCOOTER",
+  naked: "NAKED", "街车": "NAKED", roadster: "NAKED",
+  sport: "SPORT", "跑车": "SPORT", supersport: "SPORT",
+  adv: "ADV", adventure: "ADV", "拉力": "ADV",
+  cruiser: "CRUISER", "巡航": "CRUISER",
+  modern_classic: "MODERN_CLASSIC", retro: "MODERN_CLASSIC", "复古": "MODERN_CLASSIC",
+  mini_fun: "MINI_FUN", mini: "MINI_FUN", "迷你": "MINI_FUN",
+  electric_scooter: "ELECTRIC_SCOOTER", "电摩": "ELECTRIC_SCOOTER",
+  electric_fleet: "ELECTRIC_FLEET", "电动队车": "ELECTRIC_FLEET",
+};
+
+export const MOTORCYCLES_SHEET: SheetDef = {
+  key: "motorcycles",
+  title: "车辆 Motorcycles",
+  keyField: "plate",
+  keyHeader: "Plate",
+  allowDelete: true,
+  branchScoped: false,
+  keyTransform: normalizePlate,
+  columns: [
+    {
+      header: "Plate", zh: "车牌", field: "plate", type: "text", required: true,
+      note: "作为键：匹配时忽略大小写与空格（存进去的仍是你写的写法）",
+    },
+    {
+      header: "Type", zh: "车型", field: "type", type: "enum", required: true,
+      enumMap: MOTORCYCLE_TYPE_LABELS,
+      // 这一列**决定这辆车适用哪些服务**（src/lib/service-catalog.ts 的 appliesTo 用的就是这些键）——
+      // 填错不会报错，只会让该做的服务不出现。所以取值必须来自代码里的 12 个键。
+      note: "决定适用哪些服务；取值见 src/lib/motorcycle-types.ts",
+    },
+    {
+      header: "Customer Phone", zh: "车主手机", field: "customerPhone", type: "text", required: true,
+      transform: normalizePhone, note: "按手机号找车主（忽略 +60/0 前缀与破折号）；车主不存在会报错，不会凭空新建",
+    },
+    { header: "Brand", zh: "品牌", field: "brand", type: "text", required: true },
+    { header: "Model", zh: "型号", field: "model", type: "text", required: true },
+    { header: "Year", zh: "年份", field: "year", type: "int", required: true },
+    { header: "Mileage", zh: "当前里程", field: "currentMileage", type: "int" },
+    { header: "VIN", zh: "车架号", field: "vin", type: "text", note: "生产里多数为空，所以键不能用它" },
+    { header: "Engine No", zh: "引擎号", field: "engineNo", type: "text" },
+    { header: "Color", zh: "颜色", field: "color", type: "text" },
+  ],
+};
+
 export const SHEETS: SheetDef[] = [
   PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET,
+  MOTORCYCLES_SHEET,
 ];
 
 export function sheetByKey(key: string): SheetDef | undefined {

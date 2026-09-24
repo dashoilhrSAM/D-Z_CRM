@@ -2,7 +2,7 @@ import ExcelJS from "exceljs";
 import { db } from "@/lib/db";
 import {
   META_SHEET, SHEETS, PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET,
-  SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, WORKBOOK_VERSION, type SheetDef,
+  SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, WORKBOOK_VERSION, type SheetDef,
 } from "./sheets";
 
 /**
@@ -83,7 +83,7 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   meta.addRow(["branchId", scope.branchId]);
   meta.addRow(["branchName", branch.name]);
 
-  const [products, packages, packageItems, campaigns, suppliers, serviceTypes] = await Promise.all([
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles] = await Promise.all([
     db.product.findMany({
       where: { organisationId: scope.organisationId },
       include: { supplier: { select: { name: true } } },
@@ -99,6 +99,12 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
     db.supplier.findMany({ where: { organisationId: scope.organisationId }, orderBy: { name: "asc" } }),
     // 服务目录由代码同步进库；没有 code 的行无法作为键，导出时跳过（它们也不该被 Excel 改）
     db.serviceType.findMany({ where: { organisationId: scope.organisationId, code: { not: null } }, orderBy: { code: "asc" } }),
+    // 车辆挂在客户身上，客户是组织级的 → 用 customer.organisationId 收窄
+    db.motorcycle.findMany({
+      where: { customer: { organisationId: scope.organisationId } },
+      include: { customer: { select: { phone: true } } },
+      orderBy: { plate: "asc" },
+    }),
   ]);
 
   addDataSheet(wb, PRODUCTS_SHEET, products.map((p) => ({
@@ -130,6 +136,12 @@ export async function buildSetupWorkbook(scope: ExportScope): Promise<Uint8Array
   addDataSheet(wb, SERVICE_TYPES_SHEET, serviceTypes.map((s) => ({
     code: s.code, name: s.name, category: s.category ?? "", durationMin: s.durationMin ?? "",
     priceSen: s.priceSen ?? "", active: s.active,
+  })));
+
+  addDataSheet(wb, MOTORCYCLES_SHEET, motorcycles.map((m) => ({
+    plate: m.plate, type: m.type, customerPhone: m.customer.phone ?? "",
+    brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
+    vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
   })));
 
   addMappingSheet(wb);

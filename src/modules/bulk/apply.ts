@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/auth/audit";
 import type { RowPlan } from "./diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET } from "./sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, normalizePlate, normalizePhone } from "./sheets";
 
 /**
  * 应用已确认的差异（P2）。
@@ -49,14 +49,20 @@ export async function applyPlans(input: {
     return { ok: false, error: "The branch in this file is not in your organisation" };
   }
 
-  const [suppliers, products, packages] = await Promise.all([
+  const [suppliers, products, packages, customers, motorcycles] = await Promise.all([
     db.supplier.findMany({ where: { organisationId: input.organisationId }, select: { id: true, name: true } }),
     db.product.findMany({ where: { organisationId: input.organisationId }, select: { id: true, sku: true } }),
     db.servicePackage.findMany({ where: { branchId: input.branchId }, select: { id: true, name: true } }),
+    // 车主按**归一化后的手机号**匹配（生产里 +60/0/破折号三种写法并存，见 sheets.ts 的 normalizePhone）
+    db.customer.findMany({ where: { organisationId: input.organisationId }, select: { id: true, phone: true } }),
+    // 车辆按**归一化后的车牌**匹配（空格与大小写不统一）
+    db.motorcycle.findMany({ where: { customer: { organisationId: input.organisationId } }, select: { id: true, plate: true } }),
   ]);
   const supplierIdByName = new Map(suppliers.map((s) => [s.name.trim().toLowerCase(), s.id]));
   const productIdBySku = new Map(products.map((p) => [p.sku.trim().toLowerCase(), p.id]));
   const packageIdByName = new Map(packages.map((p) => [p.name.trim().toLowerCase(), p.id]));
+  const customerIdByPhone = new Map(customers.filter((c) => c.phone).map((c) => [normalizePhone(c.phone as string), c.id]));
+  const motorcycleIdByPlate = new Map(motorcycles.map((m) => [normalizePlate(m.plate), m.id]));
 
   const summary: Record<string, ApplySummary> = {};
   const bucket = (sheet: string) => (summary[sheet] ??= emptySummary());
@@ -74,6 +80,7 @@ export async function applyPlans(input: {
         else if (plan.sheet === CAMPAIGNS_SHEET.key) await applyCampaign(tx, plan, input, bucket(plan.sheet));
         else if (plan.sheet === SUPPLIERS_SHEET.key) await applySupplier(tx, plan, input, bucket(plan.sheet));
         else if (plan.sheet === SERVICE_TYPES_SHEET.key) await applyServiceType(tx, plan, input, bucket(plan.sheet));
+        else if (plan.sheet === MOTORCYCLES_SHEET.key) await applyMotorcycle(tx, plan, input, customerIdByPhone, motorcycleIdByPlate, bucket(plan.sheet));
         else throw new Error("Unknown sheet: " + plan.sheet);
       }
     });
@@ -246,6 +253,61 @@ async function applyPackageItem(
     if (!existing) throw new Error("Package item no longer exists: " + plan.key);
     await tx.servicePackageItem.update({ where: { id: existing.id }, data: data as never });
     out.updated += 1;
+  }
+}
+
+async function applyMotorcycle(
+  tx: Tx,
+  plan: RowPlan,
+  input: { organisationId: string },
+  customerIdByPhone: Map<string, string>,
+  motorcycleIdByPlate: Map<string, string>,
+  out: ApplySummary,
+) {
+  const data: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(plan.values)) {
+    if (field === "customerPhone" || field === "plate") continue;
+    data[field] = value;
+  }
+  // 车主：按手机号找。找不到**报错而不新建** —— 车辆表不是建客户的地方，
+  // 从车辆名单凭空建客户是产生重复客户最典型的方式（客户表还没做，判重规则也没抽出来）。
+  const phone = String(plan.values.customerPhone ?? "").trim();
+  const customerId = phone ? customerIdByPhone.get(normalizePhone(phone)) : undefined;
+  if (phone && !customerId) {
+    throw new Error("No customer with phone " + phone + " — add the customer first (vehicles do not create customers)");
+  }
+  const existingId = motorcycleIdByPlate.get(normalizePlate(plan.key));
+
+  if (plan.action === "create") {
+    if (!customerId) throw new Error("Customer phone is required for a new vehicle: " + plan.key);
+    await tx.motorcycle.create({
+      data: {
+        customerId,
+        plate: String(plan.values.plate ?? plan.key),
+        brand: String(plan.values.brand ?? ""),
+        model: String(plan.values.model ?? ""),
+        year: Number(plan.values.year ?? new Date().getFullYear()),
+        type: (data.type as never) ?? "UNDERBONE",
+        ...data,
+      } as never,
+    });
+    out.created += 1;
+  } else if (plan.action === "update") {
+    if (!existingId) throw new Error("Vehicle no longer exists: " + plan.key);
+    if (customerId) data.customerId = customerId;
+    await tx.motorcycle.update({ where: { id: existingId }, data: data as never });
+    out.updated += 1;
+  } else if (plan.action === "delete") {
+    if (!existingId) {
+      out.skipped += 1;
+      return;
+    }
+    // 有历史（工单/预约）就不能删 —— 先查引用再决定（见文件头 ②）
+    const used = await tx.serviceJob.count({ where: { motorcycleId: existingId } })
+      + await tx.booking.count({ where: { motorcycleId: existingId } });
+    if (used > 0) throw new Error("Vehicle has " + used + " job(s) or booking(s) and cannot be deleted: " + plan.key);
+    await tx.motorcycle.delete({ where: { id: existingId } });
+    out.deleted += 1;
   }
 }
 
