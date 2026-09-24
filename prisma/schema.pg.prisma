@@ -1531,7 +1531,9 @@ model AutomationExecution {
   trigger    String
   status     String         @default("SUCCESS") // SUCCESS | FAILED
   error      String?
+  dedupeKey  String?        // 去重键（原先误存在 error 字段里 —— 见 2026-09-24 的迁移）
   executedAt DateTime       @default(now())
+  @@index([ruleId, trigger, dedupeKey])
 }
 
 model MessageTemplate {
@@ -1942,3 +1944,31 @@ model BulkImportSession {
   @@index([organisationId, branchId, status])
   @@index([organisationId, uploadedAt])
 }
+
+/// 延迟发送队列：自动化动作「N 天后发这条消息」先落这里，由每日 cron 发出。
+/// 刻意**不设关系字段**（与 OtpAttempt 一致）—— 新增表不动其它模型，减少 schema 面。
+model ScheduledMessage {
+  id             String    @id @default(cuid())
+  organisationId String
+  branchId       String?
+  customerId     String
+  templateId     String
+  /// 模板变量（Json）
+  vars           Json?
+  /// 什么时候该发（UTC）
+  sendAt         DateTime
+  /// PENDING | SENT | FAILED | CANCELLED
+  status         String    @default("PENDING")
+  attempts       Int       @default(0)
+  lastError      String?
+  /// 营销类消息（发送时要走 opt-out 检查）
+  isMarketing    Boolean   @default(false)
+  jobId          String?
+  /// 是哪条自动化规则排的（便于排查）
+  sourceRuleId   String?
+  createdAt      DateTime  @default(now())
+  sentAt         DateTime?
+
+  @@index([status, sendAt])
+}
+

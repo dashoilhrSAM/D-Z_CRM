@@ -18,6 +18,60 @@
 
 import { db } from "@/lib/db";
 import { automationModule } from "./service";
+import { messagingModule, type TemplateVars } from "@/modules/messaging/service";
+
+/** 延迟发送的时间点：N 天后（UTC）——纯函数，可测 */
+export function sendAtFor(now: Date, delayDays: number): Date {
+  const days = Math.max(0, Math.floor(delayDays));
+  return new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+/** 该发了吗（纯函数） */
+export function isScheduledDue(sendAt: Date, now: Date): boolean {
+  return sendAt.getTime() <= now.getTime();
+}
+
+/**
+ * 把到期的延迟消息发出去。
+ *
+ * 与自动化规则里的 SEND_MESSAGE 走**同一个发送入口**（messagingModule.sendFromTemplate ✓），
+ * 所以 opt-out、真实 status/externalId、失败记录都自动一致 —— 不另开一条发送路径。
+ */
+export async function sendDueScheduledMessages(now: Date = new Date()): Promise<{ sent: number; failed: number }> {
+  const due = await db.scheduledMessage.findMany({
+    where: { status: "PENDING", sendAt: { lte: now } },
+    take: 50,
+    orderBy: { sendAt: "asc" },
+  });
+  let sent = 0;
+  let failed = 0;
+  for (const m of due) {
+    try {
+      const out = await messagingModule.sendFromTemplate({
+        customerId: m.customerId,
+        templateId: m.templateId,
+        vars: (m.vars ?? {}) as TemplateVars,
+        isMarketing: m.isMarketing,
+        jobId: m.jobId ?? undefined,
+        branchId: m.branchId ?? undefined,
+        referenceType: "SCHEDULED",
+      });
+      if (!out.sent) throw new Error("provider did not send");
+      await db.scheduledMessage.update({
+        where: { id: m.id },
+        data: { status: "SENT", sentAt: new Date(), attempts: m.attempts + 1, lastError: null },
+      });
+      sent++;
+    } catch (e) {
+      await db.scheduledMessage.update({
+        where: { id: m.id },
+        data: { status: "FAILED", attempts: m.attempts + 1, lastError: String((e as Error).message).slice(0, 300) },
+      });
+      failed++;
+    }
+  }
+  return { sent, failed };
+}
 
 /** 多久没来算「流失」 */
 export const INACTIVE_DAYS = 90;
