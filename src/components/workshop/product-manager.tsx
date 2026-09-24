@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { Search } from "lucide-react";
+import { filterProducts } from "@/lib/product-search";
 import { useRouter } from "next/navigation";
 import { createProduct, updateProduct, deleteProduct, setProductActive } from "@/actions/products";
 import { useLang } from "@/components/shared/language-context";
@@ -34,6 +36,7 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(empty());
   const [msg, setMsg] = useState("");
+  const [q, setQ] = useState("");
 
   async function doCreate() {
     const res = await createProduct({ name: add.name, sku: add.sku.trim().toUpperCase(), category: add.category || null, brand: add.brand || null, costPriceSen: toSen(add.cost), sellPriceSen: toSen(add.sell), minStock: Number(add.minStock) || 5, imageUrl: add.imageUrl || null });
@@ -50,6 +53,9 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
     await deleteProduct(id); router.refresh();
   }
   async function doToggle(p: PRow) { await setProductActive(p.id, !p.active); router.refresh(); }
+
+  // 空查询返回全部（不是全部隐藏）—— 规则在 @/lib/product-search 里，有测试盯着
+  const shown = filterProducts(products, q);
 
   return (
     <div className="rounded-2xl border bg-card overflow-hidden">
@@ -81,6 +87,29 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
         </div>
       )}
 
+      {/* 搜索：按名字 / SKU / 品牌 / 分类 / 原厂编号，多个词全部命中才算匹配 */}
+      <div className="flex flex-wrap items-center gap-2 border-b px-4 py-2">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <input
+            className={inputCls + " pl-8"}
+            placeholder={t("ws.products.search", lang)}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
+        </div>
+        {q.trim() && (
+          <>
+            <span className="text-xs text-muted-foreground">
+              {t("ws.products.showing", lang).replace("{n}", String(shown.length)).replace("{total}", String(products.length))}
+            </span>
+            <button className="rounded-md border px-2.5 py-1.5 text-xs" onClick={() => setQ("")}>
+              {t("ws.products.clear", lang)}
+            </button>
+          </>
+        )}
+      </div>
+
       <div className="overflow-x-auto max-h-[560px] overflow-y-auto">
         <table className="dz-table">
           <thead><tr className="border-b bg-muted/40 text-left text-xs text-muted-foreground sticky top-0 z-10">
@@ -89,7 +118,10 @@ export function ProductManager({ products, canManage }: { products: PRow[]; canM
             <th className="px-4 py-3">{t("ws.products.col.margin", lang)}</th><th className="px-4 py-3">{t("ws.products.col.status", lang)}</th>{canManage && <th className="px-4 py-3 text-right">•</th>}
           </tr></thead>
           <tbody>
-            {products.map((p) => {
+            {shown.length === 0 && (
+              <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-muted-foreground">{t("ws.products.no-match", lang)}</td></tr>
+            )}
+            {shown.map((p) => {
               const margin = p.sellPriceSen > 0 ? Math.round(((p.sellPriceSen - p.costPriceSen) / p.sellPriceSen) * 100) : 0;
               const editing = editingId === p.id;
               return (

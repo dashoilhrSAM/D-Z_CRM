@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Camera, Check } from "lucide-react";
+import { toast } from "sonner";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 
@@ -32,6 +33,9 @@ export function SopPhotoCapture({ jobId, photos, canCapture = true }: { jobId: s
       const res = await fetch(`/api/jobs/${jobId}/photos`, { method: "POST", body: fd });
       const data = await res.json();
       if (!data.ok) alert(data.error ?? t("ws.ctrl.upload-failed", lang));
+      // 拍齐最后一张时后端会直接把工单推进到「进行中」——告诉技师一声，
+      // 否则他回到列表才发现状态变了（老板反馈：接单后应当变成 in progress）
+      if (data.started) toast.success(t("mech.started", lang));
       router.refresh();
     } catch (err) {
       alert(String((err as Error).message));
