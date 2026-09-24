@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { planSheet, type RowPlan, type SheetSummary } from "@/modules/bulk/diff";
 import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePhone } from "@/modules/bulk/sheets";
 import { buildSetupWorkbook } from "@/modules/bulk/export";
-import { SHEETS, type FieldType } from "@/modules/bulk/sheets";
+import { buildExistingRows, sheetColumns, type SheetColumnMeta } from "@/modules/bulk/existing";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
 
@@ -80,15 +80,7 @@ export async function exportSetupWorkbook(input: {
   return { ok: true, base64: Buffer.from(bytes).toString("base64"), fileName: "workshop-setup-" + slug + "-" + date + ".xlsx" };
 }
 
-/** 给界面渲染编辑器用的列元数据（类型、是否必填、枚举可选值） */
-export interface SheetColumnMeta {
-  field: string;
-  header: string;
-  zh: string;
-  type: FieldType;
-  required: boolean;
-  options?: string[];
-}
+export type { SheetColumnMeta } from "@/modules/bulk/existing";
 
 export interface PreviewResult {
   ok: true;
@@ -129,58 +121,8 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true, organisationId: true } });
   if (!branch || branch.organisationId !== me.organisationId) return { ok: false, error: "The branch in this file is not in your organisation" };
 
-  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles, customers] = await Promise.all([
-    db.product.findMany({
-      where: { organisationId: me.organisationId },
-      // **必须带上供应商名**：导出的文件里写着供应商名，现状里没有的话，
-      // 每个有供应商的零件都会被误报成"有改动"（假差异比不预览更糟）
-      include: { supplier: { select: { name: true } } },
-    }),
-    db.servicePackage.findMany({ where: { branchId }, select: { name: true, tier: true, priceSen: true, description: true, isBestValue: true } }),
-    db.servicePackageItem.findMany({
-      where: { package: { branchId } },
-      include: { package: { select: { name: true } }, product: { select: { sku: true } } },
-    }),
-    db.campaign.findMany({
-      where: { branchId },
-      select: { name: true, type: true, status: true, startDate: true, endDate: true, discountPercent: true, pointsBonus: true, audience: true },
-    }),
-    db.supplier.findMany({
-      where: { organisationId: me.organisationId },
-      select: { name: true, contactName: true, phone: true, email: true, address: true, leadTimeDays: true },
-    }),
-    db.serviceType.findMany({
-      where: { organisationId: me.organisationId, code: { not: null } },
-      select: { code: true, name: true, category: true, durationMin: true, priceSen: true, active: true },
-    }),
-    db.motorcycle.findMany({
-      where: { customer: { organisationId: me.organisationId } },
-      include: { customer: { select: { phone: true } } },
-    }),
-    db.customer.findMany({
-      where: { organisationId: me.organisationId },
-      select: { id: true, name: true, phone: true, email: true, address: true, tags: true, notes: true },
-    }),
-  ]);
-  const existingBySheet: Record<string, Record<string, unknown>[]> = {
-    [PRODUCTS_SHEET.key]: products.map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" })),
-    [PACKAGES_SHEET.key]: packages,
-    [PACKAGE_ITEMS_SHEET.key]: packageItems.map((i) => ({
-      packageName: i.package.name, itemName: i.name, kind: i.kind, productSku: i.product?.sku ?? "",
-      defaultQty: i.defaultQty, priceSen: i.priceSen,
-    })),
-    [CAMPAIGNS_SHEET.key]: campaigns,
-    [SUPPLIERS_SHEET.key]: suppliers,
-    // 服务目录只比对有 code 的行（没有 code 的无法作为键，也确实不该被 Excel 改）
-    [SERVICE_TYPES_SHEET.key]: serviceTypes,
-    // 手机号在这里也归一化 —— 导入时会归一化文件里的值，两边必须同一套算法才比得上
-    [MOTORCYCLES_SHEET.key]: motorcycles.map((m) => ({
-      plate: m.plate, type: m.type, customerPhone: normalizePhone(m.customer.phone ?? ""),
-      brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
-      vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
-    })),
-    [CUSTOMERS_SHEET.key]: customers,
-  };
+  const existingBySheet = await buildExistingRows({ organisationId: me.organisationId, branchId });
+
   const defBySheet: Record<string, typeof PRODUCTS_SHEET> = {
     [PRODUCTS_SHEET.key]: PRODUCTS_SHEET,
     [PACKAGES_SHEET.key]: PACKAGES_SHEET,
@@ -215,14 +157,15 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     // 客户：邮箱**不做键**，但两个人不能共用 —— 在预览里就说清楚（而不是等到应用才炸）。
     // 自动合并会在"换号写错一次"时并错人，所以这里只报错、不合并。
     if (s.key === CUSTOMERS_SHEET.key) {
+      const customerRows = existingBySheet[CUSTOMERS_SHEET.key] ?? [];
       const emailOwner = new Map(
-        customers.filter((c) => c.email).map((c) => [(c.email as string).trim().toLowerCase(), c]),
+        customerRows.filter((c) => c.email).map((c) => [String(c.email).trim().toLowerCase(), c]),
       );
       for (const p of sheetPlans) {
         if (p.action !== "create" && p.action !== "update") continue;
         const email = typeof p.values.email === "string" ? p.values.email.trim().toLowerCase() : "";
         if (!email) continue;
-        const mine = customers.find((c) => c.phone && normalizePhone(c.phone) === normalizePhone(p.key));
+        const mine = customerRows.find((c) => c.phone && normalizePhone(String(c.phone)) === normalizePhone(p.key));
         const owner = emailOwner.get(email);
         if (owner && owner.id !== mine?.id) {
           p.action = "error";
@@ -237,18 +180,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     return { ok: false, error: "This file has no sheet I can read — export a fresh copy from this page" };
   }
 
-  // 列元数据：枚举列把 enumMap 的**取值**去重后给界面当选项（界面只看得到规范值，与库里一致）
-  const columns: Record<string, SheetColumnMeta[]> = {};
-  for (const def of SHEETS) {
-    columns[def.key] = def.columns.map((c) => ({
-      field: c.field,
-      header: c.header,
-      zh: c.zh,
-      type: c.type,
-      required: c.required ?? false,
-      options: c.type === "enum" ? [...new Set(Object.values(c.enumMap ?? {}))] : undefined,
-    }));
-  }
+  const columns = sheetColumns();
 
   return {
     ok: true,
