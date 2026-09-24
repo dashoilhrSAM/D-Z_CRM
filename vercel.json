@@ -2,6 +2,10 @@
   "buildCommand": "prisma generate --schema prisma/schema.pg.prisma && node scripts/sync-prod-schema.mjs && next build",
   "crons": [
     {
+      "path": "/api/cron/automation-scan",
+      "schedule": "30 8 * * *"
+    },
+    {
       "path": "/api/cron/reminders",
       "schedule": "0 9 * * *"
     },

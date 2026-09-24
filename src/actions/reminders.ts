@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { messagingModule } from "@/modules/messaging/service";
+import { hasActiveServiceDueRule } from "@/modules/automation/scan";
 
 /** Send a service reminder via the Service Reminder template (REM-008..020). */
 export async function sendReminder(reminderId: string) {
@@ -36,6 +37,12 @@ export async function sendReminder(reminderId: string) {
 
 /** Batch-send all due / overdue service reminders (manual trigger of the scheduled job). */
 export async function sendDueReminders(): Promise<{ ok: boolean; sent: number; failed: number }> {
+  // **规则优先**：如果老板建了启用中的 SERVICE_DUE 自动化规则，
+  // 就不要再走这条内置提醒 —— 否则同一个客户会收到两条（规则一条 + 内置一条）✗。
+  const org = await db.organisation.findFirst();
+  if (org && (await hasActiveServiceDueRule(org.id))) {
+    return { ok: true, sent: 0, failed: 0 };
+  }
   const due = await db.serviceReminder.findMany({
     where: { closedAt: null, OR: [{ status: "DUE" }, { status: "OVERDUE" }, { estimatedDate: { lte: new Date() } }] },
     take: 50,
