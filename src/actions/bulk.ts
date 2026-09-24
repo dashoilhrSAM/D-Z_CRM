@@ -7,7 +7,8 @@ import { db } from "@/lib/db";
 import { planSheet, type RowPlan, type SheetSummary } from "@/modules/bulk/diff";
 import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePhone } from "@/modules/bulk/sheets";
 import { buildSetupWorkbook } from "@/modules/bulk/export";
-import { buildExistingRows, sheetColumns, type SheetColumnMeta } from "@/modules/bulk/existing";
+import { SHEETS } from "@/modules/bulk/sheets";
+import { buildExistingRows, countExistingBySheet, sheetColumns, type SheetColumnMeta } from "@/modules/bulk/existing";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
 import { audit } from "@/lib/auth/audit";
@@ -97,6 +98,12 @@ export interface PreviewResult {
   declaredSheets: string[] | null;
   /** 每张表的列定义 —— 界面据此渲染「就地修改」的输入控件 */
   columns: Record<string, SheetColumnMeta[]>;
+  /**
+   * 每张表「库里有多少行」。界面拿它与「文件里有多少行」对照，
+   * 少的时候明确告诉老板「这些不会被删除」（删行要在 _action 写 delete）——
+   * 他删了一行却什么都没发生，就是因为没人告诉他这条规则。
+   */
+  existingCounts: Record<string, number>;
   /** 文件属于哪个分店（套餐/促销按它落库） */
   branchId: string;
   branchName: string | null;
@@ -189,12 +196,16 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
 
   const columns = sheetColumns();
 
+  const existingCounts: Record<string, number> = {};
+  for (const def of SHEETS) existingCounts[def.key] = (existingBySheet[def.key] ?? []).length;
+
   return {
     ok: true,
     versionOk: parsed.versionOk,
     warnings: parsed.warnings,
     declaredSheets: parsed.declaredSheets,
     columns,
+    existingCounts,
     branchId,
     branchName: branch.name,
     sheets,
@@ -263,7 +274,7 @@ async function defaultBranchId(me: { organisationId: string; branchId: string | 
 
 /** 打开页面时接上「上次没审完的那一份」 */
 export async function resumeSetupImport(): Promise<
-  { ok: true; session: SessionView | null; columns: Record<string, SheetColumnMeta[]> } | { ok: false; error: string }
+  { ok: true; session: SessionView | null; columns: Record<string, SheetColumnMeta[]>; existingCounts: Record<string, number> } | { ok: false; error: string }
 > {
   const me = await actor();
   if (!me) return { ok: false, error: "Not signed in" };
@@ -271,12 +282,15 @@ export async function resumeSetupImport(): Promise<
     return { ok: false, error: "No permission to import" };
   const branchId = await defaultBranchId(me);
   if (!branchId) return { ok: false, error: "No branch" };
-  return { ok: true, session: await findDraftSession(me.organisationId, branchId, me.userId), columns: sheetColumns() };
+  const session = await findDraftSession(me.organisationId, branchId, me.userId);
+  // 计数按**当前**库算（老板可能在别处又加了零件），所以放在这里而不是存进会话
+  const existingCounts = await countExistingBySheet({ organisationId: me.organisationId, branchId });
+  return { ok: true, session, columns: sheetColumns(), existingCounts };
 }
 
 /** 载入某一份会话（历史里点进去） */
 export async function loadSetupImport(sessionId: string): Promise<
-  { ok: true; session: SessionView; columns: Record<string, SheetColumnMeta[]> } | { ok: false; error: string }
+  { ok: true; session: SessionView; columns: Record<string, SheetColumnMeta[]>; existingCounts: Record<string, number> } | { ok: false; error: string }
 > {
   const me = await actor();
   if (!me) return { ok: false, error: "Not signed in" };
@@ -284,7 +298,11 @@ export async function loadSetupImport(sessionId: string): Promise<
     return { ok: false, error: "No permission to import" };
   const session = await loadImportSession(sessionId, me.organisationId);
   if (!session) return { ok: false, error: "Session not found" };
-  return { ok: true, session, columns: sheetColumns() };
+  const existingCounts = await countExistingBySheet({
+    organisationId: me.organisationId,
+    branchId: session.branchId,
+  });
+  return { ok: true, session, columns: sheetColumns(), existingCounts };
 }
 
 /** 上传即建草稿：解析 + 差异 → 整份存下来 */
