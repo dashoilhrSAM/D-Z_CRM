@@ -25,6 +25,15 @@ export interface ParsedWorkbook {
   /** 文件属于哪个分店（套餐/促销按分店存 —— 以**文件里写的**为准，不信调用方传的） */
   branchId: string | null;
   branchName: string | null;
+  /**
+   * 这份文件**声明包含**哪些 sheet（导出时写进元数据）。
+   * null ＝ 老文件没写，按「全都算包含」处理（向后兼容）。
+   * 有值时：不在清单里的 sheet 是「**这次不涉及**」，不是「这张表是空的」——
+   * 否则你只想改零件、传一份只含零件的文件，系统会把套餐/车辆当成全空。
+   */
+  declaredSheets: string[] | null;
+  /** 只要模板导出的文件（没有数据行） */
+  templateOnly: boolean;
   sheets: ParsedSheet[];
   warnings: string[];
 }
@@ -81,6 +90,8 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
   let version: number | null = null;
   let branchId: string | null = null;
   let branchName: string | null = null;
+  let declaredSheets: string[] | null = null;
+  let templateOnly = false;
   const meta = wb.getWorksheet(META_SHEET);
   if (meta) {
     meta.eachRow((row) => {
@@ -88,6 +99,8 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
       if (k === "version") version = Number(v);
       if (k === "branchId") branchId = v || null;
       if (k === "branchName") branchName = v || null;
+      if (k === "sheets") declaredSheets = v ? v.split(",").map((x) => x.trim()).filter(Boolean) : null;
+      if (k === "templateOnly") templateOnly = v === "1";
     });
   } else {
     warnings.push("No version marker in this file (it may be one of your own templates)");
@@ -140,5 +153,5 @@ export async function parseSetupWorkbook(data: Uint8Array): Promise<ParsedWorkbo
     sheets.push({ key: def.key, title: def.title, found: true, headerRowNumber: header.rowNumber, rows, warnings: sheetWarnings });
   }
 
-  return { version, versionOk, branchId, branchName, sheets, warnings };
+  return { version, versionOk, branchId, branchName, declaredSheets, templateOnly, sheets, warnings };
 }

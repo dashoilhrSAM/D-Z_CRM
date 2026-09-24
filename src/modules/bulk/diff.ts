@@ -156,7 +156,8 @@ function sameDay(a: unknown, b: unknown): boolean {
   return da.toISOString().slice(0, 10) === db.toISOString().slice(0, 10);
 }
 
-function sameValue(a: unknown, b: unknown): boolean {
+/** 值比较（日期按天）。供 apply 的「预览是否过期」检测复用。 */
+export function sameValue(a: unknown, b: unknown): boolean {
   if (a === undefined || b === undefined || a === null || b === null) return a === b;
   if (typeof a === "number" || typeof b === "number") return Number(a) === Number(b);
   if (typeof a === "boolean" || typeof b === "boolean") return Boolean(a) === Boolean(b);

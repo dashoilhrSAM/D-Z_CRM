@@ -1,7 +1,8 @@
 import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/auth/audit";
-import type { RowPlan } from "./diff";
+import { cellToValue, sameValue, type RowPlan } from "./diff";
+import { SHEETS, type SheetDef } from "./sheets";
 import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePlate, normalizePhone } from "./sheets";
 
 /**
@@ -25,10 +26,15 @@ export interface ApplySummary {
   /** 有历史引用因而改成停用的 */
   deactivated: number;
   skipped: number;
+  /**
+   * **预览过期被拒**的行：你看预览之后，别人改了同一条。
+   * 这时不能盲目覆盖 —— 逐行拒绝并说清楚（老板 2026-09-23 确认的口径）。
+   */
+  stale: number;
 }
 
 function emptySummary(): ApplySummary {
-  return { created: 0, updated: 0, deleted: 0, deactivated: 0, skipped: 0 };
+  return { created: 0, updated: 0, deleted: 0, deactivated: 0, skipped: 0, stale: 0 };
 }
 
 export async function applyPlans(input: {
@@ -38,7 +44,12 @@ export async function applyPlans(input: {
   userId: string;
   sessionBranchId: string | null;
   plans: RowPlan[];
-}): Promise<{ ok: true; summary: Record<string, ApplySummary> } | { ok: false; error: string }> {
+  /** 界面里「就地修改」的原始值：键是 "sheet#行号"，值是 { 字段: 原始输入 } */
+  edits?: Record<string, Record<string, unknown>>;
+}): Promise<
+  { ok: true; summary: Record<string, ApplySummary>; refused: { sheet: string; key: string; fields: string[] }[] }
+  | { ok: false; error: string }
+> {
   const bad = input.plans.filter((p) => p.action === "error");
   if (bad.length) {
     return { ok: false, error: bad.length + " row(s) have errors — nothing was written" };
@@ -68,6 +79,8 @@ export async function applyPlans(input: {
 
   const summary: Record<string, ApplySummary> = {};
   const bucket = (sheet: string) => (summary[sheet] ??= emptySummary());
+  /** 因为「预览过期」被拒的行 —— 回报给界面，让人知道哪几条没写成 */
+  const refused: { sheet: string; key: string; fields: string[] }[] = [];
 
   try {
     await db.$transaction(async (tx) => {
@@ -79,14 +92,44 @@ export async function applyPlans(input: {
           bucket(plan.sheet).skipped += 1;
           continue;
         }
-        if (plan.sheet === PRODUCTS_SHEET.key) await applyProduct(tx, plan, input, supplierIdByName, bucket(plan.sheet));
-        else if (plan.sheet === PACKAGES_SHEET.key) await applyPackage(tx, plan, input, bucket(plan.sheet));
-        else if (plan.sheet === PACKAGE_ITEMS_SHEET.key) await applyPackageItem(tx, plan, input, productIdBySku, packageIdByName, bucket(plan.sheet));
-        else if (plan.sheet === CAMPAIGNS_SHEET.key) await applyCampaign(tx, plan, input, bucket(plan.sheet));
-        else if (plan.sheet === SUPPLIERS_SHEET.key) await applySupplier(tx, plan, input, bucket(plan.sheet));
-        else if (plan.sheet === SERVICE_TYPES_SHEET.key) await applyServiceType(tx, plan, input, bucket(plan.sheet));
-        else if (plan.sheet === MOTORCYCLES_SHEET.key) await applyMotorcycle(tx, plan, input, customerIdByPhone, motorcycleIdByPlate, bucket(plan.sheet));
-        else if (plan.sheet === CUSTOMERS_SHEET.key) await applyCustomer(tx, plan, input, customerIdByPhone, customerIdByEmail, customerNameById, bucket(plan.sheet));
+        // **服务端复验**：值必须重新过一遍列定义（界面里改过的也要），不通过就整行拒绝
+        const def = SHEETS.find((s) => s.key === plan.sheet);
+        let effective = plan;
+        if (def) {
+          // ① 界面里的「就地修改」以原始值传回 → 解析成库里的形态
+          const rawEdits = input.edits?.[plan.sheet + "#" + plan.rowNumber] ?? {};
+          const cleanedEdits: Record<string, unknown> = {};
+          for (const [field, value] of Object.entries(rawEdits)) {
+            if (typeof value === "string" && value.trim() === "") continue;   // 留空＝不动
+            cleanedEdits[field] = value;
+          }
+          const parsed = coerceEdits(def, cleanedEdits);
+          const values = { ...plan.values, ...parsed.values };
+          // ② 复验合并后的值（含客户端可能篡改的部分）
+          const errors = [...parsed.errors, ...validateCoercedValues(def, values)];
+          if (errors.length > 0) {
+            refused.push({ sheet: plan.sheet, key: plan.key, fields: errors });
+            continue;
+          }
+          effective = { ...plan, values };
+        }
+        // **预览过期检测**：你看预览之后有人改了同一条 → 拒绝这一行，而不是把别人的改动盖掉
+        if (plan.action === "update" || plan.action === "delete") {
+          const { stale } = await staleFields(tx, effective, input.organisationId, input.branchId);
+          if (stale.length > 0) {
+            bucket(plan.sheet).stale += 1;
+            refused.push({ sheet: plan.sheet, key: plan.key, fields: stale });
+            continue;
+          }
+        }
+        if (plan.sheet === PRODUCTS_SHEET.key) await applyProduct(tx, effective, input, supplierIdByName, bucket(plan.sheet));
+        else if (plan.sheet === PACKAGES_SHEET.key) await applyPackage(tx, effective, input, bucket(plan.sheet));
+        else if (plan.sheet === PACKAGE_ITEMS_SHEET.key) await applyPackageItem(tx, effective, input, productIdBySku, packageIdByName, bucket(plan.sheet));
+        else if (plan.sheet === CAMPAIGNS_SHEET.key) await applyCampaign(tx, effective, input, bucket(plan.sheet));
+        else if (plan.sheet === SUPPLIERS_SHEET.key) await applySupplier(tx, effective, input, bucket(plan.sheet));
+        else if (plan.sheet === SERVICE_TYPES_SHEET.key) await applyServiceType(tx, effective, input, bucket(plan.sheet));
+        else if (plan.sheet === MOTORCYCLES_SHEET.key) await applyMotorcycle(tx, effective, input, customerIdByPhone, motorcycleIdByPlate, bucket(plan.sheet));
+        else if (plan.sheet === CUSTOMERS_SHEET.key) await applyCustomer(tx, effective, input, customerIdByPhone, customerIdByEmail, customerNameById, bucket(plan.sheet));
         else throw new Error("Unknown sheet: " + plan.sheet);
       }
     });
@@ -102,7 +145,95 @@ export async function applyPlans(input: {
     entity: "Setup",
     after: { summary, rows: input.plans.length, fileBranchId: input.branchId },
   });
-  return { ok: true, summary };
+  return { ok: true, summary, refused };
+}
+
+/**
+ * 预览过期检测：把计划里记的**旧值**与数据库**此刻**的值逐字段比。
+ * 不一致 = 你看预览之后有人改了同一条 → 拒绝这一行（而不是把别人的改动盖掉）。
+ */
+/**
+ * **服务端复验**：界面里改过的值也要重新按列定义校验一次。
+ * 客户端只负责传「值 + 批准与否」，能不能写、写成什么类型由这里说了算 ——
+ * 一次被篡改的请求不该能绕开枚举白名单或把金额写成文字。
+ */
+/**
+ * 复验**计划里已经是归一化形态的值**（分/Date/枚举规范值/布尔）。
+ *
+ * 注意与「界面传回来的原始编辑值」的区别：后者要过 cellToValue 解析
+ * （"12.50" 是 RM、要乘 100），而计划里的值已经是 sen —— 再解析一次会把它当元，金额直接错 100 倍。
+ * 这两件事**必须分开**，混淆过一次（测试立刻抓到了）。
+ */
+function validateCoercedValues(def: SheetDef, values: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  for (const col of def.columns) {
+    const v = values[col.field];
+    if (v === undefined) continue;
+    if (col.type === "money" || col.type === "int") {
+      if (typeof v !== "number" || !Number.isFinite(v) || v < 0) errors.push(col.header + ": expected a number");
+    } else if (col.type === "bool") {
+      if (typeof v !== "boolean") errors.push(col.header + ": expected true/false");
+    } else if (col.type === "enum") {
+      const allowed = [...new Set(Object.values(col.enumMap ?? {}))];
+      if (typeof v !== "string" || !allowed.includes(v)) errors.push(col.header + ": unknown value (" + String(v) + ")");
+    } else if (col.type === "date") {
+      if (!(v instanceof Date) && typeof v !== "string") errors.push(col.header + ": expected a date");
+    } else if (typeof v !== "string") {
+      errors.push(col.header + ": expected text");
+    }
+  }
+  return errors;
+}
+
+/** 界面传回来的**原始编辑值**（Excel 语义：金额是 RM、日期是 YYYY-MM-DD）→ 归一化 */
+function coerceEdits(def: SheetDef, raw: Record<string, unknown>): { values: Record<string, unknown>; errors: string[] } {
+  const out: Record<string, unknown> = {};
+  const errors: string[] = [];
+  for (const [field, value] of Object.entries(raw)) {
+    const col = def.columns.find((c) => c.field === field);
+    if (!col) {
+      errors.push("Unknown column: " + field);
+      continue;
+    }
+    const res = cellToValue(col, value);
+    if (!res.ok) errors.push(col.header + ": " + res.error);
+    else if (res.value !== undefined) out[field] = res.value;
+  }
+  return { values: out, errors };
+}
+
+async function staleFields(
+  tx: Tx,
+  plan: RowPlan,
+  organisationId: string,
+  branchId: string,
+): Promise<{ stale: string[] }> {
+  if (plan.changes.length === 0) return { stale: [] };
+  let current: Record<string, unknown> | null = null;
+  if (plan.sheet === PRODUCTS_SHEET.key) {
+    current = await tx.product.findUnique({ where: { sku: plan.key } }) as never;
+  } else if (plan.sheet === PACKAGES_SHEET.key) {
+    current = await tx.servicePackage.findFirst({ where: { branchId, name: plan.key } }) as never;
+  } else if (plan.sheet === PACKAGE_ITEMS_SHEET.key) {
+    const [pkgName, itemName] = plan.key.split(" / ");
+    const pkg = await tx.servicePackage.findFirst({ where: { branchId, name: pkgName }, select: { id: true } });
+    if (pkg) {
+      const item = await tx.servicePackageItem.findFirst({ where: { packageId: pkg.id, name: itemName } });
+      current = item ? { ...item, packageName: pkgName, itemName: item.name } : null;
+    }
+  } else if (plan.sheet === CAMPAIGNS_SHEET.key) {
+    current = await tx.campaign.findFirst({ where: { branchId, name: plan.key } }) as never;
+  } else if (plan.sheet === SUPPLIERS_SHEET.key) {
+    current = await tx.supplier.findFirst({ where: { organisationId, name: plan.key } }) as never;
+  } else if (plan.sheet === SERVICE_TYPES_SHEET.key) {
+    current = await tx.serviceType.findFirst({ where: { organisationId, code: plan.key } }) as never;
+  } else if (plan.sheet === MOTORCYCLES_SHEET.key) {
+    const all = await tx.motorcycle.findMany({ where: { customer: { organisationId } } });
+    current = (all.find((m) => normalizePlate(m.plate) === normalizePlate(plan.key)) ?? null) as never;
+  }
+  if (!current) return { stale: [] };   // 行已经不在了：由各自的 apply 分支去报"已不存在"
+  const row = current as Record<string, unknown>;
+  return { stale: plan.changes.filter((c) => !sameValue(row[c.field], c.from)).map((c) => c.field) };
 }
 
 type Tx = Prisma.TransactionClient;
