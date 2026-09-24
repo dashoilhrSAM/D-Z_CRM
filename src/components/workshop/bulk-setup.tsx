@@ -53,6 +53,7 @@ export function BulkSetup({
   initialSession,
   initialColumns,
   initialCounts,
+  initialHistory,
 }: {
   canDelete: boolean;
   branches: { id: string; name: string }[];
@@ -60,6 +61,8 @@ export function BulkSetup({
   initialSession: InitialSession | null;
   initialColumns: Record<string, SheetColumnMeta[]>;
   initialCounts: Record<string, number>;
+  /** 导入历史（服务端读好传进来 —— 不用挂载后再拉，也避免 set-state-in-effect） */
+  initialHistory: SessionHistoryRow[];
 }) {
   const lang = useLang();
   const router = useRouter();
@@ -82,7 +85,9 @@ export function BulkSetup({
   const [resumed, setResumed] = useState(initialSession !== null);
   const [file, setFile] = useState<File | null>(null);
   const [downloading, setDownloading] = useState(false);
-  const [history, setHistory] = useState<SessionHistoryRow[] | null>(null);
+  // 历史**默认就显示**：原来藏在按钮后面，老板说「也要导入历史记录」—— 它是常规信息，不是隐藏功能
+  const [history, setHistory] = useState<SessionHistoryRow[]>(initialHistory);
+  const [historyOpen, setHistoryOpen] = useState(true);
   const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
   const [selected, setSelected] = useState<string[]>(sheets.map((s) => s.key));
   const [templateOnly, setTemplateOnly] = useState(false);
@@ -156,16 +161,17 @@ export function BulkSetup({
         decisions: {},
         declaredSheets: res.preview.declaredSheets,
       });
-      setHistory(null);
+      await fetchHistory();
       toast.success(t("bulk.uploaded", lang));
     });
   };
 
-  const openHistory = () =>
-    start(async () => {
-      const res = await setupSessionHistory();
-      setHistory(res.ok ? res.rows : []);
-    });
+  /** 只取数据，不自己包过渡 —— 这样上传/应用之后也能直接调用它刷新历史 */
+  const fetchHistory = async () => {
+    const res = await setupSessionHistory();
+    if (res.ok) setHistory(res.rows);
+  };
+  const refreshHistory = () => start(fetchHistory);
 
   const openSession = (id: string) =>
     start(async () => {
@@ -190,7 +196,7 @@ export function BulkSetup({
 
   const onChanged = () => {
     setResumed(false);
-    setHistory(null);
+    void fetchHistory();
     void resume();
     router.refresh();
   };
@@ -247,15 +253,25 @@ export function BulkSetup({
           >
             <Download className="h-4 w-4" /> {t("bulk.download", lang) + " (" + selected.length + ")"}
           </Button>
-          <Button size="sm" variant="ghost" onClick={openHistory} disabled={pending}>
-            <History className="h-4 w-4" /> {t("bulk.history", lang)}
+          <Button
+            size="sm" variant="ghost" disabled={pending}
+            onClick={() => {
+              if (historyOpen) {
+                setHistoryOpen(false);
+              } else {
+                setHistoryOpen(true);
+                void refreshHistory();
+              }
+            }}
+          >
+            <History className="h-4 w-4" /> {t("bulk.history", lang) + (historyOpen ? " ▲" : " ▼")}
           </Button>
           {branches.length === 1 && <span className="text-xs text-muted-foreground">{branches[0].name}</span>}
         </div>
       </div>
 
-      {/* 历史（点一次才拉，不占页面加载） */}
-      {history && (
+      {/* 导入历史：默认展开（服务端预读），可按上方按钮收起或刷新 */}
+      {historyOpen && (
         <div className="rounded-2xl border bg-card p-4 space-y-2">
           <h2 className="text-sm font-semibold">{t("bulk.history", lang)}</h2>
           {history.length === 0 && <p className="text-xs text-muted-foreground">{t("bulk.history-empty", lang)}</p>}
@@ -279,6 +295,11 @@ export function BulkSetup({
                     : t("bulk.status-cancelled", lang)}
                 </span>
                 <span className="text-muted-foreground">{h.uploadedByName}</span>
+                {h.appliedAt && (
+                  <span className="text-muted-foreground">
+                    {t("bulk.applied-at", lang) + " " + h.appliedAt.slice(0, 16).replace("T", " ")}
+                  </span>
+                )}
                 <span className="flex-1" />
                 <Button size="sm" variant="ghost" onClick={() => openSession(h.id)} disabled={pending}>
                   {t("bulk.open", lang)}

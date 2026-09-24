@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
-import { resumeSetupImport, setupBranches } from "@/actions/bulk";
+import { resumeSetupImport, setupBranches, setupSessionHistory } from "@/actions/bulk";
 import { SHEETS } from "@/modules/bulk/sheets";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +26,9 @@ export default async function SetupPage() {
   // 也不会先闪一下空页面再填上内容。
   const resume = await resumeSetupImport();
   const draft = resume.ok ? resume.session : null;
+  // **导入历史也在服务端读好**：老板要的是「一眼看到最近导入过什么」，
+  // 而不是先点一个按钮才出现（历史是常规信息，不是隐藏功能）。
+  const history = await setupSessionHistory();
 
   return (
     <div className="space-y-4">
@@ -49,6 +52,7 @@ export default async function SetupPage() {
         }
         initialColumns={resume.ok ? resume.columns : {}}
         initialCounts={resume.ok ? resume.existingCounts : {}}
+        initialHistory={history.ok ? history.rows : []}
       />
     </div>
   );

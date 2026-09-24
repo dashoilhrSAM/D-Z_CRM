@@ -78,6 +78,9 @@ afterAll(async () => {
   await db.campaign.deleteMany({ where: { branchId } });
   await db.product.deleteMany({ where: { organisationId: orgId } });
   await db.supplier.deleteMany({ where: { organisationId: orgId } });
+  // 应用完成通知会落在分店/用户上 —— 不先清掉，后面删分店和组织会被外键挡住
+  await db.notification.deleteMany({ where: { branchId } });
+  await db.user.deleteMany({ where: { organisationId: orgId } });
   await db.branch.delete({ where: { id: branchId } });
   await db.organisation.delete({ where: { id: orgId } });
 });
@@ -187,6 +190,63 @@ describe("改一条、加一条、删一条", () => {
     expect(after.find((p) => p.sku === "OIL-" + tag)!.sellPriceSen).toBe(3800);
   });
 
+  it("应用完成后落一条站内通知（数字与本次实际写入一致）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const { db } = await import("@/lib/db");
+
+    // 通知的 userId 是外键 —— 用一个真实用户，否则插入会被 FK 拒掉。
+    // 用 upsert 而不是 findFirst 兜底：findFirst 会捡到上一轮跑剩下的用户，
+    // 那样测试就不再是自足的了（第一次跑能过、第二次跑因为残留而失败）。
+    const operator = await db.user.upsert({
+      where: { id: "notify-tester-" + tag },
+      update: {},
+      create: {
+        id: "notify-tester-" + tag,
+        organisationId: orgId, branchId, name: "Notify Tester",
+        email: "notify-tester-" + tag + "@test.local", role: "OWNER" as never,
+      },
+    });
+
+    const beforeCount = await db.notification.count({ where: { type: "BULK_IMPORT_APPLIED" } });
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: operator.id, sessionBranchId: null,
+      sourceLabel: "notify-test.xlsx",
+      plans: [{
+        sheet: "products", rowNumber: 2, key: "OIL-" + tag, action: "update",
+        values: { sellPriceSen: 4321 }, changes: [], errors: [],
+      }],
+    });
+    expect(res.ok).toBe(true);
+
+    const afterCount = await db.notification.count({ where: { type: "BULK_IMPORT_APPLIED" } });
+    expect(afterCount, "应当多出一条通知").toBe(beforeCount + 1);
+
+    const n = await db.notification.findFirst({
+      where: { type: "BULK_IMPORT_APPLIED" }, orderBy: { createdAt: "desc" },
+    });
+    expect(n).toBeTruthy();
+    expect(n!.title, "通知里要有文件名").toContain("notify-test.xlsx");
+    // 本次只有 1 条修改 —— 数字必须来自真实写入，不是编的
+    expect(n!.body).toContain("~1");
+    expect(n!.link).toBe("/workshop/setup");
+    expect(n!.branchId).toBe(branchId);
+  });
+
+  it("通知写失败绝不影响已经写入的数据（通知是附赠，不是正事）", async () => {
+    const { applyPlans } = await import("@/modules/bulk/apply");
+    const { db } = await import("@/lib/db");
+    // 用一个**不存在的用户 id**：通知那条会因外键失败，但数据必须照写
+    const res = await applyPlans({
+      organisationId: orgId, branchId, userId: "no-such-user-" + tag, sessionBranchId: null,
+      plans: [{
+        sheet: "products", rowNumber: 2, key: "OIL-" + tag, action: "update",
+        values: { sellPriceSen: 5555 }, changes: [], errors: [],
+      }],
+    });
+    expect(res.ok, "通知失败不能把写入也拖垮").toBe(true);
+    const p = await db.product.findFirst({ where: { organisationId: orgId, sku: "OIL-" + tag } });
+    expect(p!.sellPriceSen, "价格必须已经写进去").toBe(5555);
+  });
   it("有错的 sheet **一条都不写**（半对半错比不写更糟）", async () => {
     const { applyPlans } = await import("@/modules/bulk/apply");
     const before = await currentProducts();

@@ -384,6 +384,8 @@ export async function applySetupSession(input: { sessionId: string }): Promise<
     sessionBranchId: me.branchId,
     plans: approved,
     edits,
+    // 通知里带上文件名，老板一眼知道是哪一份
+    sourceLabel: session.fileName,
   });
   if (!res.ok) return { ok: false, error: res.error };
 
@@ -402,7 +404,9 @@ export async function applySetupSession(input: { sessionId: string }): Promise<
   for (const [sheet, s] of Object.entries(res.summary)) {
     summary[sheet] = { created: s.created, updated: s.updated, deleted: s.deleted, deactivated: s.deactivated };
   }
+
   revalidatePath("/workshop/setup");
+  revalidatePath("/workshop/notifications");
   return { ok: true, summary, refused: res.refused };
 }
 

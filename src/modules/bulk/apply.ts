@@ -46,6 +46,8 @@ export async function applyPlans(input: {
   plans: RowPlan[];
   /** 界面里「就地修改」的原始值：键是 "sheet#行号"，值是 { 字段: 原始输入 } */
   edits?: Record<string, Record<string, unknown>>;
+  /** 通知里显示的来源（一般是上传的文件名） */
+  sourceLabel?: string;
 }): Promise<
   { ok: true; summary: Record<string, ApplySummary>; refused: { sheet: string; key: string; fields: string[] }[] }
   | { ok: false; error: string }
@@ -145,6 +147,35 @@ export async function applyPlans(input: {
     entity: "Setup",
     after: { summary, rows: input.plans.length, fileBranchId: input.branchId },
   });
+
+  // **应用完成通知**：放在事务提交**之后**（写数据是正事，通知失败了也绝不能回滚它），
+  // 所以失败被吞掉。为什么需要它：大文件应用要跑一会儿，老板很可能切去做别的，
+  // 只在界面上闪一下的提示帮不了他 —— 站内通知能让他回头看到结果。
+  const totals = Object.values(summary).reduce(
+    (a, s) => ({
+      created: a.created + s.created,
+      updated: a.updated + s.updated,
+      deleted: a.deleted + s.deleted,
+    }),
+    { created: 0, updated: 0, deleted: 0 },
+  );
+  await db.notification
+    .create({
+      data: {
+        userId: input.userId,
+        branchId: input.branchId,
+        type: "BULK_IMPORT_APPLIED",
+        title: "Batch setup applied: " + (input.sourceLabel ?? "setup workbook"),
+        body:
+          "+" + totals.created + " new · ~" + totals.updated + " changed · -" + totals.deleted + " removed" +
+          (refused.length > 0
+            ? " · " + refused.length + " row(s) refused (changed by someone else first)"
+            : ""),
+        link: "/workshop/setup",
+      },
+    })
+    .catch(() => {});
+
   return { ok: true, summary, refused };
 }
 

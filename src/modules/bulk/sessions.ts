@@ -152,6 +152,8 @@ export interface SessionHistoryRow {
   id: string;
   fileName: string;
   uploadedAt: string;
+  /** 应用时间（没应用过就是 null）——历史里要能看出「什么时候真的写进去的」 */
+  appliedAt: string | null;
   status: SessionStatus;
   uploadedBy: string;
   uploadedByName: string;
@@ -205,6 +207,7 @@ export async function listImportSessions(organisationId: string, limit = 30): Pr
       id: r.id,
       fileName: r.fileName,
       uploadedAt: r.uploadedAt.toISOString(),
+      appliedAt: r.appliedAt ? r.appliedAt.toISOString() : null,
       status: r.status as SessionStatus,
       uploadedBy: r.uploadedBy,
       uploadedByName: nameById.get(r.uploadedBy) ?? "—",
