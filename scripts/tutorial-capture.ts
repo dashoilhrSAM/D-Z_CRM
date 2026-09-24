@@ -46,7 +46,7 @@ const ROUTES: Record<string, { path: string; name: string }[]> = {
     { path: "/workshop/crm/return-list", name: "crm-return-list" },
     { path: "/workshop/integrations", name: "integrations" },
     { path: "/workshop/ai", name: "ai" },
-    { path: "/workshop/import", name: "import" },
+    { path: "/workshop/setup", name: "bulk-setup" },
     { path: "/workshop/settings", name: "settings" },
     { path: "/workshop/settings/developer", name: "settings-developer" },
     { path: "/workshop/settings/audit-logs", name: "settings-audit-logs" },

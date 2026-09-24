@@ -68,7 +68,6 @@ export const NAV_SECTIONS: readonly NavSection[] = [
       { key: "loyalty", label: "Loyalty & Referrals", labelKey: "nav.loyalty", href: "/workshop/loyalty", icon: Star, module: "LOYALTY", access: ["OWNER", "COUNTER_STAFF"] },
       { key: "analytics", label: "Analytics", labelKey: "nav.analytics", href: "/workshop/analytics", icon: Gauge, module: "ANALYTICS", access: ["OWNER"] },
       { key: "notifications", label: "Notifications", labelKey: "nav.notifications", href: "/workshop/notifications", icon: Bell, access: ["OWNER", "COUNTER_STAFF", "MECHANIC"] },
-      { key: "import", label: "CSV Import", labelKey: "nav.import", href: "/workshop/import", icon: Upload, access: ["OWNER"] },
       { key: "integrations", label: "Integrations", labelKey: "nav.integrations", href: "/workshop/integrations", icon: Plug, module: "INTEGRATIONS", access: ["OWNER"] },
       { key: "audit-logs", label: "Audit Logs", labelKey: "nav.audit-logs", href: "/workshop/settings/audit-logs", icon: ShieldCheck, access: ["OWNER"] },
     ],

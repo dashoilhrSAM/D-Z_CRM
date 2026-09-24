@@ -23,7 +23,6 @@ export const DICT: Dict = {
   "nav.loyalty": { en: "Loyalty & Referrals", zh: "忠诚度与推荐", ms: "Kesetiaan & Rujukan" },
   "nav.analytics": { en: "Analytics", zh: "分析", ms: "Analitik" },
   "nav.notifications": { en: "Notifications", zh: "通知", ms: "Pemberitahuan" },
-  "nav.import": { en: "CSV Import", zh: "CSV 导入", ms: "Import CSV" },
   "nav.integrations": { en: "Integrations", zh: "集成", ms: "Integrasi" },
   "nav.audit-logs": { en: "Audit Logs", zh: "审计日志", ms: "Log Audit" },
   "svc.book_requested": { en: "Booking Requested", zh: "预约待确认", ms: "Tempahan Dihantar" },
@@ -1993,7 +1992,6 @@ export const DICT: Dict = {
   "loyal.empty": { en: "No members yet — points are awarded automatically on service completion.", zh: "暂无会员——服务完成后自动发放积分。", ms: "Tiada ahli lagi — mata diberikan secara automatik selepas servis selesai." },
 
   // workshop customers
-  "ws.customers.import-csv": { en: "Import CSV", zh: "导入 CSV", ms: "Import CSV" },
 
   // packages page
   "ws.pkg.inactive": { en: "Inactive", zh: "未启用", ms: "Tidak Aktif" },
@@ -2196,8 +2194,6 @@ export const DICT: Dict = {
   "ws.settings.link.integrations-desc": { en: "Provider configs", zh: "提供商配置", ms: "Konfigurasi pembekal" },
   "ws.settings.link.audit": { en: "Audit Logs", zh: "审计日志", ms: "Log Audit" },
   "ws.settings.link.audit-desc": { en: "Sensitive operations", zh: "敏感操作", ms: "Operasi sensitif" },
-  "ws.settings.link.import": { en: "CSV Import / Export", zh: "CSV 导入 / 导出", ms: "Import / Eksport CSV" },
-  "ws.settings.link.import-desc": { en: "Data migration", zh: "数据迁移", ms: "Migrasi data" },
   "ws.settings.link.developer": { en: "Developer Settings", zh: "开发者设置", ms: "Tetapan Pembangun" },
   "ws.settings.link.developer-desc": { en: "Access matrix · data mgmt", zh: "访问矩阵 · 数据管理", ms: "Matriks akses · pengurusan data" },
 
@@ -2266,6 +2262,7 @@ export const DICT: Dict = {
   "ws.cust.mkt-optin": { en: "Marketing opted in", zh: "已同意营销", ms: "Pemasaran dibenarkan" },
   "ws.cust.mkt-optout": { en: "Marketing opted out", zh: "已退订营销", ms: "Pemasaran dilarang" },
   "ws.cust.prefers": { en: "prefers {channel}", zh: "偏好 {channel}", ms: "lebih suka {channel}" },
+  "ws.settings.link.setup-desc": { en: "Download your current setup as a workbook, change it in Excel, upload it back and review every change before anything is written.", zh: "把当前配置下载成工作簿，在 Excel 里修改后上传，逐条审核后再写入。", ms: "Muat turun tetapan semasa, ubah dalam Excel, muat naik dan semak sebelum disimpan." },
   "nav.setup": { en: "Bulk setup", zh: "批量配置", ms: "Persediaan pukal" },
   "bulk.title": { en: "Bulk setup", zh: "批量配置（Excel）", ms: "Persediaan pukal (Excel)" },
   "bulk.subtitle": { en: "Download the current setup, edit it in Excel, upload it back, and see exactly what would change before anything is written.", zh: "下载当前配置 → 在 Excel 里改 → 传回来 → 先看要改什么，确认后才写入。", ms: "Muat turun, edit, muat naik, lihat perubahan dahulu." },

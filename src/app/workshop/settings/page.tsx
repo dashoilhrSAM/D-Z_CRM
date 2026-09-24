@@ -40,7 +40,7 @@ export default async function SettingsPage() {
     { href: "/workshop/loyalty", label: t("ws.settings.link.loyalty", lang), desc: t("ws.settings.link.loyalty-desc", lang), icon: Star },
     ...(fullBackOffice ? [{ href: "/workshop/integrations", label: t("ws.settings.link.integrations", lang), desc: t("ws.settings.link.integrations-desc", lang), icon: Plug }] : []),
     ...(fullBackOffice ? [{ href: "/workshop/settings/audit-logs", label: t("ws.settings.link.audit", lang), desc: t("ws.settings.link.audit-desc", lang), icon: ShieldCheck }] : []),
-    { href: "/workshop/import", label: t("ws.settings.link.import", lang), desc: t("ws.settings.link.import-desc", lang), icon: FileUp },
+    { href: "/workshop/setup", label: t("nav.setup", lang), desc: t("ws.settings.link.setup-desc", lang), icon: FileUp },
     // Developer（角色×模块矩阵编辑器）**刻意不给 MANAGER**：改矩阵 = 给自己加权限，是一条自提权路径。
     // 「后台功能跟 owner 一样」不等于「能把提权入口也交出去」。
     ...(isOrgLevel ? [{ href: "/workshop/settings/developer", label: t("ws.settings.link.developer", lang), desc: t("ws.settings.link.developer-desc", lang), icon: Code2 }] : []),
