@@ -305,9 +305,31 @@ export const MOTORCYCLES_SHEET: SheetDef = {
   ],
 };
 
+export const CUSTOMERS_SHEET: SheetDef = {
+  key: "customers",
+  title: "客户 Customers",
+  keyField: "phone",
+  keyHeader: "Phone",
+  allowDelete: true,
+  branchScoped: false,
+  // 键是手机号：比对时归一化（生产里同一个号有四种写法），但**存进去的仍是你写的写法**
+  keyTransform: normalizePhone,
+  columns: [
+    { header: "Name", zh: "姓名", field: "name", type: "text", required: true },
+    {
+      header: "Phone", zh: "手机", field: "phone", type: "text", required: true,
+      note: "作为键：匹配时忽略 +60/0 前缀与破折号空格（存进去的仍是你写的写法）",
+    },
+    { header: "Email", zh: "邮箱", field: "email", type: "text", note: "不做键；与另一个客户重复会报错，不会自动合并" },
+    { header: "Address", zh: "地址", field: "address", type: "text" },
+    { header: "Tags", zh: "标签", field: "tags", type: "text" },
+    { header: "Notes", zh: "备注", field: "notes", type: "text" },
+  ],
+};
+
 export const SHEETS: SheetDef[] = [
   PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET,
-  MOTORCYCLES_SHEET,
+  MOTORCYCLES_SHEET, CUSTOMERS_SHEET,
 ];
 
 export function sheetByKey(key: string): SheetDef | undefined {

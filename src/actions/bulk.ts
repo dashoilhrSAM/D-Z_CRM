@@ -5,7 +5,7 @@ import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
 import { db } from "@/lib/db";
 import { planSheet, type RowPlan, type SheetSummary } from "@/modules/bulk/diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, normalizePhone } from "@/modules/bulk/sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePhone } from "@/modules/bulk/sheets";
 import { buildSetupWorkbook } from "@/modules/bulk/export";
 import { parseSetupWorkbook } from "@/modules/bulk/parse";
 import { applyPlans } from "@/modules/bulk/apply";
@@ -102,7 +102,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true, organisationId: true } });
   if (!branch || branch.organisationId !== me.organisationId) return { ok: false, error: "The branch in this file is not in your organisation" };
 
-  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles] = await Promise.all([
+  const [products, packages, packageItems, campaigns, suppliers, serviceTypes, motorcycles, customers] = await Promise.all([
     db.product.findMany({
       where: { organisationId: me.organisationId },
       // **必须带上供应商名**：导出的文件里写着供应商名，现状里没有的话，
@@ -130,6 +130,10 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
       where: { customer: { organisationId: me.organisationId } },
       include: { customer: { select: { phone: true } } },
     }),
+    db.customer.findMany({
+      where: { organisationId: me.organisationId },
+      select: { id: true, name: true, phone: true, email: true, address: true, tags: true, notes: true },
+    }),
   ]);
   const existingBySheet: Record<string, Record<string, unknown>[]> = {
     [PRODUCTS_SHEET.key]: products.map((p) => ({ ...p, supplierName: p.supplier?.name ?? "" })),
@@ -148,6 +152,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
       brand: m.brand, model: m.model, year: m.year, currentMileage: m.currentMileage,
       vin: m.vin ?? "", engineNo: m.engineNo ?? "", color: m.color ?? "",
     })),
+    [CUSTOMERS_SHEET.key]: customers,
   };
   const defBySheet: Record<string, typeof PRODUCTS_SHEET> = {
     [PRODUCTS_SHEET.key]: PRODUCTS_SHEET,
@@ -157,6 +162,7 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     [SUPPLIERS_SHEET.key]: SUPPLIERS_SHEET,
     [SERVICE_TYPES_SHEET.key]: SERVICE_TYPES_SHEET,
     [MOTORCYCLES_SHEET.key]: MOTORCYCLES_SHEET,
+    [CUSTOMERS_SHEET.key]: CUSTOMERS_SHEET,
   };
 
   const canDelete = ORG_LEVEL.includes(me.role);
@@ -177,6 +183,24 @@ export async function previewSetupImport(formData: FormData): Promise<PreviewRes
     for (const p of sheetPlans) {
       if (p.action === "error" && p.errors.some((e) => e.includes("cannot be deleted"))) {
         p.errors = ["Only the owner can delete rows"];
+      }
+    }
+    // 客户：邮箱**不做键**，但两个人不能共用 —— 在预览里就说清楚（而不是等到应用才炸）。
+    // 自动合并会在"换号写错一次"时并错人，所以这里只报错、不合并。
+    if (s.key === CUSTOMERS_SHEET.key) {
+      const emailOwner = new Map(
+        customers.filter((c) => c.email).map((c) => [(c.email as string).trim().toLowerCase(), c]),
+      );
+      for (const p of sheetPlans) {
+        if (p.action !== "create" && p.action !== "update") continue;
+        const email = typeof p.values.email === "string" ? p.values.email.trim().toLowerCase() : "";
+        if (!email) continue;
+        const mine = customers.find((c) => c.phone && normalizePhone(c.phone) === normalizePhone(p.key));
+        const owner = emailOwner.get(email);
+        if (owner && owner.id !== mine?.id) {
+          p.action = "error";
+          p.errors.push('Email ' + p.values.email + " already belongs to " + owner.name + " — if they really share it, leave the Email cell blank");
+        }
       }
     }
     plans.push(...sheetPlans);

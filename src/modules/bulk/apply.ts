@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/auth/audit";
 import type { RowPlan } from "./diff";
-import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, normalizePlate, normalizePhone } from "./sheets";
+import { PRODUCTS_SHEET, PACKAGES_SHEET, PACKAGE_ITEMS_SHEET, CAMPAIGNS_SHEET, SUPPLIERS_SHEET, SERVICE_TYPES_SHEET, MOTORCYCLES_SHEET, CUSTOMERS_SHEET, normalizePlate, normalizePhone } from "./sheets";
 
 /**
  * 应用已确认的差异（P2）。
@@ -54,7 +54,7 @@ export async function applyPlans(input: {
     db.product.findMany({ where: { organisationId: input.organisationId }, select: { id: true, sku: true } }),
     db.servicePackage.findMany({ where: { branchId: input.branchId }, select: { id: true, name: true } }),
     // 车主按**归一化后的手机号**匹配（生产里 +60/0/破折号三种写法并存，见 sheets.ts 的 normalizePhone）
-    db.customer.findMany({ where: { organisationId: input.organisationId }, select: { id: true, phone: true } }),
+    db.customer.findMany({ where: { organisationId: input.organisationId }, select: { id: true, phone: true, email: true, name: true } }),
     // 车辆按**归一化后的车牌**匹配（空格与大小写不统一）
     db.motorcycle.findMany({ where: { customer: { organisationId: input.organisationId } }, select: { id: true, plate: true } }),
   ]);
@@ -62,6 +62,8 @@ export async function applyPlans(input: {
   const productIdBySku = new Map(products.map((p) => [p.sku.trim().toLowerCase(), p.id]));
   const packageIdByName = new Map(packages.map((p) => [p.name.trim().toLowerCase(), p.id]));
   const customerIdByPhone = new Map(customers.filter((c) => c.phone).map((c) => [normalizePhone(c.phone as string), c.id]));
+  const customerIdByEmail = new Map(customers.filter((c) => c.email).map((c) => [(c.email as string).trim().toLowerCase(), c.id]));
+  const customerNameById = new Map(customers.map((c) => [c.id, c.name]));
   const motorcycleIdByPlate = new Map(motorcycles.map((m) => [normalizePlate(m.plate), m.id]));
 
   const summary: Record<string, ApplySummary> = {};
@@ -69,7 +71,10 @@ export async function applyPlans(input: {
 
   try {
     await db.$transaction(async (tx) => {
-      for (const plan of input.plans) {
+      // **客户先处理**：这样同一份工作簿里可以「先建客户、再挂他的车」——
+      // 否则车辆行的车主查找用的是导入前的地图，找不到刚建出来的客户。
+      const ordered = [...input.plans].sort((a, b) => sheetPriority(a.sheet) - sheetPriority(b.sheet));
+      for (const plan of ordered) {
         if (plan.action === "skip") {
           bucket(plan.sheet).skipped += 1;
           continue;
@@ -81,6 +86,7 @@ export async function applyPlans(input: {
         else if (plan.sheet === SUPPLIERS_SHEET.key) await applySupplier(tx, plan, input, bucket(plan.sheet));
         else if (plan.sheet === SERVICE_TYPES_SHEET.key) await applyServiceType(tx, plan, input, bucket(plan.sheet));
         else if (plan.sheet === MOTORCYCLES_SHEET.key) await applyMotorcycle(tx, plan, input, customerIdByPhone, motorcycleIdByPlate, bucket(plan.sheet));
+        else if (plan.sheet === CUSTOMERS_SHEET.key) await applyCustomer(tx, plan, input, customerIdByPhone, customerIdByEmail, customerNameById, bucket(plan.sheet));
         else throw new Error("Unknown sheet: " + plan.sheet);
       }
     });
@@ -253,6 +259,91 @@ async function applyPackageItem(
     if (!existing) throw new Error("Package item no longer exists: " + plan.key);
     await tx.servicePackageItem.update({ where: { id: existing.id }, data: data as never });
     out.updated += 1;
+  }
+}
+
+/**
+ * 处理顺序：**客户 → 车辆 → 其它**。
+ * 客户必须先建，否则同一份工作簿里「新建客户 + 挂他的车」会因车主查不到而失败。
+ */
+function sheetPriority(sheet: string): number {
+  if (sheet === CUSTOMERS_SHEET.key) return 0;
+  if (sheet === MOTORCYCLES_SHEET.key) return 1;
+  return 2;
+}
+
+async function applyCustomer(
+  tx: Tx,
+  plan: RowPlan,
+  input: { organisationId: string; branchId: string },
+  customerIdByPhone: Map<string, string>,
+  customerIdByEmail: Map<string, string>,
+  customerNameById: Map<string, string>,
+  out: ApplySummary,
+) {
+  const phone = String(plan.values.phone ?? plan.key).trim();
+  const existingId = customerIdByPhone.get(normalizePhone(phone));
+  const email = plan.values.email === undefined ? undefined : String(plan.values.email).trim();
+  const emailKey = email ? email.toLowerCase() : "";
+
+  // 邮箱**不做键**（夫妻/公司共用一个邮箱是现实的），但也不能两个人共用：
+  // 撞上别人的邮箱就报错，**不自动合并** —— 自动合并会在"换号写错一次"时并错人。
+  if (emailKey) {
+    const owner = customerIdByEmail.get(emailKey);
+    if (owner && owner !== existingId) {
+      throw new Error(
+        "Email " + email + " already belongs to " + (customerNameById.get(owner) ?? "another customer") +
+        " — if they really share it, leave the Email cell blank",
+      );
+    }
+  }
+
+  const data: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(plan.values)) {
+    // 手机号是键：不参与数据改写（与 diff 里"键字段是身份不是数据"同一条规则）
+    if (field === "phone") continue;
+    data[field] = value;
+  }
+
+  if (plan.action === "create") {
+    const created = await tx.customer.create({
+      data: {
+        organisationId: input.organisationId,
+        branchId: input.branchId,
+        name: String(plan.values.name ?? ""),
+        phone,
+        ...data,
+      } as never,
+      select: { id: true },
+    });
+    // **建完立刻更新映射**，同一份文件里后面的车辆行才挂得上这位新客户
+    customerIdByPhone.set(normalizePhone(phone), created.id);
+    if (emailKey) customerIdByEmail.set(emailKey, created.id);
+    customerNameById.set(created.id, String(plan.values.name ?? ""));
+    out.created += 1;
+  } else if (plan.action === "update") {
+    if (!existingId) throw new Error("Customer no longer exists: " + phone);
+    await tx.customer.update({ where: { id: existingId }, data: data as never });
+    if (emailKey) customerIdByEmail.set(emailKey, existingId);
+    out.updated += 1;
+  } else if (plan.action === "delete") {
+    if (!existingId) {
+      out.skipped += 1;
+      return;
+    }
+    // 有历史就不能删 —— 先查引用再决定（见文件头 ②）
+    const [vehicles, jobs, bookings, invoices] = await Promise.all([
+      tx.motorcycle.count({ where: { customerId: existingId } }),
+      tx.serviceJob.count({ where: { customerId: existingId } }),
+      tx.booking.count({ where: { customerId: existingId } }),
+      tx.invoice.count({ where: { customerId: existingId } }),
+    ]);
+    const used = vehicles + jobs + bookings + invoices;
+    if (used > 0) {
+      throw new Error("Customer has " + used + " vehicle(s)/job(s)/booking(s)/invoice(s) and cannot be deleted: " + phone);
+    }
+    await tx.customer.delete({ where: { id: existingId } });
+    out.deleted += 1;
   }
 }
 
