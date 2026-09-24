@@ -13,6 +13,9 @@ const include = {
   booking: { select: { date: true, timeSlot: true, branch: { select: { city: true } } } },
   items: { where: { status: { not: "DECLINED" } }, select: { lineTotalSen: true } },
   parts: { where: { status: { not: "DECLINED" } }, select: { lineTotalSen: true } },
+  // 接单按钮要说清楚「还差什么才开工」，所以卡片需要知道照片张数与报价状态
+  photos: { select: { id: true } },
+  quotation: { select: { status: true } },
 } satisfies Prisma.ServiceJobInclude;
 
 type JobRow = Prisma.ServiceJobGetPayload<{ include: typeof include }>;
@@ -26,6 +29,9 @@ function toOrder(j: JobRow): OrderCard {
     bookingTime: j.booking?.timeSlot ?? null,
     amountSen: j.items.reduce((s, i) => s + i.lineTotalSen, 0) + j.parts.reduce((s, p) => s + p.lineTotalSen, 0),
     packageName: j.packageName,
+    photoCount: j.photos.length,
+    // 没有报价历史的工单不受报价门禁限制（与 service 里的 QUOT-001 判定一致）
+    quotationApproved: j.quotation ? j.quotation.status === "APPROVED" : null,
   };
 }
 

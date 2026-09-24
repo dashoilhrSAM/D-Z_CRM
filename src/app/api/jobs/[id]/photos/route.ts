@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
 import { requireStaff } from "@/lib/api-auth";
+import { jobService } from "@/modules/service-jobs/service";
 
 export const dynamic = "force-dynamic";
 
@@ -39,5 +40,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     create: { jobId: id, angle, photoUrl: url, capturedById: auth.session.user!.id },
     update: { photoUrl: url, capturedById: auth.session.user!.id, capturedAt: new Date() },
   });
-  return NextResponse.json({ ok: true, url });
+
+  // **拍齐 5 张 = 接单完成 → 直接开工**（老板反馈：点了 accept order 之后应当变成 in progress）。
+  // 以前必须先在别的页拍完照、再回来重新点接单，中间那一趟看起来像「接了但没接上」。
+  // 报价门禁（QUOT-001）仍由 service 把关：过不了就静静留待，卡片上会写明在等客户确认。
+  let started = false;
+  const photoCount = await db.serviceJobPhoto.count({ where: { jobId: id } });
+  if (photoCount >= 5) {
+    try {
+      await jobService.transition(id, "IN_PROGRESS");
+      started = true;
+    } catch {
+      // 报价未确认 / 非法状态等都走这里；不影响照片已经存好这件事
+    }
+  }
+  return NextResponse.json({ ok: true, url, started, photoCount });
 }

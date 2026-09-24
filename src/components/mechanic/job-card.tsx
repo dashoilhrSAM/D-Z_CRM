@@ -4,10 +4,11 @@ import { useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Bike, CheckCheck, CheckCircle2, ChevronRight, MapPin } from "lucide-react";
+import { Bike, Camera, CheckCheck, CheckCircle2, ChevronRight, Hourglass, MapPin } from "lucide-react";
+import { jobStartState } from "@/lib/job-start-state";
 import { transitionJob } from "@/actions/workshop";
 import { useLang } from "@/components/shared/language-context";
-import { t } from "@/lib/i18n";
+import { t, tpl } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 
 export interface OrderCard {
@@ -23,6 +24,10 @@ export interface OrderCard {
   bookingTime: string | null;
   amountSen: number;
   packageName: string | null;
+  /** 已拍的服务前照片张数（SOP-001 要求 5 张） */
+  photoCount: number;
+  /** 报价是否已确认；null＝这张工单没有报价要求 */
+  quotationApproved: boolean | null;
 }
 
 /** Grab 风格订单卡：金额醒目 + 接单（WAITING → IN_PROGRESS）。 */
@@ -30,7 +35,13 @@ export function JobCard({ order, completed = false }: { order: OrderCard; comple
   const router = useRouter();
   const lang = useLang();
   const [pending, start] = useTransition();
-  const canAccept = order.status === "WAITING";
+  // 接单能不能成，取决于门禁过没过 —— 由纯函数判定（见 @/lib/job-start-state，有测试）
+  const startState = jobStartState({
+    status: order.status,
+    photoCount: order.photoCount,
+    quotationApproved: order.quotationApproved,
+  });
+  const canAccept = startState === "ready";
 
   const accept = () =>
     start(async () => {
@@ -82,6 +93,20 @@ export function JobCard({ order, completed = false }: { order: OrderCard; comple
           >
             <CheckCheck className="h-4 w-4" /> {t("mech.accept", lang)}
           </button>
+        ) : startState === "needs-photos" ? (
+          // 还差照片：按钮直接说清楚差几张，点进去就是拍照（不再显示成「接单」让人以为接上了）
+          <Link
+            href={"/mechanic-app/jobs/" + order.id}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-amber-500/15 py-3 text-sm font-semibold text-amber-700 transition-colors hover:bg-amber-500/25"
+          >
+            <Camera className="h-4 w-4" />
+            {tpl("mech.need-photos", lang, { n: order.photoCount, total: 5 })}
+          </Link>
+        ) : startState === "needs-quotation" ? (
+          // 照片齐了但报价没确认：谁也不能开工，明说在等客户
+          <div className="flex w-full items-center justify-center gap-2 rounded-xl border py-3 text-sm font-medium text-muted-foreground">
+            <Hourglass className="h-4 w-4" /> {t("mech.wait-quotation", lang)}
+          </div>
         ) : (
           <Link href={"/mechanic-app/jobs/" + order.id} className="flex w-full items-center justify-center gap-2 rounded-xl border py-3 text-sm font-semibold text-primary transition-colors hover:bg-accent">
             {t("mech.view-work", lang)} <ChevronRight className="h-4 w-4" />
