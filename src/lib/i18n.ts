@@ -2263,6 +2263,7 @@ export const DICT: Dict = {
   "ws.cust.mkt-optout": { en: "Marketing opted out", zh: "已退订营销", ms: "Pemasaran dilarang" },
   "ws.cust.prefers": { en: "prefers {channel}", zh: "偏好 {channel}", ms: "lebih suka {channel}" },
   "ws.settings.link.setup-desc": { en: "Download your current setup as a workbook, change it in Excel, upload it back and review every change before anything is written.", zh: "把当前配置下载成工作簿，在 Excel 里修改后上传，逐条审核后再写入。", ms: "Muat turun tetapan semasa, ubah dalam Excel, muat naik dan semak sebelum disimpan." },
+  "bulk.applied-at": { en: "applied", zh: "应用时间", ms: "disimpan" },
   "nav.setup": { en: "Bulk setup", zh: "批量配置", ms: "Persediaan pukal" },
   "bulk.title": { en: "Bulk setup", zh: "批量配置（Excel）", ms: "Persediaan pukal (Excel)" },
   "bulk.subtitle": { en: "Download the current setup, edit it in Excel, upload it back, and see exactly what would change before anything is written.", zh: "下载当前配置 → 在 Excel 里改 → 传回来 → 先看要改什么，确认后才写入。", ms: "Muat turun, edit, muat naik, lihat perubahan dahulu." },
