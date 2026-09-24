@@ -592,3 +592,16 @@ describe("删除行为（老板反馈「删了一行没检测到」之后补的�
     }
   });
 });
+describe("审核台该显示哪些表（老板「删了一行没反应」的直接原因）", () => {
+  it("零改动但有缺行 → 必须显示（否则删了行什么都没提示）", async () => {
+    const { shouldShowSheet } = await import("@/modules/bulk/diff");
+    expect(shouldShowSheet(0, 1)).toBe(true);
+    expect(shouldShowSheet(0, 5)).toBe(true);
+  });
+
+  it("有改动 → 显示；两者都没有 → 不显示（页面别被八张空表塞满）", async () => {
+    const { shouldShowSheet } = await import("@/modules/bulk/diff");
+    expect(shouldShowSheet(3, 0)).toBe(true);
+    expect(shouldShowSheet(0, 0)).toBe(false);
+  });
+});
