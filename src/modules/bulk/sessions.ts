@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
-import type { RowPlan } from "./diff";
+import { rowKeyOf, type RowPlan } from "./diff";
+
+export { rowKeyOf };
 
 /**
  * 导入会话（P3）—— 把「审到一半」这件事存下来。
@@ -21,9 +23,13 @@ export type SessionStatus = "DRAFT" | "APPLIED" | "CANCELLED";
 export interface SessionDecisions {
   /** 键是 "sheet#行号" —— 与差异计划的行标识一致 */
   [rowKey: string]: {
-    decision: "approved" | "declined";
-    /** 就地修改过的原始值（金额是 RM、日期是 YYYY-MM-DD），应用时由服务端解析并复验 */
-    edits?: Record<string, unknown>;
+    /** 缺省＝还没决定（界面取消批准时会回到这个状态） */
+    decision?: "approved" | "declined";
+    /**
+     * 就地修改过的**原始输入**（金额是 RM、日期是 YYYY-MM-DD）——
+     * 应用时由服务端解析（cellToValue）并复验，客户端不做任何换算。
+     */
+    edits?: Record<string, string>;
   };
 }
 
@@ -41,8 +47,7 @@ export interface SessionView {
   appliedSummary: unknown;
 }
 
-const KEY_SEP = "#";
-export const rowKeyOf = (sheet: string, rowNumber: number) => sheet + KEY_SEP + rowNumber;
+
 
 function toView(row: {
   id: string; fileName: string; fileHash: string; branchId: string; uploadedBy: string;
