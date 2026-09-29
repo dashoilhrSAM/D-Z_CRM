@@ -1,7 +1,16 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { identityFromClaims, type RequestIdentity } from "@/lib/auth/request-identity";
 
-/** Edge middleware 用 Supabase session 刷新 + 取当前用户。 */
+/**
+ * Edge middleware 用 Supabase session 刷新 + 取当前身份。
+ *
+ * 2026-09-29（P1）：这里原来调 auth.getUser()——**每个请求都打一次 GoTrue**。
+ * 现在用 getClaims()：本项目是非对称签名（ES256），它在本地用 WebCrypto 验签，
+ * JWKS 由库缓存在函数实例里，稳态下零网络往返。返回的身份只有
+ * { id, email, user_metadata }，而 middleware 需要的恰好就是 user_metadata 里的业务
+ * claims（role/orgId/branchId）与"有没有登录"这两件事。
+ */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
@@ -22,12 +31,13 @@ export async function updateSession(request: NextRequest) {
     },
   );
 
-  // 会话刷新容错：Supabase getuser() 在 refresh token 失效时会 throw（如项目迁移后旧会话），
+  // 会话刷新容错：refresh token 失效时会 throw（如项目迁移后的旧会话），
   // 此时清掉旧 auth cookie、按未登录处理（middleware 据此跳登录），避免整个页面 500。
-  let user: Awaited<ReturnType<typeof supabase.auth.getUser>>["data"]["user"] = null;
+  // getClaims() 也会在需要时先刷新会话，所以这条容错路径依然必要。
+  let user: RequestIdentity | null = null;
   try {
-    const r = await supabase.auth.getUser();
-    user = r.data.user;
+    const { data } = await supabase.auth.getClaims();
+    user = identityFromClaims(data?.claims);
   } catch (e) {
     for (const c of request.cookies.getAll()) {
       if (c.name.startsWith("sb-")) {
