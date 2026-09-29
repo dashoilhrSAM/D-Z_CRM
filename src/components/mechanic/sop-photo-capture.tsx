@@ -6,6 +6,8 @@ import { Camera, Check } from "lucide-react";
 import { toast } from "sonner";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
+import { compressImageForUpload } from "@/lib/image-compress";
+import { MAX_PHOTO_UPLOAD_BYTES } from "@/lib/photo-policy";
 
 const ANGLES = ["front", "back", "left", "right", "meter"] as const;
 type Angle = (typeof ANGLES)[number];
@@ -27,8 +29,16 @@ export function SopPhotoCapture({ jobId, photos, canCapture = true }: { jobId: s
     if (!file) return;
     setUploading(angle);
     try {
+      // 先压缩再上传：生产实测原图平均 2.65 MB、SOP 每单 5 张，而 Vercel
+      // 的请求体上限是 4.5 MB（线上最大一张已 4.3 MB）—— 原图上传既把存储与
+      // 流量乘以 8 倍，又随时会被平台以 413 拒掉，而那句报错和"照片太大"无关。
+      const prepared = await compressImageForUpload(file);
+      if (prepared.bytes > MAX_PHOTO_UPLOAD_BYTES) {
+        toast.error(tpl("mech.sop.too-large", lang, { mb: (prepared.bytes / 1024 / 1024).toFixed(1) }));
+        return;
+      }
       const fd = new FormData();
-      fd.append("file", file);
+      fd.append("file", prepared.file);
       fd.append("angle", ANGLE_CODE[angle]);
       const res = await fetch(`/api/jobs/${jobId}/photos`, { method: "POST", body: fd });
       const data = await res.json();

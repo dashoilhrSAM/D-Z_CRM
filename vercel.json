@@ -1,5 +1,6 @@
 {
   "buildCommand": "prisma generate --schema prisma/schema.pg.prisma && node scripts/sync-prod-schema.mjs && next build",
+  "regions": ["sin1"],
   "crons": [
     {
       "path": "/api/cron/automation-scan",
