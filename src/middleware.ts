@@ -46,7 +46,7 @@ export async function middleware(req: NextRequest) {
   const requestHeaders = new Headers(req.headers);
   requestHeaders.set("x-pathname", pathname);
 
-  // 1. Supabase Auth session. getUser() also refreshes tokens.
+  // 1. Supabase Auth session. getClaims() 本地验签，并在需要时刷新 token（见 lib/supabase/middleware.ts）。
   const { response, user } = await updateSession(req);
 
   // 2. API 层门禁（纵深防御的第一道；第二道在 src/lib/api-auth.ts，逐路由 requireStaff()）。

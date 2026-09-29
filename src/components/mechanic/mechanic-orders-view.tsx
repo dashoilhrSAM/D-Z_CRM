@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { JobCard, type OrderCard } from "@/components/mechanic/job-card";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
+import { jitteredDelayMs } from "@/lib/refresh-policy";
 
 type Tab = "current" | "completed";
 
@@ -18,13 +19,24 @@ export function MechanicOrdersView({ current, completed, name }: { current: Orde
   const [auto, setAuto] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Auto-refresh every 30s while visible (toggleable).
+  // Auto-refresh while visible (toggleable). 间隔带 ±20% 抖动 —— 见
+  // src/lib/refresh-policy.ts：平均仍约 30 秒，但不再和所有终端同时打点。
   useEffect(() => {
     if (!auto) return;
-    const id = setInterval(() => {
-      if (!document.hidden) router.refresh();
-    }, 30000);
-    return () => clearInterval(id);
+    let id: ReturnType<typeof setTimeout>;
+    let cancelled = false;
+    const schedule = () => {
+      id = setTimeout(() => {
+        if (cancelled) return;
+        if (!document.hidden) router.refresh();
+        schedule();
+      }, jitteredDelayMs());
+    };
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
   }, [auto, router]);
 
   const doRefresh = () => {

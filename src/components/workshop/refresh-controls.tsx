@@ -6,21 +6,20 @@ import { RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLang } from "@/components/shared/language-context";
 import { t } from "@/lib/i18n";
-
-/** 自动刷新间隔（毫秒）。 */
-const AUTO_REFRESH_MS = 30_000;
+import { jitteredDelayMs } from "@/lib/refresh-policy";
 
 /**
- * Workshop 刷新控件：手动刷新按钮 + 自动刷新开关（默认开，30 秒 router.refresh()）。
+ * Workshop 刷新控件：手动刷新按钮 + 自动刷新开关（默认开，约 30 秒 router.refresh()）。
  * - router.refresh() 软刷新：重新拉 server 组件数据，保留客户端滚动/表单状态
  * - 顶部常驻（desktop header / mobile sticky 条）
+ * - 间隔带 ±20% 抖动（见 src/lib/refresh-policy.ts）：平均不变，尖峰摊平
  */
 export function RefreshControls({ compact = false }: { compact?: boolean }) {
   const router = useRouter();
   const lang = useLang();
   const [spinning, setSpinning] = useState(false);
   const [auto, setAuto] = useState(true);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const doRefresh = () => {
     setSpinning(true);
@@ -31,9 +30,20 @@ export function RefreshControls({ compact = false }: { compact?: boolean }) {
 
   useEffect(() => {
     if (!auto) return;
-    timerRef.current = setInterval(doRefresh, AUTO_REFRESH_MS);
+    // 用「自我重排的 setTimeout」而不是 setInterval：每次延迟都要重新取抖动值，
+    // setInterval 的固定周期做不到这件事（抖动会退化成相位固定）。
+    let cancelled = false;
+    const schedule = () => {
+      timerRef.current = setTimeout(() => {
+        if (cancelled) return;
+        doRefresh();
+        schedule();
+      }, jitteredDelayMs());
+    };
+    schedule();
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      cancelled = true;
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [auto]);
