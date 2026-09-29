@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { storageProvider } from "@/providers";
 import { requireStaff } from "@/lib/api-auth";
 import { jobService } from "@/modules/service-jobs/service";
+import { MAX_PHOTO_UPLOAD_BYTES, oversizePhotoMessage } from "@/lib/photo-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -23,7 +24,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!ANGLES.includes(angleRaw as JobPhotoAngle)) return NextResponse.json({ ok: false, error: "Invalid angle" }, { status: 400 });
   if (!file) return NextResponse.json({ ok: false, error: "file required" }, { status: 400 });
   if (!file.type.startsWith("image/")) return NextResponse.json({ ok: false, error: "Image required" }, { status: 400 });
-  if (file.size > 8 * 1024 * 1024) return NextResponse.json({ ok: false, error: "File too large (max 8MB)" }, { status: 400 });
+  // 护栏必须**低于** Vercel 的 4.5 MB 请求体上限：超出上限的请求会被平台
+  // 直接 413 掉（FUNCTION_PAYLOAD_TOO_LARGE），这个处理函数根本不会执行，
+  // 用户看到的是一句和大小无关的报错。落在两线之间的由这里用人话拒绝。
+  if (file.size > MAX_PHOTO_UPLOAD_BYTES) {
+    return NextResponse.json({ ok: false, error: oversizePhotoMessage(file.size) }, { status: 413 });
+  }
 
   const job = await db.serviceJob.findUnique({ where: { id }, select: { id: true, mechanicId: true, status: true } });
   if (!job) return NextResponse.json({ ok: false, error: "Job not found" }, { status: 404 });

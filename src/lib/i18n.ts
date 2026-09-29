@@ -1402,6 +1402,7 @@ export const DICT: Dict = {
   "mech.sop.capture": { en: "Capture", zh: "拍摄", ms: "Rakam" },
   "mech.sop.retake": { en: "Retake", zh: "重拍", ms: "Rakam semula" },
   "mech.sop.uploading": { en: "Uploading…", zh: "上传中…", ms: "Memuat naik…" },
+  "mech.sop.too-large": { en: "Photo is still {mb} MB after compression — please retake.", zh: "压缩后仍有 {mb} MB，请重拍。", ms: "Foto masih {mb} MB selepas dimampatkan — sila rakam semula." },
   "mech.sop.progress": { en: "{n}/5 captured", zh: "{n}/5 已拍", ms: "{n}/5 dirakam" },
   "mech.sop.need-all": { en: "Capture all 5 photos to start service.", zh: "拍齐 5 张才能开始服务。", ms: "Rakam 5 foto untuk mula servis." },
   "mech.sop.start-blocked": { en: "Capture all 5 photos first", zh: "请先拍齐 5 张", ms: "Rakam 5 foto dahulu" },
