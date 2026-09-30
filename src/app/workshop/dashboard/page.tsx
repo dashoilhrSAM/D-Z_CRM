@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, Sparkles, Wallet, TrendingUp, Wrench, Receipt, Filter, Users, CalendarClock, ListTodo, AlertTriangle, Clock } from "lucide-react";
 import { dashboardService } from "@/services/dashboard";
+import { jobService } from "@/modules/service-jobs/service";
 import { aiService } from "@/modules/ai/service";
 import { StatCard } from "@/components/shared/stat-card";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -49,8 +50,21 @@ export default async function DashboardPage() {
   const greeting = hour < 12 ? t("dash.morning", lang) : hour < 18 ? t("dash.afternoon", lang) : t("dash.evening", lang);
 
   // data isolation: mechanic sees only their jobs in the snapshot
-  const myJobs = isMechanic && user ? dash.board.jobs.filter((j) => j.mechanic?.id === user.id) : dash.board.jobs;
-  const todayJobs = myJobs.filter((j) => j.isToday).slice(0, 9);
+  // 今日工单卡片：只取「今天新建 + 当前用户范围」的前 9 张（界面上也只显示 9 张）。
+  // 原来是取回**全部工单**再内存过滤 + slice —— 而 dashboard 占全部渲染的 67%（自动刷新）。
+  const todayJobs = (
+    await jobService.listBoardRows({
+      branchId: branch?.id,
+      mechanicId: isMechanic && user ? user.id : undefined,
+      todayOnly: true,
+      pageSize: 9,
+    })
+  ).jobs;
+  // 「我的进行中工单」这个数字走聚合计数，不为一个数字把行取回来
+  const scopedCounts = isMechanic && user ? (await jobService.boardSummary(branch?.id, user.id)).counts : null;
+  const myActiveCount = scopedCounts
+    ? ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"].reduce((s, k) => s + (scopedCounts[k] ?? 0), 0)
+    : 0;
 
   return (
     <PageTransition>
@@ -72,7 +86,7 @@ export default async function DashboardPage() {
       {/* today metrics — role-scoped */}
       {isMechanic ? (
         <div data-tut="stats" className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-          <StatCard label={t("dash.my-active-jobs", lang)} value={myJobs.filter((j) => ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"].includes(j.status)).length} unit={t("dash.unit-jobs", lang)} href="/workshop/mechanic" />
+          <StatCard label={t("dash.my-active-jobs", lang)} value={myActiveCount} unit={t("dash.unit-jobs", lang)} href="/workshop/mechanic" />
           <StatCard label={t("dash.my-jobs-today", lang)} value={todayJobs.length} unit={t("dash.unit-jobs", lang)} href="/workshop/jobs" />
           <StatCard label={t("dash.awaiting-approval", lang)} value={dash.statuses.AWAITING_APPROVAL} unit={t("dash.unit-approvals", lang)} href="/workshop/jobs?status=AWAITING_APPROVAL" tone="warn" />
           <StatCard label={t("dash.ready", lang)} value={dash.statuses.READY} unit={t("dash.unit-jobs", lang)} href="/workshop/jobs?status=READY" tone="success" />
