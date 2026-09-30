@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LoginShell } from "@/components/login/login-shell";
 import { signInWithPassword, requestRiderPhoneOtp, verifyRiderPhoneOtp } from "@/actions/auth-supabase";
+import { safeNextPath } from "@/lib/auth/next-path";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 import { COUNTRY_CODES } from "@/lib/phone";
@@ -16,6 +17,9 @@ type Tab = "phone" | "sms" | "email";
 export default function RiderLoginPage() {
   const router = useRouter();
   const lang = useLang();
+  // `?next=` 回跳（门店链接 /t/<slug>、QR 落地页）：必须过 safeNextPath，防开放重定向
+  const searchParams = useSearchParams();
+  const nextPath = safeNextPath(searchParams.get("next"), "");
   const [tab, setTab] = useState<Tab>("phone");
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("+60"); // 手机号区号（默认马来西亚）
@@ -46,7 +50,8 @@ export default function RiderLoginPage() {
     const res = await signInWithPassword({ identifier, countryCode: cc, password });
     setBusy(false);
     if (!res.ok) { setError(res.error); return; }
-    router.push(res.hasBike === false ? "/rider/bike-first" : "/rider/home");
+    if (nextPath) router.push(nextPath);
+    else router.push(res.hasBike === false ? "/rider/bike-first" : "/rider/home");
     router.refresh();
   }
 
@@ -78,7 +83,8 @@ export default function RiderLoginPage() {
       router.push("/rider/signup");
       return;
     }
-    router.push(res.hasBike === false ? "/rider/bike-first" : "/rider/home");
+    if (nextPath) router.push(nextPath);
+    else router.push(res.hasBike === false ? "/rider/bike-first" : "/rider/home");
     router.refresh();
   }
 

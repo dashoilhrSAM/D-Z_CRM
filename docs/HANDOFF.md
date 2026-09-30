@@ -6,12 +6,17 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**多租户隔离 P0→P1→P2 已全部合并上线**（PR #97/#98/#99；`origin/main = f65bee4`），
-**P3a 身份映射（AuthLink）已建表 + 回填 + 上线**；**P3b 已勘察但刻意未施工** ——
-施工单在 `docs/MULTI_TENANT_PLAN.md` §P3 的「P3b 施工单」（6 步，每步可独立验证）。
-最关键的一条判断：**不能先松开 `authId` 唯一键**，否则会打开跨店劫持（见「关键决策」第 3 条）。
-基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **947**（83 文件）/ build 通过 / Playwright **55**；
-生产 `/` 200、`/qr/rider/x` 307、匿名数据面 7 张探针表全 **401**、schema `agree`。
+**多租户隔离 P0→P3b 已全部合并上线**（PR #97–#103；`origin/main = 0c5b498`）。
+P3b 六步施工单里 **1（注册匹配带租户）、2（authId 降为租户内唯一）、3（请求级解析链）
+已完成并上线，第 4 步完成了多店选择器**；只剩 `/t/<slug>` 入口页、删死代码 `dz_org`、
+claim 迁 `app_metadata`（见「下一步」）。
+**生产侧已执行过破坏性 DDL**：`User/Customer.authId` 的全局唯一索引已删除，改为
+`@@unique([organisationId, authId])` + `Customer(organisationId, phone)` 索引，
+`schema and database agree`。**不要重跑那次 DDL**（脚本幂等，但没必要）。
+生产实测过真实登录（`test.owner@dz.my`）：落在 `/workshop/dashboard`、侧边栏显示姓名、
+无 `dz_tenant` cookie（走"唯一所属"分支）—— 新解析链在生产工作。
+基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **992**（87 文件）/ build 通过 / Playwright **55**；
+生产 `/` 200、`/login` 200、`/qr/rider/x` 307。
 
 ## 会话信息
 - 原会话 ID：`session-7fd1ea0d-1a14-4d2c-85f9-9c332e4441d4`（会话名「多租户隔离方案分析」）
@@ -41,30 +46,29 @@
   P3b 施工单写入方案文档。`active-tenant.ts` **目前没有任何调用方**。
 
 ## 下一步（按优先级）
-1. **P3b 第 1 步**（← 唯一该先做的事）：给注册路径的 email/phone 匹配**加租户条件**
-   （`src/actions/auth-supabase.ts:410` 的 `findFirst({ where: { email } })` 与 `:419` 的
-   `customersByPhone(...)`），注册的 org 改为来自 `/t/<slug>` 而不是
-   `organisation.findFirst({ orderBy: { name: "asc" } })`（`:204` 与 `:442`）。
-   **验证**：单店行为不变；新增"在 B 店用 A 店客户的邮箱注册，不得绑上 A 店那条记录"的回归测试。
-2. **P3b 第 2 步**：第 1 步绿了之后，才松 `User.authId` / `Customer.authId` 全局唯一键 →
-   `@@unique([organisationId, authId])`。**不要跳过第 1 步先做这一步。**
-3. P3b 第 3–6 步：解析链（`session-user.ts:40/45`、`rider-customer.ts:14` 三处
-   `findUnique({ where: { authId } })` 改走 `readActiveTenant()` + `identityInTenant`）→
-   `/t/<slug>/login` + 多店选择器 → 删死代码 `dz_org` → claim 迁 `app_metadata`。
-4. P2 剩余（低优先，清单跑 `node scripts/tenant-guard-audit.mjs` 即得）：
+1. **P3b 第 4 步的剩下一半：`/t/<slug>` 入口页**。`resolveEntryTenant({ slug })` 从第 1 步起
+   就能收 slug，但还没有路由把它接上 —— 今天"进哪家店"的显式来源只有签名 `dz_tenant` cookie
+   （`/select-workshop` 会写）。有了它，门店专属链接（`/t/d-z-smart-workshop`）才真的能开店门。
+2. **CI 的 e2e job 缺 4 个 Secrets**（`AUTH_SECRET` + Supabase 三个 key；GitHub Settings → Secrets）。
+   配齐后 Playwright 会在 CI 上跑，多店选择器这类"要真登录才走得到"的路径才有端到端覆盖 ——
+   今天它只有数据层单测。
+3. **P3b 第 5 步清理**：删死代码 `dz_org`（`actions/rider-context.ts` 写了但全项目没人读）；
+   `User.email` 的复合唯一生产上已存在，核对 schema 是否已写全。
+4. **P3b 第 6 步**：claim 迁 `app_metadata`（P0 有意留下的 fail-closed 状态）。
+5. P2 剩余（低优先，清单跑 `node scripts/tenant-guard-audit.mjs` 即得）：
    `bulk/apply.ts:60/65`、`bulk/export.ts:89/105` 是**误报**（下一行有手工归属校验）；
    `completion.ts` 里按 `job.id` 的写是**传递安全**（入口已验归属）。
-5. CI 的 e2e job 仍需在 GitHub Settings → Secrets 配 4 个值（`AUTH_SECRET` +
-   Supabase 三个 key）才会绿 —— 已接线，缺了会红得说明白缺什么。
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm lint`：**退出码 0**（830 个 warning 是既有的，0 error 是门槛）
 - `pnpm exec tsc --noEmit`：**0 错误**
-- `pnpm test`：**947 个通过**（83 文件）
+- `pnpm test`：**992 个通过**（87 文件）
 - `pnpm build`：**必须通过**（改了源码要 build → kickstart 服务 → 再跑 e2e）
 - `pnpm exec playwright test --project=desktop-chromium`：**55 个通过**
 - 生产 schema 漂移：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check`
   → 期望 `schema and database agree`
+- 生产备份：`node scripts/backup-prod.mjs`（data-only dump + 索引清单 + 回读复验 → `docs/backups/`，该目录 gitignore）
+- AuthLink 漂移体检：`pnpm exec tsx scripts/backfill-tenant-columns.ts`（只读；期望"员工 0 客户 0"）
 - 租户守卫审计：`node scripts/tenant-guard-audit.mjs`（输出生产侧未收窄查询的分诊清单）
 
 ## 服务与恢复

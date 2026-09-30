@@ -21,6 +21,7 @@
  */
 import { db } from "@/lib/db";
 import { readActiveTenant, type ActiveTenant } from "@/lib/tenant/active-tenant";
+import { identitiesForAuthUser, type ResolvedIdentity } from "@/lib/tenant/identity";
 
 export type EntryTenantSource = "slug" | "cookie" | "sole";
 
@@ -124,8 +125,51 @@ export async function resolveEntryTenantFor(input: {
 
 /**
  * 生产入口：读签名 cookie 后委托给 `resolveEntryTenantFor`。
- * `slug` 由将来的 `/t/<slug>` 路由传入（P3b 第 4 步），今天传 null。
+ * `slug` 由 `/t/<slug>` 路由传入（显式门店链接）。
  */
 export async function resolveEntryTenant(input?: { slug?: string | null }): Promise<EntryTenantResult> {
   return resolveEntryTenantFor({ slug: input?.slug, cookieTenant: await readActiveTenant() });
+}
+
+// ---------------------------------------------------------------------------
+// 门店专属链接（`/t/<slug>`）的落地决策
+// ---------------------------------------------------------------------------
+
+export type ShopEntryPlan =
+  /** 他是这家店的人 → 签 cookie 并进对应的家 */
+  | { kind: "enter"; organisationId: string; slug: string; home: "/workshop/dashboard" | "/rider/home" }
+  /** 还没登录 → 先去登录，登录后回跳到这个链接（登录页消费 `?next=`） */
+  | { kind: "signin" }
+  /** 登录了，但**不是这家店**的人（可能属于别家店）→ 送去选择器，绝不替他进别家 */
+  | { kind: "not-a-member"; candidates: ResolvedIdentity[] }
+  /** 链接本身有问题（slug 不存在 / 门店停用） */
+  | { kind: "unknown-shop"; error: string };
+
+/**
+ * `/t/<slug>` 该往哪儿走（P3b 第 4 步剩下的那一半）。
+ *
+ * 三条硬规则：
+ *  ① **URL 里的 slug 优先于 cookie** —— 用户点的是"这家店"的链接，就该按这家店判；
+ *  ② 进店的前提是 `identitiesForAuthUser` 里**确实有这家店**（`AuthLink` 是唯一事实来源），
+ *     不是"slug 存在就放行"；
+ *  ③ 不是这家店的人 → `not-a-member`，**不签任何 cookie**、不猜一家，交给选择器。
+ *
+ * 抽成函数（而不是写进 route handler）是为了能单测 —— route handler 里的
+ * `cookies()/redirect()` 在 vitest 里跑不了，决策本身才是要守的东西。
+ */
+export async function planShopEntry(authId: string | null, slug: string): Promise<ShopEntryPlan> {
+  const tenant = await resolveEntryTenantFor({ slug });
+  if (!tenant.ok) return { kind: "unknown-shop", error: tenant.error };
+  if (!authId) return { kind: "signin" };
+
+  const candidates = await identitiesForAuthUser(authId);
+  const mine = candidates.find((c) => c.organisationId === tenant.organisationId);
+  if (!mine) return { kind: "not-a-member", candidates };
+
+  return {
+    kind: "enter",
+    organisationId: tenant.organisationId,
+    slug: tenant.slug ?? slug,
+    home: mine.kind === "STAFF" ? "/workshop/dashboard" : "/rider/home",
+  };
 }
