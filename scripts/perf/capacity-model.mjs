@@ -28,8 +28,9 @@ const ASSUMPTIONS = {
   riderViewsSession: 8, riderShareOfCustomers: 0.2,
   customersPerDealer: 300,
   actionsPerView: 0.25,
-  qRender: 6, qAction: 12, qApi: 3,          // 每次渲染 6 条 SQL（无 unstable_cache）
-  cpuRenderMs: 40, cpuActionMs: 80,          // 实测校准位
+  qRender: 6, qAction: 12, qApi: 3,          // 2026-09-30 实测（阶段 A）：中位数 6 条；重页面 15-34，有界化后已降
+  cpuRenderMs: 43, cpuActionMs: 80,          // 2026-09-30 实测（阶段 B）：混合浏览负载 42.9-49.4 核·毫秒/请求。
+                                             // 注意这是本机 Apple Silicon；Vercel 的 x86 通常每核更慢，预算要留余量。
   wallRenderS: 0.45, wallActionS: 0.8,
   memGB: 2,                                  // Fluid compute 默认 2GB/1vCPU
   rscKB: 80, assetsPerSession: 20, sessionsDomShare: 0.6,
