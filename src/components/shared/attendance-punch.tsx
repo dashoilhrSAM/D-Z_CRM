@@ -52,6 +52,22 @@ export function AttendancePunch({ kind, lang, compact = false }: { kind: PunchKi
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [geo, setGeo] = useState<GeoReading>({ lat: null, lng: null, accuracyM: null, error: null });
 
+  /*
+   * 每次打开面板都把上一次的读数复位。
+   *
+   * 为什么写成"渲染期间调整 state"而不是放在 effect 里：在 effect 里同步 setState 会
+   * 触发级联渲染（React 官方「you might not need an effect」明确不推荐，Next 16 的
+   * react-hooks 规则也会报错）。这个写法是 React 文档给出的等价替代 —— 语义没变
+   * （open 从 false 变 true 的那一次渲染就把状态重置掉），但不会有级联渲染。
+   */
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (prevOpen !== open) {
+    setPrevOpen(open);
+    setPhase("warming");
+    setCameraError(null);
+    setGeo({ lat: null, lng: null, accuracyM: null, error: null });
+  }
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -67,28 +83,28 @@ export function AttendancePunch({ kind, lang, compact = false }: { kind: PunchKi
       return;
     }
     let cancelled = false;
-    setPhase("warming");
-    setCameraError(null);
-    setGeo({ lat: null, lng: null, accuracyM: null, error: null });
-
-    // 定位与摄像头并行：定位可能要好几秒，而它不依赖摄像头
-    if (typeof navigator !== "undefined" && navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (cancelled) return;
-          setGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracyM: pos.coords.accuracy ?? null, error: null });
-        },
-        (err) => {
-          if (cancelled) return;
-          setGeo({ lat: null, lng: null, accuracyM: null, error: err.message || "unavailable" });
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-      );
-    } else {
-      setGeo({ lat: null, lng: null, accuracyM: null, error: "unsupported" });
-    }
+    // 复位已在渲染期间完成（见组件顶部说明）。
 
     (async () => {
+      // 定位与摄像头并行：getCurrentPosition 是"发起即返回"，所以先发起定位不会挡住摄像头。
+      // 放在这个异步块里（而不是 effect 顶层）是为了不在 effect 里同步 setState ——
+      // 「不支持定位」那条分支原来是同步 setState，正是 lint 报的第二处。
+      if (typeof navigator !== "undefined" && navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            if (cancelled) return;
+            setGeo({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracyM: pos.coords.accuracy ?? null, error: null });
+          },
+          (err) => {
+            if (cancelled) return;
+            setGeo({ lat: null, lng: null, accuracyM: null, error: err.message || "unavailable" });
+          },
+          { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+        );
+      } else if (!cancelled) {
+        setGeo({ lat: null, lng: null, accuracyM: null, error: "unsupported" });
+      }
+
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 720 } }, audio: false });
         if (cancelled) {
