@@ -32,6 +32,39 @@ enum Role {
   AUDITOR
 }
 
+/// 认证身份 → 业务身份的映射（P3）。
+///
+/// 为什么需要它：`User.authId` / `Customer.authId` 是**全局唯一**的，于是
+/// "同一个人在两家店各有一个客户档案"**在数据模型上根本表达不出来** ——
+/// 而这正是"每个 workshop 独立、customer 不共用"要的语义。
+///
+/// 一个自然人 = 一个 Supabase auth 账号（邮箱/手机在项目内唯一，这是 Supabase 的现实），
+/// 他在 N 家店就有 N 条 AuthLink、N 个业务主体（N 个 User 或 N 个 Customer）。
+/// **跨店共享的是登录凭证，不是客户数据** —— 这才是"customer 不共用"的正确形状。
+///
+/// 为什么要 kind/userId/customerId 三个字段而不是两张表：两类身份在解析
+/// （"这个 authId 在本店是谁"）与登录（"他属于哪几家店"）上走的是同一条路径，
+/// 合成一张表可以让这两件事各只写一次。
+model AuthLink {
+  id             String   @id @default(cuid())
+  authId         String
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  /// STAFF | CUSTOMER
+  kind           String
+  userId         String?
+  customerId     String?
+  createdAt      DateTime @default(now())
+
+  /// 一人一店一条：这是解析"他在本店是谁"时的唯一依据
+  @@unique([authId, organisationId])
+  /// 一条业务身份只能被一个 auth 账号认领（防止两个账号绑到同一个员工/客户）
+  @@unique([organisationId, kind, userId])
+  @@unique([organisationId, kind, customerId])
+  /// 反查"这个 auth 账号属于哪几家店"（登录时的多店选择器要用）
+  @@index([authId])
+}
+
 model Organisation {
   id            String   @id @default(cuid())
   qrToken       String?  @unique // QR-003: unguessable scan token
@@ -109,6 +142,7 @@ model Organisation {
   invoices      Invoice[]
   checklistTemplates ChecklistTemplate[]
   invoiceCounters InvoiceCounter[]
+  authLinks     AuthLink[]
 }
 
 

@@ -61,9 +61,45 @@ async function main() {
     }
   }
 
+  /* ---------- AuthLink：把既有的 User.authId / Customer.authId 收进映射表（P3） ---------- */
+  // 幂等：按 (authId, organisationId) upsert。现在两列都还是全局唯一，所以是 1:1，不会歧义。
+  const staffWithAuth = await db.user.findMany({
+    where: { authId: { not: null } },
+    select: { id: true, authId: true, organisationId: true },
+  });
+  const customersWithAuth = await db.customer.findMany({
+    where: { authId: { not: null } },
+    select: { id: true, authId: true, organisationId: true },
+  });
+  const wanted = [
+    ...staffWithAuth.map((u) => ({ authId: u.authId as string, organisationId: u.organisationId, kind: "STAFF", userId: u.id, customerId: null })),
+    ...customersWithAuth.map((c) => ({ authId: c.authId as string, organisationId: c.organisationId, kind: "CUSTOMER", userId: null, customerId: c.id })),
+  ];
+  console.log("\nAuthLink 待映射:", wanted.length, "条（员工", staffWithAuth.length, "+ 客户", customersWithAuth.length, "）");
+  if (APPLY) {
+    for (const w of wanted) {
+      await db.authLink.upsert({
+        where: { authId_organisationId: { authId: w.authId, organisationId: w.organisationId } },
+        create: w,
+        update: { kind: w.kind, userId: w.userId, customerId: w.customerId },
+      });
+    }
+    console.log("  已写入 AuthLink:", await db.authLink.count());
+  }
+
   if (!APPLY) {
     console.log("\n（只报告模式：加 --apply 执行）");
     return;
+  }
+
+  // AuthLink 的对照：凡是有 authId 的员工/客户，都必须能在映射表里找到 ——
+  // 否则他们下次登录时解析不到身份（而解析失败表现为"登不进去"，很难查）。
+  const staffMissing = (await db.user.count({ where: { authId: { not: null } } })) - (await db.authLink.count({ where: { kind: "STAFF" } }));
+  const custMissing = (await db.customer.count({ where: { authId: { not: null } } })) - (await db.authLink.count({ where: { kind: "CUSTOMER" } }));
+  console.log("有 authId 但缺 AuthLink：员工", staffMissing, "客户", custMissing);
+  if (staffMissing > 0 || custMissing > 0) {
+    console.error("❌ 有账号没有映射 —— 他们下次登录会解析不到身份。");
+    process.exitCode = 1;
   }
 
   const left = await db.organisation.count({ where: { slug: null } });
