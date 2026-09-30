@@ -10,6 +10,7 @@ import { createAdminClient, customersByPhone, customersByPhoneAnyTenant, custome
 import { clientIpHash, otpRateCheck } from "@/lib/otp-rate";
 import { resolveEntryTenant } from "@/lib/tenant/entry-tenant";
 import { linkCustomerIdentity } from "@/lib/tenant/identity";
+import { requestPersonRef, loadStaffForRef, loadCustomerForRef } from "@/lib/tenant/resolve";
 
 /** 业务身份（JWT claims）——A2 RLS 读取 request.jwt.claims 依赖这些字段。 */
 export interface BizClaims {
@@ -23,8 +24,11 @@ export interface BizClaims {
 /** 登录后把业务身份写入 Supabase user_metadata（进 JWT claims）。 */
 export async function injectBizClaims(authUserId: string) {
   const supabase = await createClient();
+  // P3b 第 3 步：先认「本请求指定的门店」（签名 cookie → AuthLink），没有才走唯一所属。
+  // 登录时正好是最需要它的时候 —— 多店的人在这里选店，claims 必须按他选的那家签发。
+  const ref = await requestPersonRef(authUserId);
   // 先查员工，再查顾客（rider）
-  const staff = await db.user.findUnique({ where: { authId: authUserId } });
+  const staff = await loadStaffForRef(ref, authUserId);
   if (staff) {
     const claims: BizClaims = {
       orgId: staff.organisationId,
@@ -37,7 +41,7 @@ export async function injectBizClaims(authUserId: string) {
     if (error) return { ok: false as const, error: error.message };
     return { ok: true as const, claims };
   }
-  const rider = await db.customer.findUnique({ where: { authId: authUserId } });
+  const rider = await loadCustomerForRef(ref, authUserId);
   if (rider) {
     const claims: BizClaims = {
       orgId: rider.organisationId,
@@ -449,10 +453,11 @@ export async function completeRiderPhoneSignup(input: { name: string; gender?: s
   }
 
   try {
-    // ⚠️ 这一条按 authId 的查询**还没**收窄租户 —— 多店解析链是 P3b 第 3 步。
-    // 它不会跨店绑定（绑的是这个人自己的账号），但多店时可能读到他**另一家店**的档案；
-    // 第 3 步会把它改成 identityInTenant(authId, tenant)。
-    let customer = await db.customer.findUnique({ where: { authId: user.id } });
+    // 按 authId 找已有档案 —— **带租户**（P3b 第 3 步）：这里是注册流程，门店上面已经定好，
+    // 不带租户就可能读到他**另一家店**的档案，于是"有没有档案 / 要不要认领"全建立在错的那条上。
+    // 用 findFirst 而不是 findUnique：第 2 步松开 Customer.authId 全局唯一键后 findUnique 会
+    // 编译失败，而这里本来就只想要**本店**那一条。
+    let customer = await db.customer.findFirst({ where: { authId: user.id, organisationId } });
     if (!customer) {
       const byPhoneMatches = await customersByPhone(organisationId, normalizePhoneLoose(phone));
       if (byPhoneMatches.length > 1) {

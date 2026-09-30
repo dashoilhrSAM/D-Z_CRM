@@ -1,7 +1,7 @@
 import "server-only";
 import { cache } from "react";
-import { db } from "@/lib/db";
 import { readRequestIdentity } from "@/lib/supabase/identity";
+import { requestPersonRef, loadStaffForRef, loadCustomerForRef } from "@/lib/tenant/resolve";
 import type { User, Customer } from "@prisma/client";
 import type { WorkshopPersona } from "@/lib/nav-registry";
 
@@ -36,17 +36,22 @@ export const getSessionUser = cache(async (): Promise<SessionUser> => {
   const identity = await readRequestIdentity();
   if (!identity) return ANONYMOUS;
 
+  // P3b 第 3 步：先看"本请求指定了哪家店"（签名 cookie），没有才走唯一所属。
+  // "指定了本店但他在本店没有身份"与"没指定、系统按唯一所属猜"是两件事 ——
+  // 前者返回"没有身份"，绝不回退到别家店（见 lib/tenant/resolve.ts）。
+  const ref = await requestPersonRef(identity.id);
+
   // 员工
-  const staff = await db.user.findUnique({ where: { authId: identity.id } });
+  const staff = await loadStaffForRef(ref, identity.id);
   if (staff) {
     return { kind: "staff", user: staff, role: staff.role, name: staff.name, initials: initialsOf(staff.name), orgId: staff.organisationId, branchId: staff.branchId, authenticated: true };
   }
   // rider 顾客
-  const rider = await db.customer.findUnique({ where: { authId: identity.id } });
+  const rider = await loadCustomerForRef(ref, identity.id);
   if (rider) {
     return { kind: "customer", user: rider, role: "CUSTOMER", name: rider.name, initials: initialsOf(rider.name), orgId: rider.organisationId, branchId: rider.branchId, authenticated: true };
   }
-  // 已登录但未关联业务账号
+  // 已登录但未关联业务账号（或本店没有他的身份）
   return { ...ANONYMOUS, authenticated: true };
 });
 
