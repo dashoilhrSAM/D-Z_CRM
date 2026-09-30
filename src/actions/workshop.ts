@@ -17,6 +17,7 @@ import { generateTempPassword } from "@/lib/auth/temp-password";
 import { scopedBranchId } from "@/lib/branch-scope";
 import { normalizeEmail } from "@/lib/staff-identity";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
+import { linkStaffIdentity } from "@/lib/tenant/identity";
 import { createClient } from "@supabase/supabase-js";
 import { generateAiReplyDraft } from "@/lib/ai-reply-draft";
 
@@ -456,6 +457,12 @@ export async function createStaff(input: { name: string; role: string; phone?: s
       authId,
     },
   });
+  // ★ 建了带 authId 的员工就必须同时写 AuthLink —— 它是「这个账号属于哪几家店」的唯一
+  //   事实来源（P3b 第 3 步的解析链读它）。漏写不会当场报错：老账号因 P3a 回填过照常登录，
+  //   只有**新建**的员工将来会登不进去。见 lib/tenant/identity.ts 的说明。
+  if (authId) {
+    await linkStaffIdentity({ authId, organisationId: org!.id, userId: created.id });
+  }
   revalidatePath("/", "layout");
   return { ok: true, authCreated: !!authId, authEmail: authId ? email : null, userId: created.id };
 }

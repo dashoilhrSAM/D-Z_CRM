@@ -87,19 +87,23 @@ async function main() {
     console.log("  已写入 AuthLink:", await db.authLink.count());
   }
 
-  if (!APPLY) {
-    console.log("\n（只报告模式：加 --apply 执行）");
-    return;
-  }
-
   // AuthLink 的对照：凡是有 authId 的员工/客户，都必须能在映射表里找到 ——
   // 否则他们下次登录时解析不到身份（而解析失败表现为"登不进去"，很难查）。
+  //
+  // ⚠️ 这一段原本在「只报告模式 return」**之后**，于是漂移巡检必须先 `--apply`（会写库）——
+  // 可巡检本身是只读的，应该随时能跑。2026-09-30 挪到 return 之前：
+  // `pnpm exec tsx scripts/backfill-tenant-columns.ts`（不带 --apply）现在就是一次漂移体检。
   const staffMissing = (await db.user.count({ where: { authId: { not: null } } })) - (await db.authLink.count({ where: { kind: "STAFF" } }));
   const custMissing = (await db.customer.count({ where: { authId: { not: null } } })) - (await db.authLink.count({ where: { kind: "CUSTOMER" } }));
   console.log("有 authId 但缺 AuthLink：员工", staffMissing, "客户", custMissing);
   if (staffMissing > 0 || custMissing > 0) {
     console.error("❌ 有账号没有映射 —— 他们下次登录会解析不到身份。");
     process.exitCode = 1;
+  }
+
+  if (!APPLY) {
+    console.log("\n（只报告模式：加 --apply 执行）");
+    return;
   }
 
   const left = await db.organisation.count({ where: { slug: null } });
