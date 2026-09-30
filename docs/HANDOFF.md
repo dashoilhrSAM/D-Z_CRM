@@ -6,17 +6,18 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**多租户隔离 P0→P3b 已全部合并上线**（PR #97–#103；`origin/main = 0c5b498`）。
-P3b 六步施工单里 **1（注册匹配带租户）、2（authId 降为租户内唯一）、3（请求级解析链）
-已完成并上线，第 4 步完成了多店选择器**；只剩 `/t/<slug>` 入口页、删死代码 `dz_org`、
-claim 迁 `app_metadata`（见「下一步」）。
+**多租户隔离 P0→P3b 已全部合并上线**（PR #97–#104；`origin/main = e9b8a8f`）。
+P3b 六步施工单里 **1（注册匹配带租户）、2（authId 降为租户内唯一）、3（请求级解析链）、
+4（多店选择器 + 门店专属链接 `/t/<slug>`）都已完成并上线**；剩下的是清理与收尾（见「下一步」）。
 **生产侧已执行过破坏性 DDL**：`User/Customer.authId` 的全局唯一索引已删除，改为
 `@@unique([organisationId, authId])` + `Customer(organisationId, phone)` 索引，
 `schema and database agree`。**不要重跑那次 DDL**（脚本幂等，但没必要）。
-生产实测过真实登录（`test.owner@dz.my`）：落在 `/workshop/dashboard`、侧边栏显示姓名、
-无 `dz_tenant` cookie（走"唯一所属"分支）—— 新解析链在生产工作。
-基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **992**（87 文件）/ build 通过 / Playwright **55**；
-生产 `/` 200、`/login` 200、`/qr/rider/x` 307。
+生产用真实账号（`test.owner@dz.my`）实测过，**两条解析分支都验过**：
+① 直接登录 → 落 `/workshop/dashboard`、侧边栏显示姓名、**无** `dz_tenant` cookie（"唯一所属"分支）；
+② 走门店链接 `/t/d-z-smart-workshop` → 307 到 `/login?next=…` → 登录后回到 `/t/…` →
+**签上 `dz_tenant` cookie** → 落 `/workshop/dashboard`，后续 `/workshop/staff` 正常（"指定门店"分支）。
+基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **1008**（89 文件）/ build 通过 / Playwright **55**；
+生产 `/` 200、`/login` 200、`/qr/rider/x` 307、`/t/d-z-smart-workshop` 307、`/t/nope` 404。
 
 ## 会话信息
 - 原会话 ID：`session-7fd1ea0d-1a14-4d2c-85f9-9c332e4441d4`（会话名「多租户隔离方案分析」）
@@ -46,12 +47,13 @@ claim 迁 `app_metadata`（见「下一步」）。
   P3b 施工单写入方案文档。`active-tenant.ts` **目前没有任何调用方**。
 
 ## 下一步（按优先级）
-1. **P3b 第 4 步的剩下一半：`/t/<slug>` 入口页**。`resolveEntryTenant({ slug })` 从第 1 步起
-   就能收 slug，但还没有路由把它接上 —— 今天"进哪家店"的显式来源只有签名 `dz_tenant` cookie
-   （`/select-workshop` 会写）。有了它，门店专属链接（`/t/d-z-smart-workshop`）才真的能开店门。
+1. **注册流程的门店显式化**（P3b 第 4 步唯一没做的一块）：`/t/<slug>/signup` +
+   把 slug 传进 `signUpRider` / `completeRiderPhoneSignup`。今天注册走 `resolveEntryTenant()`
+   （签名 cookie → 唯一在营门店 → **多店并存时拒绝而不是猜**），安全但还不能由链接指定；
+   `resolveEntryTenant({ slug })` 从第 1 步起就能收 slug，缺的是把 slug 从注册页一路带下去。
 2. **CI 的 e2e job 缺 4 个 Secrets**（`AUTH_SECRET` + Supabase 三个 key；GitHub Settings → Secrets）。
-   配齐后 Playwright 会在 CI 上跑，多店选择器这类"要真登录才走得到"的路径才有端到端覆盖 ——
-   今天它只有数据层单测。
+   配齐后 Playwright 会在 CI 上跑 —— 多店选择器、`/t/<slug>` 这类"要真登录才走得到"的路径
+   今天只有数据层单测 + 人工生产冒烟（都做过，见「一句话状态」）。
 3. **P3b 第 5 步清理**：删死代码 `dz_org`（`actions/rider-context.ts` 写了但全项目没人读）；
    `User.email` 的复合唯一生产上已存在，核对 schema 是否已写全。
 4. **P3b 第 6 步**：claim 迁 `app_metadata`（P0 有意留下的 fail-closed 状态）。
