@@ -5,7 +5,7 @@
 // "可被构造的重定向" —— 而触发点发生在用户**刚输完密码**那一刻，是最容易跟走的时候。
 // 所以这里的断言全部围绕"什么情况下必须回退到默认落点"。
 import { describe, expect, it } from "vitest";
-import { safeNextPath } from "@/lib/auth/next-path";
+import { safeNextPath, slugFromTenantPath } from "@/lib/auth/next-path";
 
 const FALLBACK = "/workshop/dashboard";
 
@@ -49,5 +49,28 @@ describe("safeNextPath：只认站内绝对路径", () => {
 
   it("回退值是调用方给的 —— 函数自己不猜落点", () => {
     expect(safeNextPath("https://evil.example", "/rider/home")).toBe("/rider/home");
+  });
+});
+
+describe("slugFromTenantPath：从回跳路径里取门店 slug", () => {
+  it("门店链接的各种形态都取得到", () => {
+    expect(slugFromTenantPath("/t/d-z-smart-workshop")).toBe("d-z-smart-workshop");
+    expect(slugFromTenantPath("/t/d-z-smart-workshop/signup")).toBe("d-z-smart-workshop");
+    expect(slugFromTenantPath("/t/d-z-smart-workshop?x=1")).toBe("d-z-smart-workshop");
+    expect(slugFromTenantPath("/t/shop_1.2~x")).toBe("shop_1.2~x");
+  });
+
+  it("不是门店链接 → null（QR 落地页、普通页面、空值）", () => {
+    expect(slugFromTenantPath("/qr/rider/abc")).toBeNull();
+    expect(slugFromTenantPath("/workshop/dashboard")).toBeNull();
+    expect(slugFromTenantPath("/t/")).toBeNull();
+    expect(slugFromTenantPath(null)).toBeNull();
+    expect(slugFromTenantPath("")).toBeNull();
+  });
+
+  it("**只认 slug 的字符集** —— 它会拼进 URL，别的一律不去猜", () => {
+    expect(slugFromTenantPath("/t/a b")).toBeNull();
+    expect(slugFromTenantPath("/t/..%2Fadmin")).toBeNull();
+    expect(slugFromTenantPath("/t/a/b/c")).toBe("a");
   });
 });

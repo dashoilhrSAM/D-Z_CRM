@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LoginShell } from "@/components/login/login-shell";
 import { signInWithPassword, requestRiderPhoneOtp, verifyRiderPhoneOtp } from "@/actions/auth-supabase";
-import { safeNextPath } from "@/lib/auth/next-path";
+import { safeNextPath, slugFromTenantPath } from "@/lib/auth/next-path";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 import { COUNTRY_CODES } from "@/lib/phone";
@@ -20,6 +20,9 @@ export default function RiderLoginPage() {
   // `?next=` 回跳（门店链接 /t/<slug>、QR 落地页）：必须过 safeNextPath，防开放重定向
   const searchParams = useSearchParams();
   const nextPath = safeNextPath(searchParams.get("next"), "");
+  // 从门店链接进来的（next = /t/<slug>）→ 注册链接也指向那家店，
+  // 否则新客户注册会落到"唯一在营门店"的兜底判断上（隐患 ①）。
+  const shopSlug = slugFromTenantPath(nextPath);
   const [tab, setTab] = useState<Tab>("phone");
   const [phone, setPhone] = useState("");
   const [countryCode, setCountryCode] = useState("+60"); // 手机号区号（默认马来西亚）
@@ -80,7 +83,7 @@ export default function RiderLoginPage() {
     if (res.needsProfile) {
       // 号码没在任何客户档案里 —— 引导去注册（session 已建立，验证码证明过号码归属）
       setInfo(t("login.new-here", lang));
-      router.push("/rider/signup");
+      router.push(shopSlug ? `/t/${shopSlug}/signup` : "/rider/signup");
       return;
     }
     if (nextPath) router.push(nextPath);
