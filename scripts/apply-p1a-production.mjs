@@ -139,6 +139,27 @@ function p1bStatements() {
 if (PHASE === "p1b") stmts.push(...p1bStatements());
 
 /**
+ * P3a：把既有的 User.authId / Customer.authId 收进 AuthLink（纯数据，幂等）。
+ * 用原生 SQL 而不是回填脚本：本机生成的 Prisma client 是 SQLite 的，连不上生产 PG。
+ */
+if (PHASE === "authlink") {
+  stmts.push({
+    sql: `INSERT INTO "AuthLink" ("id","authId","organisationId","kind","userId","customerId","createdAt")
+          SELECT 'al_staff_' || u."id", u."authId", u."organisationId", 'STAFF', u."id", NULL, now()
+          FROM "User" u WHERE u."authId" IS NOT NULL
+          ON CONFLICT ("authId","organisationId") DO UPDATE SET "kind"='STAFF', "userId"=EXCLUDED."userId"`,
+    why: "AuthLink ← User.authId（员工）",
+  });
+  stmts.push({
+    sql: `INSERT INTO "AuthLink" ("id","authId","organisationId","kind","userId","customerId","createdAt")
+          SELECT 'al_cust_' || c."id", c."authId", c."organisationId", 'CUSTOMER', NULL, c."id", now()
+          FROM "Customer" c WHERE c."authId" IS NOT NULL
+          ON CONFLICT ("authId","organisationId") DO UPDATE SET "kind"='CUSTOMER', "customerId"=EXCLUDED."customerId"`,
+    why: "AuthLink ← Customer.authId（客户）",
+  });
+}
+
+/**
  * 回填阶段刻意**不用 `@/lib/db` 的 Prisma 客户端**：本机生成的 client 是 SQLite 的，
  * 连不上生产 PG（同样的问题在 scripts/set-branch-geofence.ts:12-16 有记录）。
  * 这里直接用原生 SQL —— 四条 UPDATE + slug，比通用回填脚本更短也更可核对。

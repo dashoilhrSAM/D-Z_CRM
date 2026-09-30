@@ -37,8 +37,11 @@ export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
 
-  // ============ 有 organisationId 列（40 个）============
+  // ============ 有 organisationId 列 ============
+  // 注意：这里的条目数是**测试在守着的** —— 加了新模型却忘了登记，
+  // tests/tenant-scope-map.test.ts 的完整性断言会直接报出模型名（本轮 AuthLink 就是这么被抓到的）。
   Attachment: { kind: "column" },
+  AuthLink: { kind: "column", note: "认证身份→业务身份的映射（P3）；本身按租户隔离" },
   AuditLog: { kind: "column" },
   AutomationRule: { kind: "column" },
   Branch: { kind: "column" },

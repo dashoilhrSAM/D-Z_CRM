@@ -32,10 +32,24 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # 必须 build：webServer 跑的是 `pnpm start`（next start），没有 .next 它会直接起不来。
+      # 之前这个 job 一直失败在这里 —— 报的是 "Could not find a production build"，
+      # 与测试本身无关，却让整条 CI 看起来像"测试挂了"。
+      - run: pnpm build
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm exec playwright test
         env:
           CI: true
+          # 这几条是 e2e 的**真实依赖**：登录走真实 Supabase（e2e/link-auth.ts 会把
+          # User/Customer 的 authId 绑到真实 auth 用户）。缺了它们，登录类用例必然失败，
+          # 而失败原因看起来会像"应用坏了"。
+          # 需要在仓库 Settings → Secrets 里配置同名 secret；未配置时本 job 会红 ——
+          # 这是有意的：宁可见红并知道缺什么，也不要 continue-on-error 把信号藏起来。
+          DATABASE_URL: "file:./e2e.db"
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

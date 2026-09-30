@@ -78,6 +78,10 @@ export function ContentStudio({ brands, occasions }: { brands: string[]; occasio
     } catch { /* the panel is a convenience; failing to load it must not break the studio */ }
   };
 
+  // react-hooks/set-state-in-effect 在这一行是**误报**：refreshSaved 的第一条语句就是
+  // `await fetch(...)`，同步路径上没有任何 setState，不会级联渲染。
+  // 规则本身是对的，所以这里只针对这一处豁免，没有把规则降级 —— 那样会削弱整道门。
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void refreshSaved(); }, []);
 
   async function call(payload: Record<string, unknown>) {
