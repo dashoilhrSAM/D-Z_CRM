@@ -628,21 +628,31 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
    `tests/tenant-entry-tenant.test.ts`（+24，变异测试验证过会红）。
    详见 `docs/changes/2026-09-30-p3b-step1-signup-tenant.md`。
    ⏳ 有意留到第 2 步一起做：`@@index([organisationId, phone])`（纯性能项，并进那次双 schema 改动）。
-2. **再松唯一键**（前置已于第 1 步满足）：`User.authId` / `Customer.authId` 去全局唯一，改为
-   `@@unique([organisationId, authId])`。真正的"一人一店一条"由 `AuthLink` 的
+2. **再松唯一键**（前置已于第 1 步满足、解析链已于第 3 步就位）：`User.authId` / `Customer.authId`
+   去全局唯一，改为 `@@unique([organisationId, authId])`。真正的"一人一店一条"由 `AuthLink` 的
    `@@unique([authId, organisationId])` 守。**这一步之后才可能出现"同一个人两家店"。**
-   ⚠️ **必须与第 3 步同一批做**：`injectBizClaims`（`auth-supabase.ts:26/39`）与
-   `session-user.ts:40/45`、`rider-customer.ts:14` 今天都是
-   `findUnique({ where: { authId } })` —— 唯一键一松，`findUnique` 立刻不成立（编译/运行都会失败）。
-   只改 schema 不改编排链会把登录整个弄挂。
-3. **解析链落地**：`session-user.ts:40/45`、`rider-customer.ts:14` 三处
-   `findUnique({ where: { authId } })` 改为
-   `readActiveTenant()` → `identityInTenant(authId, tenant.organisationId)`，
-   无 cookie 时回退到"唯一所属"（单店用户体验不变），**多条时必须进选择器**。
+   ⚠️ **松键会同时点出三处编译错误，这是有意的护栏**（`resolve.ts` 里唯一所属的两处
+   `{ authId }` where、以及 `phone-identity.ts` 的平台级检查）—— 按报错逐个换掉即可；
+   换第 ③ 级时必须同时把第 ④ 级（选择器）接上，因为"多条"从这一刻起真的会发生。
+3. ✅ **已完成（2026-09-30）—— 解析链落地。**
+   新增 `src/lib/tenant/resolve.ts`：四级来源固定顺序
+   **① 签名 cookie → ② `/t/<slug>`/QR（第 4 步接）→ ③ 唯一所属 → ④ ≥2 条必须让用户选**，
+   第 0 级（子域）留空占位。三个消费者（`session-user.ts`、`rider-customer.ts`、
+   `injectBizClaims`）统一走 `requestPersonRef()` + `loadStaffForRef`/`loadCustomerForRefWith`，
+   规则只写一遍。
+   **关键语义**：cookie 指定了门店却没查到本人 → 返回"没有身份"，
+   **绝不回退到别家店**（"你选的那家没有你"和"没选、系统替你猜一家"是两件事，后者就是串店）。
+   **零查询回归**：今天没有任何代码写 `dz_tenant`，所以生产走的仍是第 ③ 级（与改造前同一条查询）。
+   第 ③ 级的 `{ authId }` where 是**编译期护栏**：第 2 步松键后 `findUnique` 立刻不成立，
+   编译器会逼着换成 `identitiesForAuthUser` 候选链 + 选择器。
+   测试：`tests/tenant-resolve.test.ts`（10 条，含"cookie 指向的店没有他 → 不许翻别家店"、
+   "同一 authId 两家店各取各店那条行"、以及"别处不许绕过解析链"的结构守卫 + 正向对照）。
+   详见 `docs/changes/2026-09-30-p3b-resolve-chain.md`。
 4. **入口与选择器**：`/t/<slug>/login`；`/login`、`/rider/login` 保留为无租户入口 +
    多店选择器（`needsTenantChoice()` 为 true 时**必须**让用户选）。
    `setActiveTenant` 的调用方**只能**传 `identitiesForAuthUser(authId)` 里的候选
    （不变式写在 `active-tenant.ts` 的注释里）。
+   ⏳ 第 ③ 级换成候选链必须在**这一步**一起做（解析链已经为它留好位置）。
 5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
    不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
    `User.email` → `@@unique([organisationId, email])`。

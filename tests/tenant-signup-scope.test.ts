@@ -109,9 +109,15 @@ describe("② 结构：注册路径不许再有「无租户的匹配」", () => 
     expect(src).toContain("resolveEntryTenant(");
   });
 
-  it("注册 action 里没有无租户条件的邮箱直查（隐患 ②）", () => {
+  it("注册 action 里**每一条**客户档案查询都带租户（隐患 ②）", () => {
     const src = stripComments(read("src/actions/auth-supabase.ts"));
-    expect(src).not.toContain("db.customer.findFirst");
+    // 意图是"不许有无租户条件的匹配"，而不是"不许出现某个函数名"：
+    // 第 3 步之后这里多了一处**带 organisationId** 的 findFirst（注册流程里门店已显式定好），
+    // 它是合法的 —— 所以断言改成逐条检查 where 里有没有租户。
+    const calls = src.match(/db\.customer\.find(?:First|Many|Unique)\(\{\s*where:\s*\{[^}]*\}/g) ?? [];
+    expect(calls.length, "一处客户查询都没匹配到 —— 正则失效，守卫形同虚设").toBeGreaterThan(0);
+    expect(calls.filter((c) => !c.includes("organisationId")), "这些查询没有租户条件").toEqual([]);
+    // 邮箱匹配走的是带租户的专用入口
     expect(src).toContain("customerByEmailInTenant(");
   });
 
