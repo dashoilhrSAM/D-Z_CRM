@@ -16,11 +16,11 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   const { q } = sp;
   const page = Math.max(1, Number(sp.page) || 1);
   const lang = await getLang();
-  const summaries = await customerService.listSummaries();
-  const filtered = q?.trim() ? summaries.filter((c) => (c.name + " " + (c.phone ?? "") + " " + c.motorcycles.map((m) => m.plate + m.model).join(" ")).toLowerCase().includes(q.toLowerCase())) : summaries;
+  // 分页与搜索都在数据库里完成。原来是把整张客户表连同车辆/工单/发票/提醒读进内存，
+  // 再内存过滤 + 切片丢掉 99% —— 4202 个客户时单请求 323ms，四并发反而掉到 1.23 req/s
+  // （每请求 CPU 放大 10 倍），并拖慢同一实例上的所有人。见 customerService.listSummaries。
   const PAGE_SIZE = 25;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const { items: pageItems, total, totalPages } = await customerService.listSummaries({ q, page, pageSize: PAGE_SIZE });
 
   return (
     <PageTransition>
@@ -28,7 +28,7 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">{t("ws.customers.title", lang)}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{t("ws.customers.summary", lang).replace("{n}", String(summaries.length))}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{t("ws.customers.summary", lang).replace("{n}", String(total))}</p>
         </div>
         <PendingForm data-tut="customers-search" className="w-full sm:w-72">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
