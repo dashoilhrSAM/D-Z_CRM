@@ -9,7 +9,8 @@ import { db } from "@/lib/db";
 export class DashboardService {
   async get(branchId?: string) {
     const [board, finance, reminders, reviews, kpi] = await Promise.all([
-      jobService.listBoard(branchId),
+      // 只要数字（jobsToday / 各状态计数）—— 不为此扫描整张工单表
+      jobService.boardSummary(branchId),
       this.todayFinance(branchId),
       crmService.reminders(),
       crmService.reviews(),

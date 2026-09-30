@@ -21,17 +21,18 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const page = Math.max(1, Number(sp.page) || 1);
   const lang = await getLang();
   const session = await getSessionUser();
-  const board = await jobService.listBoard(scopedBranchId(session));
+  const branchId = scopedBranchId(session);
   // data isolation: MECHANIC sees only their assigned jobs
-  const scoped = session.kind === "staff" && session.role === "MECHANIC" && session.user
-    ? board.jobs.filter((j) => j.mechanic?.id === session.user!.id)
-    : board.jobs;
-  const filtered = status ? scoped.filter((j) => j.status === status) : scoped;
+  const mechanicId = session.kind === "staff" && session.role === "MECHANIC" && session.user ? session.user.id : undefined;
   const isKanban = view === "kanban";
-  // pagination applies to the table view only (kanban keeps its per-column cap)
+  // 数字与行分开取：数字走 groupBy（不取行），行走上限查询。
+  // 原来是一次 listBoard() 把整张工单表读进来，再在内存里过滤、切片、给看板每列切 12 条。
+  const summary = await jobService.boardSummary(branchId, mechanicId);
   const PAGE_SIZE = 25;
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const table = isKanban ? null : await jobService.listBoardRows({ branchId, status, mechanicId, page, pageSize: PAGE_SIZE });
+  const columnsData = isKanban ? await jobService.listBoardColumns({ branchId, mechanicId, perColumn: 12 }) : null;
+  const pageItems = table?.jobs ?? [];
+  const totalPages = table?.totalPages ?? 1;
 
   const columns = [
     { id: "WAITING", title: t("status.WAITING", lang), dot: "bg-slate-500" },
@@ -47,7 +48,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <div className="flex-1 min-w-0">
           <h1 className="text-2xl font-bold tracking-tight">{t("ws.jobs.title", lang)}</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">{t("ws.jobs.summary", lang).replace("{n}", String(board.jobsToday)).replace("{w}", String(board.counts.WAITING)).replace("{a}", String(board.counts.AWAITING_APPROVAL))}</p>
+          <p className="text-sm text-muted-foreground mt-0.5">{t("ws.jobs.summary", lang).replace("{n}", String(summary.jobsToday)).replace("{w}", String(summary.counts.WAITING)).replace("{a}", String(summary.counts.AWAITING_APPROVAL))}</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded-lg border bg-card p-0.5 text-xs">
@@ -61,10 +62,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
 
       {/* status filter pills */}
       <div data-tut="jobs-filter" className="flex flex-wrap gap-1.5 mb-5">
-        <Link href="/workshop/jobs" className={"rounded-full border px-3 py-1 text-xs font-medium " + (!status ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground hover:border-primary/40")}>{t("ws.jobs.all", lang)} {board.jobs.length}</Link>
+        <Link href="/workshop/jobs" className={"rounded-full border px-3 py-1 text-xs font-medium " + (!status ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground hover:border-primary/40")}>{t("ws.jobs.all", lang)} {summary.total}</Link>
         {columns.map((c) => (
           <Link key={c.id} href={"/workshop/jobs?status=" + c.id} className={"rounded-full border px-3 py-1 text-xs font-medium flex items-center gap-1.5 " + (status === c.id ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground hover:border-primary/40")}>
-            <span className={"h-2 w-2 rounded-full " + c.dot} />{c.title} {board.counts[c.id]}
+            <span className={"h-2 w-2 rounded-full " + c.dot} />{c.title} {summary.counts[c.id]}
           </Link>
         ))}
       </div>
@@ -77,10 +78,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
                 <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground">
                   <span className={"h-2 w-2 rounded-full " + col.dot} />{col.title}
                 </span>
-                <span className="rounded-full bg-card border px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-muted-foreground">{board.counts[col.id]}</span>
+                <span className="rounded-full bg-card border px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-muted-foreground">{summary.counts[col.id]}</span>
               </div>
               <div className="space-y-2 flex-1">
-                {board.jobs.filter((j) => j.status === col.id).slice(0, 12).map((j) => (
+                {columnsData?.columns[col.id].map((j) => (
                   <Link key={j.id} href={"/workshop/jobs/" + j.id} className="dz-card-link block rounded-xl border bg-card p-3">
                     <div className="flex items-center justify-between">
                       <span className="font-mono text-[11px] font-semibold">{j.jobNumber}</span>

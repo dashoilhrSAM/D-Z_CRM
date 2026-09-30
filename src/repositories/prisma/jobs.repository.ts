@@ -35,6 +35,31 @@ export class PrismaJobRepository implements IJobRepository {
   list(where?: Prisma.ServiceJobWhereInput, client?: DbLike) {
     return this.c(client).serviceJob.findMany({ where, include: rowInclude, orderBy: { createdAt: "desc" } });
   }
+
+  /**
+   * 列表页取数（有界）。压测（2026-09-30）查到：工单列表页与 dashboard 都在用无界的
+   * list() —— 7,308 张工单时单请求 100ms、四并发掉到 2.3 req/s（每请求 CPU 放大 20 倍），
+   * 并且 dashboard 只是为了拿两个数字就扫了整张工单表（而 dashboard 占全部渲染的 67%）。
+   */
+  listPage(params: { where?: Prisma.ServiceJobWhereInput; skip?: number; take?: number }, client?: DbLike) {
+    return this.c(client).serviceJob.findMany({
+      where: params.where,
+      include: rowInclude,
+      orderBy: { createdAt: "desc" },
+      skip: params.skip,
+      take: params.take,
+    });
+  }
+
+  /** 按状态分组计数：一条查询拿到所有列的数字，不取任何行。
+   *  注意名字是 countsByStatus（复数）—— 仓库里已有一个 countByStatus(单个状态) 做别的事。 */
+  countsByStatus(where?: Prisma.ServiceJobWhereInput, client?: DbLike) {
+    return this.c(client).serviceJob.groupBy({ by: ["status"], where, _count: { _all: true } });
+  }
+
+  countWhere(where?: Prisma.ServiceJobWhereInput, client?: DbLike) {
+    return this.c(client).serviceJob.count({ where });
+  }
   getById(id: string, client?: DbLike) {
     return this.c(client).serviceJob.findUnique({ where: { id }, include: jobInclude });
   }

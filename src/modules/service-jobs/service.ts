@@ -1,11 +1,35 @@
 import type { DbLike } from "@/modules/customers/repository";
 import type { JobStatus, Prisma, PrismaClient } from "@prisma/client";
-import type { IJobRepository } from "./repository";
+import type { IJobRepository, JobRow } from "./repository";
 import { PrismaJobRepository } from "@/repositories/prisma/jobs.repository";
 import { canTransitionJob, type JobStatus as StatusT } from "@/lib/state-machines";
 import { db } from "@/lib/db";
 
 export type JobStatusInput = JobStatus;
+
+/** 工单列表/看板的过滤条件（branch 隔离 + 状态 + 机修本人）。 */
+function boardWhere(opts: { branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean }): Prisma.ServiceJobWhereInput {
+  const where: Prisma.ServiceJobWhereInput = {};
+  if (opts.branchId) where.branchId = opts.branchId;
+  if (opts.todayOnly) {
+    const { start, end } = serverDayRange(new Date());
+    where.createdAt = { gte: start, lt: end };
+  }
+  const statusList = opts.statuses ?? (opts.status ? [opts.status] : []);
+  if (statusList.length === 1) where.status = statusList[0] as Prisma.ServiceJobWhereInput["status"];
+  else if (statusList.length > 1) where.status = { in: statusList as Prisma.ServiceJobWhereInput["status"][] } as Prisma.ServiceJobWhereInput["status"];
+  if (opts.mechanicId) where.mechanicId = opts.mechanicId;
+  return where;
+}
+
+/**
+ * 服务器本地日的起止（与重构前 today() 的判定一致）。
+ * 用区间比较而不是「取回来再逐行判断」—— 后者要求先把行读出来，就没法有界了。
+ */
+function serverDayRange(now: Date): { start: Date; end: Date } {
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return { start, end: new Date(start.getTime() + 86400000) };
+}
 
 /**
  * 柜台加项（attachPackage 的 addons）。productId / serviceTypeId 可选：
@@ -28,36 +52,79 @@ export class JobService {
     return canTransitionJob(from as JobStatus, to as JobStatus);
   }
 
-  async listBoard(branchId?: string | null) {
-    const rows = await this.repo.list(branchId ? { branchId } : undefined);
+  /**
+   * 看板/列表的**数字部分**：各状态计数 + 今日新建数。两条查询，不取任何行。
+   *
+   * 单独拆出来的理由（2026-09-30 压测）：dashboard 原来调 listBoard() 只为拿
+   * jobsToday 与计数，却把整张工单表连同明细读进内存 —— 而 dashboard 占全部
+   * 渲染的 67%（自动刷新）。数字不该用取全表的代价换。
+   */
+  async boardSummary(branchId?: string | null, mechanicId?: string): Promise<{ counts: Record<string, number>; jobsToday: number; total: number }> {
+    const where = boardWhere({ branchId, mechanicId });
+    const { start, end } = serverDayRange(new Date());
+    const dayWhere: Prisma.ServiceJobWhereInput = { ...where, createdAt: { gte: start, lt: end } };
+    const [byStatus, jobsToday] = await Promise.all([
+      this.repo.countsByStatus(where),
+      this.repo.countWhere(dayWhere),
+    ]);
+    const counts: Record<string, number> = { WAITING: 0, IN_PROGRESS: 0, AWAITING_APPROVAL: 0, READY: 0, COMPLETED: 0, CANCELLED: 0 };
+    let total = 0;
+    for (const row of byStatus) {
+      counts[row.status] = row._count._all;
+      total += row._count._all;
+    }
+    return { counts, jobsToday, total };
+  }
+
+  /** 表格视图：**有界分页**，状态过滤与分页都在数据库里做（原来是全量取回来再内存过滤切片）。 */
+  async listBoardRows(opts: { branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean; page?: number; pageSize?: number }) {
+    const pageSize = Math.max(1, opts.pageSize ?? 25);
+    const page = Math.max(1, opts.page ?? 1);
+    const where = boardWhere(opts);
+    const [rows, total] = await Promise.all([
+      this.repo.listPage({ where, skip: (page - 1) * pageSize, take: pageSize }),
+      this.repo.countWhere(where),
+    ]);
+    return { jobs: rows.map((j) => this.toBoardRow(j)), total, totalPages: Math.max(1, Math.ceil(total / pageSize)) };
+  }
+
+  /**
+   * 看板视图：**每一列各取前 N 条**。
+   * 原来是先取全量、再在内存里 filter 出每列前 12 条 —— 一列一个全表扫描的代价。
+   */
+  async listBoardColumns(opts: { branchId?: string | null; mechanicId?: string; perColumn?: number }) {
+    const perColumn = Math.max(1, opts.perColumn ?? 12);
+    const base = boardWhere(opts);
+    const statuses = ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY", "COMPLETED"] as const;
+    const [columns, summary] = await Promise.all([
+      Promise.all(
+        statuses.map(async (s) => {
+          const rows = await this.repo.listPage({ where: { ...base, status: s }, take: perColumn });
+          return [s, rows.map((j) => this.toBoardRow(j))] as const;
+        }),
+      ),
+      this.boardSummary(opts.branchId, opts.mechanicId),
+    ]);
+    return { columns: Object.fromEntries(columns) as Record<(typeof statuses)[number], ReturnType<JobService["toBoardRow"]>[]>, counts: summary.counts, jobsToday: summary.jobsToday };
+  }
+
+  /** 单张工单 → 看板/列表行。算法与重构前逐字一致，只是抽出来给三条路径共用。 */
+  private toBoardRow(j: JobRow) {
     const now = new Date();
     const today = (d: Date) => d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+    const acceptedItems = j.items.filter((i) => i.status !== "DECLINED");
+    const acceptedParts = j.parts.filter((p) => p.status !== "DECLINED");
+    const totalSen = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
     return {
-      jobs: rows.map((j) => {
-        const acceptedItems = j.items.filter((i) => i.status !== "DECLINED");
-        const acceptedParts = j.parts.filter((p) => p.status !== "DECLINED");
-        const totalSen = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
-        return {
-          id: j.id, jobNumber: j.jobNumber, status: j.status, mileage: j.mileage,
-          packageName: j.packageName, customerRequest: j.customerRequest,
-          customer: { id: j.customer.id, name: j.customer.name, phone: j.customer.phone },
-          motorcycle: { brand: j.motorcycle.brand, model: j.motorcycle.model, plate: j.motorcycle.plate, year: j.motorcycle.year },
-          mechanic: j.mechanic,
-          createdAt: j.createdAt, startedAt: j.startedAt, readyAt: j.readyAt, completedAt: j.completedAt,
-          totalSen,
-          pendingApprovals: j.approvals.filter((a) => a.status === "PENDING").length,
-          isToday: today(j.createdAt),
-        };
-      }),
-      counts: {
-        WAITING: rows.filter((r) => r.status === "WAITING").length,
-        IN_PROGRESS: rows.filter((r) => r.status === "IN_PROGRESS").length,
-        AWAITING_APPROVAL: rows.filter((r) => r.status === "AWAITING_APPROVAL").length,
-        READY: rows.filter((r) => r.status === "READY").length,
-        COMPLETED: rows.filter((r) => r.status === "COMPLETED").length,
-        CANCELLED: rows.filter((r) => r.status === "CANCELLED").length,
-      },
-      jobsToday: rows.filter((r) => today(r.createdAt)).length,
+      id: j.id, jobNumber: j.jobNumber, status: j.status, mileage: j.mileage,
+      packageName: j.packageName, customerRequest: j.customerRequest,
+      customer: { id: j.customer.id, name: j.customer.name, phone: j.customer.phone },
+      motorcycle: { brand: j.motorcycle.brand, model: j.motorcycle.model, plate: j.motorcycle.plate, year: j.motorcycle.year },
+      mechanic: j.mechanic,
+      createdAt: j.createdAt, startedAt: j.startedAt, readyAt: j.readyAt, completedAt: j.completedAt,
+      totalSen,
+      pendingApprovals: j.approvals.filter((a) => a.status === "PENDING").length,
+      isToday: today(j.createdAt),
     };
   }
 

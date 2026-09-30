@@ -33,6 +33,14 @@ export type JobRow = Prisma.ServiceJobGetPayload<{
 
 export interface IJobRepository {
   list(where?: Prisma.ServiceJobWhereInput, client?: DbLike): Promise<JobRow[]>;
+  /**
+   * 有界取数（skip/take）。列表面**必须**走这条，不要再用 list() ——
+   * 见 PrismaJobRepository.listPage 的注释（无界取数会让并发吞吐反向下降）。
+   */
+  listPage(params: { where?: Prisma.ServiceJobWhereInput; skip?: number; take?: number }, client?: DbLike): Promise<JobRow[]>;
+  /** 按状态分组计数（不取行）。 */
+  countsByStatus(where?: Prisma.ServiceJobWhereInput, client?: DbLike): Promise<{ status: string; _count: { _all: number } }[]>;
+  countWhere(where?: Prisma.ServiceJobWhereInput, client?: DbLike): Promise<number>;
   getById(id: string, client?: DbLike): Promise<JobFull | null>;
   getByNumber(jobNumber: string, client?: DbLike): Promise<JobRow | null>;
   create(data: Prisma.ServiceJobUncheckedCreateInput, client?: DbLike): Promise<JobFull>;

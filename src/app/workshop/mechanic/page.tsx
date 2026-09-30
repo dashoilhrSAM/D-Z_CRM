@@ -13,8 +13,14 @@ export default async function MechanicPage() {
   const lang = await getLang();
   const session = await getSessionUser();
   const isMechanic = session.kind === "staff" && session.role === "MECHANIC";
-  const board = await jobService.listBoard(scopedBranchId(session));
-  const active = board.jobs.filter((j) => ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"].includes(j.status));
+  // 只取「在进行中」的工单：状态过滤下推到数据库，并加上限。（原来是把含已完工在内的
+  // 全部工单读进内存再 filter —— 工单越多越慢。）300 是安全网，单个分店的未完工单不会接近它。
+  const board = await jobService.listBoardRows({
+    branchId: scopedBranchId(session),
+    statuses: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"],
+    pageSize: 300,
+  });
+  const active = board.jobs;
   // quotation status per active job (default allowed for no-quotation legacy jobs)
   const activeIds = active.map((j) => j.id);
   const quotes = activeIds.length ? await db.quotation.findMany({ where: { jobId: { in: activeIds } }, select: { jobId: true, status: true } }) : [];
