@@ -40,10 +40,14 @@ const EMPTY: AccrualSummary = { based: 0, legacy: 0, pending: 0, skipped: 0, tot
 export async function accrueForJob(
   tx: CommissionTx,
   jobId: string,
+  // 2026-09-30（P2）：租户成为必需参数。
+  // 原来按裸 id 查工单 —— 而佣金是**钱**：谁拿到一个 jobId 就能给它计提佣金。
+  // 现在查不到就与"工单不存在"同一条错误，不泄露别家是否真有这个工单。
+  organisationId: string,
   opts: { at?: Date; actorUserId?: string | null } = {},
 ): Promise<AccrualSummary> {
-  const job = await tx.serviceJob.findUnique({
-    where: { id: jobId },
+  const job = await tx.serviceJob.findFirst({
+    where: { id: jobId, organisationId },
     include: { items: true, parts: true, invoice: true, branch: true },
   });
   if (!job) throw new Error("Job not found: " + jobId);
@@ -53,7 +57,8 @@ export async function accrueForJob(
   const invoice = job.invoice;
   const earnedAt = opts.at ?? invoice.issuedAt ?? new Date();
   const windowKey = windowKeyOf(earnedAt);
-  const organisationId = job.branch.organisationId;
+  // 租户用**参数**（调用方已验证），不再从 job.branch 派生：本次查询就是按它过滤的，
+  // 两处若不一致反而说明数据有问题，但以过滤依据为准才不会自相矛盾。
 
   const [org, rulesRaw] = await Promise.all([
     tx.organisation.findUnique({ where: { id: organisationId }, select: { commissionOnGross: true, commissionOnParts: true } }),

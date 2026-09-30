@@ -100,7 +100,7 @@ afterAll(async () => {
 describe("开关打开时：零件照常计提", () => {
   it("零件行产生一条 BASE，金额 = 零件净额 × 5%，并带上 productId 与 jobPartId", async () => {
     const jobId = await makeJobWithPart(3500, 2, "P-ON-" + tag);
-    const summary = await accrueForJob(db, jobId);
+    const summary = await accrueForJob(db, jobId, orgId);
     expect(summary.based).toBe(1);
     expect(summary.totalSen).toBe(350); // 7000 × 5%
 
@@ -116,7 +116,7 @@ describe("开关打开时：零件照常计提", () => {
 
   it("重跑不产生第二条（零件行有自己的唯一键）", async () => {
     const jobId = jobIds[jobIds.length - 1];
-    const again = await accrueForJob(db, jobId);
+    const again = await accrueForJob(db, jobId, orgId);
     expect(again.skipped).toBe(1);
     expect(await db.commissionLedger.count({ where: { jobId } })).toBe(1);
   });
@@ -126,7 +126,7 @@ describe("开关关闭时：零件完全不计提（连 0 元痕迹都不留）"
   it("关掉后同一张零件单不再产生任何台账行", async () => {
     await db.organisation.update({ where: { id: orgId }, data: { commissionOnParts: false } });
     const jobId = await makeJobWithPart(4000, 1, "P-OFF-" + tag);
-    const summary = await accrueForJob(db, jobId);
+    const summary = await accrueForJob(db, jobId, orgId);
     expect(summary.based).toBe(0);
     expect(summary.legacy).toBe(0);
     expect(summary.pending).toBe(0);
@@ -136,7 +136,7 @@ describe("开关关闭时：零件完全不计提（连 0 元痕迹都不留）"
 
   it("重新打开后（同一张工单重跑）零件会被计提 —— 说明开关是读取时的判断，不是写入时的快照", async () => {
     const jobId = jobIds[jobIds.length - 1];
-    const summary = await accrueForJob(db, jobId);
+    const summary = await accrueForJob(db, jobId, orgId);
     expect(summary.based).toBe(1);
     expect(await db.commissionLedger.count({ where: { jobId } })).toBe(1);
   });

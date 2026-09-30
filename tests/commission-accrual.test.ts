@@ -75,7 +75,7 @@ afterAll(async () => {
 
 describe("完工计提（工单 A：有技师 + 免费行 + 发票折扣）", () => {
   it("按**客户实付**计提：折扣按行分摊后算 5%", async () => {
-    const first = await accrueForJob(db, jobIds[0]);
+    const first = await accrueForJob(db, jobIds[0], orgId);
     // 9000 − 900(折扣) = 8100 净额；5% = 405
     expect(first.based).toBe(1);
     expect(first.totalSen).toBe(405);
@@ -87,7 +87,7 @@ describe("完工计提（工单 A：有技师 + 免费行 + 发票折扣）", ()
 
   it("**重跑不产生第二条**：第二次全部撞唯一键，台账行数不变", async () => {
     const before = await db.commissionLedger.count({ where: { jobId: jobIds[0] } });
-    const second = await accrueForJob(db, jobIds[0]);
+    const second = await accrueForJob(db, jobIds[0], orgId);
     expect(second.based).toBe(0);
     expect(second.totalSen).toBe(0);
     expect(second.skipped).toBeGreaterThan(0);
@@ -107,14 +107,14 @@ describe("完工计提（工单 A：有技师 + 免费行 + 发票折扣）", ()
       data: { organisationId: orgId, jobNumber: "TEST-C-" + tag, branchId: (await db.branch.findFirst({ where: { organisationId: orgId } }))!.id, customerId: (await db.customer.findFirst({ where: { organisationId: orgId } }))!.id, motorcycleId: (await db.motorcycle.findFirst({ where: { plate: "T" + tag.toUpperCase().slice(0, 6) } }))!.id, mileage: 1 },
     });
     jobIds.push(job.id);
-    const res = await accrueForJob(db, job.id);
+    const res = await accrueForJob(db, job.id, orgId);
     expect(res).toEqual({ based: 0, legacy: 0, pending: 0, skipped: 0, totalSen: 0 });
   });
 });
 
 describe("未指派技师（工单 B）", () => {
   it("写 PENDING 行而不是静默算 0（钱少给了必须有人看得见）", async () => {
-    const res = await accrueForJob(db, jobIds[1]);
+    const res = await accrueForJob(db, jobIds[1], orgId);
     expect(res.pending).toBe(1);
     expect(res.based).toBe(0);
     const row = await db.commissionLedger.findFirst({ where: { jobId: jobIds[1], kind: "PENDING" } });

@@ -1,11 +1,12 @@
 import { PrismaClient, Prisma } from "@prisma/client";
+import { auditExtension, guardMode } from "@/lib/tenant/guard";
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient; logged?: boolean };
 
 /** 性能诊断开关（默认关）：见文件末尾的说明。 */
 const queryLogging = process.env.PRISMA_LOG_QUERIES === "1";
 
-export const db =
+const base =
   globalForPrisma.prisma ??
   new PrismaClient({
     transactionOptions: { maxWait: 10000, timeout: 60000 },
@@ -15,7 +16,23 @@ export const db =
     ...(queryLogging ? { log: [{ emit: "event", level: "query" }] as Prisma.LogDefinition[] } : {}),
   });
 
-if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = db;
+/**
+ * 租户守卫的**审计模式**（TENANT_GUARD=report|throw）。
+ *
+ * 为什么不直接上强制注入：那需要 175 个文件都换成"绑定租户的 client"，一次改完风险太大。
+ * 审计模式反过来用：**照常跑一遍已有的 913 条单测 + e2e**，把代码真实发出的
+ * 每条查询拿 scope-map 对一遍，于是"哪些查询没带租户条件"是**测出来的**，
+ * 而不是静态猜出来的。拿到清单后再按风险排序改。
+ *
+ *   TENANT_GUARD=report pnpm test        # 收集并汇总
+ *   TENANT_GUARD=throw  pnpm test        # 第一条就抛（用于盯着某个模块改）
+ *
+ * 默认关闭（生产不开）：它只加一次对象检查，但没必要在线上跑诊断。
+ */
+export const db: PrismaClient =
+  guardMode() === "off" ? base : (base.$extends(auditExtension()) as unknown as PrismaClient);
+
+if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = base;
 
 /**
  * 性能诊断：PRISMA_LOG_QUERIES=1 时把每条 SQL 的耗时打到 stdout。

@@ -90,10 +90,13 @@ export interface CompletionResult {
  * already-completed job is a no-op.
  */
 export class CompletionService {
-  async complete(jobId: string): Promise<CompletionResult> {
+  async complete(jobId: string, organisationId: string): Promise<CompletionResult> {
     const { result, notify } = await db.$transaction(async (tx) => {
-      const job = await tx.serviceJob.findUnique({
-        where: { id: jobId },
+      // 2026-09-30（P2）：按裸 id 查工单 → 带租户的 findFirst。
+      // 这是完工链路的入口（发票/收款/库存扣减/佣金/提醒全在它后面），
+      // 原先任何人拿到一个 jobId 就能推动**别家**的工单完工。
+      const job = await tx.serviceJob.findFirst({
+        where: { id: jobId, organisationId },
         include: {
           customer: true,
           motorcycle: true,
@@ -152,9 +155,8 @@ export class CompletionService {
 
       // 2. Build the invoice
       const year = new Date().getFullYear();
-      // 发票的租户取自车主（job.customer 已 include；Customer.organisationId 是必填的，
-      // 而 job.organisationId 这一列对迁移前的历史工单还是 NULL —— 不能用可空值写唯一键）。
-      const organisationId = job.customer.organisationId;
+      // 发票租户用**入口参数**：上面的 findFirst 就是按它过滤的，所以它与这一行的归属一致；
+      // 不再从 job.customer 派生（那会在历史工单上引入"customer 的租户 ≠ 工单的租户"的分歧）。
       const invoiceNumber = await nextInvoiceNumber(tx, year, organisationId);
       const subtotal = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
       const cogs = acceptedParts.reduce((s, p) => s + p.unitCostSen * p.quantity, 0);
@@ -198,7 +200,7 @@ export class CompletionService {
       // P2：佣金计提。必须在**同一个事务**里 —— 活干完、账单、佣金三者要么一起成立，
       // 要么都不成立，否则会出现"活干完了但佣金没计"的中间态（钱少给了还没人知道）。
       // 幂等由台账唯一键 (jobItemId, kind) 兜住：完工流程被重试时第二条插不进去。
-      const accrual = await accrueForJob(tx, job.id, { at: invoice.issuedAt });
+      const accrual = await accrueForJob(tx, job.id, organisationId, { at: invoice.issuedAt });
 
       // 3. Update motorcycle snapshot
       const nextMileage = job.mileage + DEFAULT_SERVICE_INTERVAL_KM;

@@ -4,6 +4,7 @@ import { customerService } from "@/modules/customers/service";
 import { Money } from "@/components/shared/money";
 import { fmtDate, fmtKM } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
+import { getSessionUser } from "@/lib/session-user";
 import { t } from "@/lib/i18n";
 import { PendingForm, ExportCsvButton } from "@/components/shared/search-form";
 import { Pagination } from "@/components/shared/pagination";
@@ -20,7 +21,10 @@ export default async function CustomersPage({ searchParams }: { searchParams: Pr
   // 再内存过滤 + 切片丢掉 99% —— 4202 个客户时单请求 323ms，四并发反而掉到 1.23 req/s
   // （每请求 CPU 放大 10 倍），并拖慢同一实例上的所有人。见 customerService.listSummaries。
   const PAGE_SIZE = 25;
-  const { items: pageItems, total, totalPages } = await customerService.listSummaries({ q, page, pageSize: PAGE_SIZE });
+  // 2026-09-30（P2）：租户来自会话 —— 这一层原先完全不收窄，列表页会列出**所有租户**的客户。
+  // 现在 listSummaries 把 organisationId 设为必需参数，漏了根本编译不过。
+  const session = await getSessionUser();
+  const { items: pageItems, total, totalPages } = await customerService.listSummaries({ organisationId: session.orgId, q, page, pageSize: PAGE_SIZE });
 
   return (
     <PageTransition>

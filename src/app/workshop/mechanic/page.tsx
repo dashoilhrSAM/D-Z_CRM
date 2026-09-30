@@ -16,6 +16,7 @@ export default async function MechanicPage() {
   // 只取「在进行中」的工单：状态过滤下推到数据库，并加上限。（原来是把含已完工在内的
   // 全部工单读进内存再 filter —— 工单越多越慢。）300 是安全网，单个分店的未完工单不会接近它。
   const board = await jobService.listBoardRows({
+    organisationId: session.orgId,
     branchId: scopedBranchId(session),
     statuses: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"],
     pageSize: 300,

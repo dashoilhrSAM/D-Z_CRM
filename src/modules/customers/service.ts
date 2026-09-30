@@ -19,11 +19,12 @@ export class CustomerService {
    * 边界与显示顺序不一致，所以只保留数据库那一处）。
    */
   async listSummaries(
-    opts: { q?: string; page?: number; pageSize?: number } = {},
+    // organisationId 是**必需**的：这一层原先完全不收窄，列表页会列出所有租户的客户
+    opts: { organisationId: string; q?: string; page?: number; pageSize?: number },
   ): Promise<{ items: CustomerSummary[]; total: number; totalPages: number }> {
     const pageSize = Math.max(1, opts.pageSize ?? 25);
     const page = Math.max(1, opts.page ?? 1);
-    const { rows, total } = await this.repo.listPageWith({ q: opts.q, skip: (page - 1) * pageSize, take: pageSize });
+    const { rows, total } = await this.repo.listPageWith({ organisationId: opts.organisationId, q: opts.q, skip: (page - 1) * pageSize, take: pageSize });
     const now = new Date();
     return {
       items: rows.map((c) => this.toSummary(c, now)),
@@ -66,8 +67,8 @@ export class CustomerService {
     };
   }
 
-  async getPassport(customerId: string) {
-    const c = await this.repo.getById(customerId);
+  async getPassport(customerId: string, organisationId: string) {
+    const c = await this.repo.getById(customerId, organisationId);
     if (!c) return null;
     const completed = c.jobs
       .filter((j) => j.status === "COMPLETED")
@@ -109,8 +110,8 @@ export class CustomerService {
     };
   }
 
-  async search(q: string) {
-    const rows = await this.repo.search(q);
+  async search(q: string, organisationId: string) {
+    const rows = await this.repo.search(q, organisationId);
     return rows.map((c) => ({
       id: c.id, name: c.name, phone: c.phone,
       motorcycles: c.motorcycles.map((m) => ({ id: m.id, brand: m.brand, model: m.model, plate: m.plate, year: m.year, currentMileage: m.currentMileage })),

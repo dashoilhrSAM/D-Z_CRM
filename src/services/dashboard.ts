@@ -7,10 +7,10 @@ import { db } from "@/lib/db";
 
 /** Workshop dashboard aggregates (§17). */
 export class DashboardService {
-  async get(branchId?: string) {
+  async get(branchId: string | undefined, organisationId: string) {
     const [board, finance, reminders, reviews, kpi] = await Promise.all([
       // 只要数字（jobsToday / 各状态计数）—— 不为此扫描整张工单表
-      jobService.boardSummary(branchId),
+      jobService.boardSummary(branchId, undefined, organisationId),
       this.todayFinance(branchId),
       crmService.reminders(),
       crmService.reviews(),

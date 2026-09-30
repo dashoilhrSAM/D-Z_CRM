@@ -21,10 +21,12 @@ import { t, tpl } from "@/lib/i18n";
 export default async function CustomerPassportPage({ params }: { params: Promise<{ id: string }> }) {
   const lang = await getLang();
   const { id } = await params;
-  const passport = await customerService.getPassport(id);
+  // 2026-09-30（P2）：先取会话再查客户 —— getPassport 现在要求租户，
+  // 而它原先按 cuid 直查，任何租户的员工改一下 URL 就能读别家客户档案（含内部备注）。
+  const session = await getSessionUser();
+  const passport = await customerService.getPassport(id, session.orgId);
   if (!passport) notFound();
   const { customer, motorcycles, stats, jobs, oilHistory, tyres, messages, reminders } = passport;
-  const session = await getSessionUser();
   const [timeline, loyalty, consent, documents, referralCount] = await Promise.all([
     customerTimeline(id),
     db.loyaltyAccount.findUnique({ where: { customerId: id }, include: { tier: true } }),

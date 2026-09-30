@@ -97,7 +97,7 @@ afterAll(async () => {
 
 describe("完工流程（工单 A：有技师 + 免费行）", () => {
   it("走完真实完工流程后：发票建立、台账有且只有一条 BASE、金额与返回一致", async () => {
-    const result = await completionService.complete(jobIds[0]);
+    const result = await completionService.complete(jobIds[0], orgId);
 
     // 发票（完工本来就该开的）
     expect(result.invoiceNumber).toMatch(/^DZ-\d{4}-\d{5}$/);
@@ -115,7 +115,7 @@ describe("完工流程（工单 A：有技师 + 免费行）", () => {
 
   it("**再完工一次**（幂等路径）：不产生第二条台账，返回的金额读自台账而不是重算", async () => {
     const before = await db.commissionLedger.count({ where: { jobId: jobIds[0] } });
-    const again = await completionService.complete(jobIds[0]);
+    const again = await completionService.complete(jobIds[0], orgId);
     const after = await db.commissionLedger.count({ where: { jobId: jobIds[0] } });
     expect(after).toBe(before);
     expect(again.commissionAccruedSen).toBe(450);
@@ -124,7 +124,7 @@ describe("完工流程（工单 A：有技师 + 免费行）", () => {
 
 describe("完工流程（工单 B：没有技师）", () => {
   it("写 PENDING 行（金额 0 + 原因），不静默算 0", async () => {
-    const result = await completionService.complete(jobIds[1]);
+    const result = await completionService.complete(jobIds[1], orgId);
     expect(result.commissionAccruedSen).toBe(0);
     const rows = await db.commissionLedger.findMany({ where: { jobId: jobIds[1] } });
     expect(rows).toHaveLength(1);
