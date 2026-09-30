@@ -21,6 +21,8 @@ export default async function WorkshopLayout({ children }: { children: React.Rea
 
   // —— Workshop OS 访问守卫：仅员工且非 MECHANIC ——
   if (!session.authenticated) redirect("/login");
+  // 多家店都有身份却没选店 → 先选（**不能**替他挑一家；P3b 第 4 步）
+  if (session.needsWorkshopChoice) redirect("/select-workshop");
   if (session.kind === "customer") redirect("/rider/home"); // rider 不能进 workshop OS（电脑版也不行）
   if (session.role === "MECHANIC") redirect("/mechanic-app"); // mechanic 只能 app
 

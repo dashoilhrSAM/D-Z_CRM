@@ -20,5 +20,5 @@ export async function getRiderCustomer() {
   const identity = await readRequestIdentity();
   if (!identity) return null;
   const ref = await requestPersonRef(identity.id);
-  return loadCustomerForRefWith(ref, identity.id, RIDER_INCLUDE);
+  return loadCustomerForRefWith(ref, RIDER_INCLUDE);
 }

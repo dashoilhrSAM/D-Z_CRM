@@ -1,16 +1,16 @@
-// P3b 第 3 步：请求级身份解析链（`requestPersonRef`）。
+// P3b 第 2+3 步：请求级身份解析链（`requestPersonRef`）。
 //
 // 要证明的是**顺序与边界**，不是"能查到人"：
-//   ① 有签名 cookie → 只认那家店；
-//   ② **cookie 指向的店里没有他 → 就是"没有身份"，绝不回退到别家店**
-//      （把"你选的那家没有你"和"没选、系统替你猜一家"混为一谈，正是串店的入口）；
-//   ③ 没有 cookie → 唯一所属（今天 authId 全局唯一，单店体验不变）；
-//   ④ 同一个人两家店各一条身份时，cookie 指哪家就取哪家的那条**行**。
+//   ① 恰好一条身份 → 唯一所属（单店体验不变）；
+//   ② **多家店都有身份 → 必须让用户选，绝不静默挑一个**（第 4 步的选择器靠这条）；
+//   ③ 指定了门店（签名 cookie）→ 只认那一家；那家没有他 → 就是"没有身份"，**不回退**；
+//   ④ 取行函数在 choice/none 时必须给 null —— 一旦这里能拿到某一条，就是串店。
 //
-// 第 ④ 条今天在 User/Customer 上还做不到（两个 authId 列都还是全局唯一），
-// 但 AuthLink 已经能表达它 —— 这也正是第 2 步要松开那两个键的理由。
+// ⚠️ 第 ② 条在第 2 步之前**不可能发生**（两个 authId 列都是全局唯一）。
+// 现在 `User.authId` / `Customer.authId` 已是**租户内唯一**，所以同一个 authId
+// 可以在两家店各有一条业务身份 —— 这正是"每个 workshop 独立、customer 不共用"的前提。
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { db } from "@/lib/db";
 import { requestPersonRefFor, loadStaffForRef, loadCustomerForRef } from "@/lib/tenant/resolve";
@@ -18,10 +18,14 @@ import { requestPersonRefFor, loadStaffForRef, loadCustomerForRef } from "@/lib/
 const ORG_A = "test_resolve_org_a";
 const ORG_B = "test_resolve_org_b";
 const ORG_C = "test_resolve_org_c";
-const AUTH_ID = "test-resolve-shared-auth";
+/** 一个人两家店（A 店员工 + B 店骑手）—— 第 2 步之后才可能存在 */
+const MULTI_AUTH = "test-resolve-multi-auth";
+/** 只有一条身份 —— 第 ① 级"唯一所属" */
+const SINGLE_AUTH = "test-resolve-single-auth";
 const ORPHAN_AUTH = "test-resolve-orphan-auth";
 
 let userA = "";
+let userS = "";
 let custB = "";
 
 const TENANT_A = { organisationId: ORG_A, slug: "resolve-a" };
@@ -41,65 +45,78 @@ beforeAll(async () => {
   await db.organisation.create({ data: { id: ORG_A, name: "Resolve A", slug: "resolve-a-" + tag } });
   await db.organisation.create({ data: { id: ORG_B, name: "Resolve B", slug: "resolve-b-" + tag } });
   await db.organisation.create({ data: { id: ORG_C, name: "Resolve C", slug: "resolve-c-" + tag } });
-  // 同一个人：A 店是员工、B 店是骑手（一个 auth 账号，两条业务身份）
-  userA = (await db.user.create({ data: { organisationId: ORG_A, name: "Resolve Staff", email: "resolve." + tag + "@example.com", role: "MECHANIC", authId: AUTH_ID } })).id;
-  custB = (await db.customer.create({ data: { organisationId: ORG_B, name: "Resolve Rider", authId: AUTH_ID } })).id;
-  await db.authLink.create({ data: { authId: AUTH_ID, organisationId: ORG_A, kind: "STAFF", userId: userA } });
-  await db.authLink.create({ data: { authId: AUTH_ID, organisationId: ORG_B, kind: "CUSTOMER", customerId: custB } });
+  userA = (await db.user.create({ data: { organisationId: ORG_A, name: "Multi @ A", email: "multi.a." + tag + "@example.com", role: "MECHANIC", authId: MULTI_AUTH } })).id;
+  userS = (await db.user.create({ data: { organisationId: ORG_A, name: "Single @ A", email: "single." + tag + "@example.com", role: "MECHANIC", authId: SINGLE_AUTH } })).id;
+  custB = (await db.customer.create({ data: { organisationId: ORG_B, name: "Multi @ B", authId: MULTI_AUTH } })).id;
+  await db.authLink.create({ data: { authId: MULTI_AUTH, organisationId: ORG_A, kind: "STAFF", userId: userA } });
+  await db.authLink.create({ data: { authId: MULTI_AUTH, organisationId: ORG_B, kind: "CUSTOMER", customerId: custB } });
+  await db.authLink.create({ data: { authId: SINGLE_AUTH, organisationId: ORG_A, kind: "STAFF", userId: userS } });
 });
 
 afterAll(cleanup);
 
-describe("① 没有指定门店 → 唯一所属（单店体验不变）", () => {
-  it("无 cookie（tenant=null）→ source=unique", async () => {
-    expect(await requestPersonRefFor(AUTH_ID, null)).toEqual({ source: "unique" });
+describe("① 恰好一条身份 → 唯一所属（单店体验不变）", () => {
+  it("无 cookie → source=unique，且 identity 就是那一条", async () => {
+    const ref = await requestPersonRefFor(SINGLE_AUTH, null);
+    expect(ref.source).toBe("unique");
+    expect(ref.source === "unique" && ref.identity.organisationId).toBe(ORG_A);
   });
 
-  it("authId 为空也不炸，走 unique", async () => {
-    expect(await requestPersonRefFor("", TENANT_A)).toEqual({ source: "unique" });
+  it("取行拿到那一条", async () => {
+    const ref = await requestPersonRefFor(SINGLE_AUTH, null);
+    expect((await loadStaffForRef(ref))?.id).toBe(userS);
+    expect(await loadCustomerForRef(ref)).toBeNull();
   });
 
-  it("unique 分支按 authId 取行（= 今天的行为）", async () => {
-    const ref = await requestPersonRefFor(AUTH_ID, null);
-    expect((await loadStaffForRef(ref, AUTH_ID))?.id).toBe(userA);
-    expect((await loadCustomerForRef(ref, AUTH_ID))?.id).toBe(custB);
+  it("authId 为空 → none（不炸、也不猜）", async () => {
+    expect(await requestPersonRefFor("", TENANT_A)).toEqual({ source: "none" });
   });
 });
 
-describe("② 指定了门店 → 只认那一家", () => {
-  it("cookie 指向 A 店 → 拿到 A 店那条员工行", async () => {
-    const ref = await requestPersonRefFor(AUTH_ID, TENANT_A);
-    expect(ref.source).toBe("tenant");
-    expect((await loadStaffForRef(ref, AUTH_ID))?.id).toBe(userA);
-    // kind 不匹配就叫没有 —— 不许"顺手"把他 B 店的骑手身份给出来
-    expect(await loadCustomerForRef(ref, AUTH_ID)).toBeNull();
+describe("② 多家店都有身份 → 必须让用户选", () => {
+  it("无 cookie → source=choice，候选恰好两条（**不许静默挑一个**）", async () => {
+    const ref = await requestPersonRefFor(MULTI_AUTH, null);
+    expect(ref.source).toBe("choice");
+    if (ref.source !== "choice") throw new Error("unreachable");
+    expect(ref.candidates.map((c) => c.organisationId).sort()).toEqual([ORG_A, ORG_B].sort());
+    expect(ref.candidates.map((c) => c.kind).sort()).toEqual(["CUSTOMER", "STAFF"]);
   });
 
-  it("cookie 指向 B 店 → 拿到 B 店那条骑手行（同一 authId，两条身份各归各店）", async () => {
-    const ref = await requestPersonRefFor(AUTH_ID, TENANT_B);
-    expect((await loadCustomerForRef(ref, AUTH_ID))?.id).toBe(custB);
-    expect(await loadStaffForRef(ref, AUTH_ID)).toBeNull();
+  it("**choice 时两个取行函数都给 null** —— 静默挑一条就是串店", async () => {
+    const ref = await requestPersonRefFor(MULTI_AUTH, null);
+    expect(await loadStaffForRef(ref)).toBeNull();
+    expect(await loadCustomerForRef(ref)).toBeNull();
+  });
+});
+
+describe("③ 指定了门店 → 只认那一家", () => {
+  it("cookie 指向 A 店 → A 店那条员工行；kind 不匹配的不给", async () => {
+    const ref = await requestPersonRefFor(MULTI_AUTH, TENANT_A);
+    expect(ref.source).toBe("tenant");
+    expect((await loadStaffForRef(ref))?.id).toBe(userA);
+    expect(await loadCustomerForRef(ref)).toBeNull();
+  });
+
+  it("cookie 指向 B 店 → B 店那条骑手行（同一 authId，两条身份各归各店）", async () => {
+    const ref = await requestPersonRefFor(MULTI_AUTH, TENANT_B);
+    expect((await loadCustomerForRef(ref))?.id).toBe(custB);
+    expect(await loadStaffForRef(ref)).toBeNull();
   });
 
   it("**cookie 指向 C 店（他在那儿没有身份）→ identity=null，绝不回退到别家店**", async () => {
-    const ref = await requestPersonRefFor(AUTH_ID, TENANT_C);
+    const ref = await requestPersonRefFor(MULTI_AUTH, TENANT_C);
     expect(ref).toEqual({ source: "tenant", organisationId: ORG_C, identity: null });
-    // 关键：两个取行函数都必须给 null —— 一旦这里能拿到 A/B 的行，就是串店
-    expect(await loadStaffForRef(ref, AUTH_ID)).toBeNull();
-    expect(await loadCustomerForRef(ref, AUTH_ID)).toBeNull();
+    expect(await loadStaffForRef(ref)).toBeNull();
+    expect(await loadCustomerForRef(ref)).toBeNull();
   });
 
-  it("认证了但完全没有业务身份 → 也是 identity=null（不是报错，也不是猜一家）", async () => {
-    const ref = await requestPersonRefFor(ORPHAN_AUTH, TENANT_A);
-    expect(ref).toEqual({ source: "tenant", organisationId: ORG_A, identity: null });
-    expect((await requestPersonRefFor(ORPHAN_AUTH, null)).source).toBe("unique");
+  it("认证了但完全没有业务身份 → none / identity=null（不是报错，也不是猜一家）", async () => {
+    expect(await requestPersonRefFor(ORPHAN_AUTH, TENANT_A)).toEqual({ source: "tenant", organisationId: ORG_A, identity: null });
+    expect((await requestPersonRefFor(ORPHAN_AUTH, null)).source).toBe("none");
   });
 });
 
-describe("③ 结构：authId → 业务行 的解析只允许出现在解析链里", () => {
-  // 五处 `findUnique({ where: { authId } })` 是 P3b 第 2 步"松唯一键"时会**编译失败**的地方。
-  // 第 3 步把它们收进了 resolve.ts —— 之后再有人随手写一条，多店时就会绕过解析链
-  // （cookie 选了 A 店，却按全局唯一键拿到 B 店那条），而且第 2 步会到处报错。
+describe("④ 结构：schema 与解析链的一致性", () => {
   const root = process.cwd();
   const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
@@ -112,22 +129,29 @@ describe("③ 结构：authId → 业务行 的解析只允许出现在解析链
     return out;
   }
 
-  /**
-   * 允许存在的例外：问的都**不是**"本次请求该按哪条业务身份办事"。
-   * 带上 `max` 是为了别把白名单变成"这个文件以后随便写" —— 多一处就红。
-   */
-  const ALLOWED: Record<string, { max: number; why: string }> = {
-    "src/lib/auth/phone-identity.ts": { max: 1, why: "平台级手机身份检查（问的是号码挂在哪个 auth 账号上）" },
-    "src/actions/auth-supabase.ts": { max: 1, why: "注册流程那一处：门店已由 resolveEntryTenant 显式定好，查询自带 organisationId" },
-    "src/actions/workshop.ts": { max: 1, why: "重置骑手密码前的安全检查（问的是这个登录是否同时是员工账号，跨店正是要拦的）" },
-  };
-
-  it("护栏仍在：唯一所属的 `{ authId }` where 只有解析链里那两处", () => {
-    const src = stripComments(readFileSync(path.join(root, "src/lib/tenant/resolve.ts"), "utf8"));
-    // 这两处就是"松唯一键时会编译失败"的地方（Prisma 只允许对唯一字段用 where-unique）
-    const guards = (src.match(/return \{ authId \};/g) ?? []).length;
-    expect(guards, "resolve.ts 里的唯一所属护栏不见了 —— 第 2 步的编译期提醒会跟着消失").toBe(2);
+  it("**双 schema 都改了**：authId 是租户内唯一、不再是全局唯一（本项目最常踩的「只改一个 schema」）", () => {
+    for (const file of ["prisma/schema.prisma", "prisma/schema.pg.prisma"]) {
+      const src = readFileSync(path.join(root, file), "utf8");
+      expect(src, file + " 的 authId 仍是全局唯一").not.toMatch(/authId\s+String\?\s+@unique/);
+      expect(src, file + " 缺 @@unique([organisationId, authId])").toContain("@@unique([organisationId, authId])");
+      expect(src, file + " 缺手机匹配索引").toContain("@@index([organisationId, phone])");
+    }
   });
+
+  it("有对应的迁移文件（改 schema 必须落到迁移上，否则本地库与 schema 会漂）", () => {
+    const rel = "prisma/migrations/20260930234000_p3b_tenant_scoped_authid/migration.sql";
+    expect(existsSync(path.join(root, rel)), "缺迁移文件 —— 本地库不会跟着变").toBe(true);
+    const sql = readFileSync(path.join(root, rel), "utf8");
+    expect(sql).toContain('CREATE UNIQUE INDEX "User_organisationId_authId_key"');
+    expect(sql).toContain('DROP INDEX "User_authId_key"');
+  });
+
+  /** 允许存在的例外：问的都**不是**"本次请求该按哪条业务身份办事"。 */
+  const ALLOWED: Record<string, { max: number; why: string }> = {
+    "src/lib/auth/phone-identity.ts": { max: 1, why: "平台级手机身份检查（问的是号码挂在哪个 auth 账号上，已带租户）" },
+    "src/actions/auth-supabase.ts": { max: 1, why: "注册流程那一处：门店已由 resolveEntryTenant 显式定好，查询自带 organisationId" },
+    "src/actions/workshop.ts": { max: 1, why: "重置骑手密码前的安全检查（问的是这个登录是否同时是员工账号）" },
+  };
 
   it("其余地方按 authId 取业务行必须先过解析链（新文件要写就得进白名单并说明理由 + 数量上限）", () => {
     const offenders: string[] = [];
@@ -144,10 +168,5 @@ describe("③ 结构：authId → 业务行 的解析只允许出现在解析链
     }
     expect(total, "一处都没匹配到 —— 正则失效，守卫形同虚设").toBeGreaterThanOrEqual(1);
     expect(offenders).toEqual([]);
-  });
-
-  it("注册流程（门店已显式定好）按 authId 查档案时带上了租户", () => {
-    const src = stripComments(readFileSync(path.join(root, "src/actions/auth-supabase.ts"), "utf8"));
-    expect(src).toContain("findFirst({ where: { authId: user.id, organisationId } })");
   });
 });

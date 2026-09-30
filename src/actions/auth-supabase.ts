@@ -28,7 +28,7 @@ export async function injectBizClaims(authUserId: string) {
   // 登录时正好是最需要它的时候 —— 多店的人在这里选店，claims 必须按他选的那家签发。
   const ref = await requestPersonRef(authUserId);
   // 先查员工，再查顾客（rider）
-  const staff = await loadStaffForRef(ref, authUserId);
+  const staff = await loadStaffForRef(ref);
   if (staff) {
     const claims: BizClaims = {
       orgId: staff.organisationId,
@@ -41,7 +41,7 @@ export async function injectBizClaims(authUserId: string) {
     if (error) return { ok: false as const, error: error.message };
     return { ok: true as const, claims };
   }
-  const rider = await loadCustomerForRef(ref, authUserId);
+  const rider = await loadCustomerForRef(ref);
   if (rider) {
     const claims: BizClaims = {
       orgId: rider.organisationId,
@@ -327,7 +327,7 @@ export async function requestRiderPhoneOtp(input: {
   if (!rate.allow) return { ok: false as const, error: rate.message };
 
   // 发码之前把号码挂到**他已有的账号**上——这正是"已有邮箱账号的客户也能短信登录"的关键一步。
-  const prepared = await preparePhoneIdentity(e164, existing ? { id: existing.id, authId: existing.authId } : null);
+  const prepared = await preparePhoneIdentity(e164, existing ? { id: existing.id, authId: existing.authId } : null, tenant.organisationId);
   if (!prepared.ok) {
     // 拒绝也要落痕（教训：不留痕的失败，线上就只剩第三方的笼统文案）。
     await db.otpAttempt.create({

@@ -149,7 +149,7 @@ export async function verifyRiderPhoneChange(input: {
   if (error) return { ok: false as const, error: error.message };
 
   // 号码归属：孤儿（上面临时建出来的那个）会被清掉，别人的账号绝不触碰。
-  const prepared = await preparePhoneIdentity(e164, { id: customer.id, authId: customer.authId });
+  const prepared = await preparePhoneIdentity(e164, { id: customer.id, authId: customer.authId }, customer.organisationId);
   if (!prepared.ok) return { ok: false as const, error: prepared.error };
   if (prepared.shouldCreateUser) {
     // 兜底：走到这里说明他的账号在那个号码上不存在，宁可拒绝也不要建出第二个身份。

@@ -342,7 +342,7 @@ model User {
   role           Role     @default(MECHANIC)
   active         Boolean  @default(true)
   // SUPABASE AUTH: auth.users.id (production login); null = demo-only user
-  authId         String?  @unique
+  authId         String?
   // AUTH: login credentials (legacy prototype auth, superseded by Supabase Auth)
   passwordHash   String?
   lastLoginAt    DateTime?
@@ -366,6 +366,11 @@ model User {
   /** 个人提成算法 { commissionType, commissionValue, addonBonusSen? } — null 用 org 默认 */
   commissionRules String?
   @@unique([organisationId, email])
+  // P3b 第 2 步：authId 从**全局唯一**降为**租户内唯一** —— 同一个自然人可以在两家店
+  // 各有一个业务身份（"跨店共享的是登录凭证，不是客户数据"）。真正的"一人一店一条"
+  // 由 AuthLink 的 @@unique([authId, organisationId]) 守。
+  // 注意 NULL：SQLite/PG 的唯一索引都不约束 NULL 行，所以"还没有登录"的档案可以有任意多条。
+  @@unique([organisationId, authId])
 }
 
 // ---------- Mechanic attendance (check in / out) ----------
@@ -510,7 +515,7 @@ model Customer {
   phone          String?
   email          String?
   // SUPABASE AUTH: auth.users.id (rider production login); null = demo customer
-  authId         String?  @unique
+  authId         String?
   qrToken        String?  @unique // QR-002: unguessable scan token (created on signup)
   gender         String?
   joinedAt       DateTime @default(now())
@@ -539,6 +544,14 @@ model Customer {
   serviceHistory ServiceHistory[]
   referralsMade  Referral[]     @relation("ReferralsMade")
   referralsReceived Referral[]   @relation("ReferralsReceived")
+
+  // P3b 第 2 步：authId 从**全局唯一**降为**租户内唯一** —— 同一个自然人可以在两家店
+  // 各有一个业务身份（"跨店共享的是登录凭证，不是客户数据"）。真正的"一人一店一条"
+  // 由 AuthLink 的 @@unique([authId, organisationId]) 守。
+  // 注意 NULL：SQLite/PG 的唯一索引都不约束 NULL 行，所以"还没有登录"的档案可以有任意多条。
+  @@unique([organisationId, authId])
+  /// P3b 第 2 步：租户内手机匹配（customersByPhone(organisationId, phone)）要走索引
+  @@index([organisationId, phone])
 }
 
 model CustomerAuthProfile {

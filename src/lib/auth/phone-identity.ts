@@ -109,7 +109,7 @@ export async function authUserByMsisdn(
  * 让这个号码能在 Supabase 里登录进**客户已有的账号**。
  *
  * 为什么需要它：Supabase 的手机验证码会给新号码建独立身份；对已有账号的客户，那等于同一个人两个账号，
- * 而 Customer.authId 只能指向一个。做法是先把号码挂到他账号上
+ * 而一个 Supabase 账号只该有一条登录凭证。做法是先把号码挂到他账号上
  * （updateUserById + phone_confirm:true，**不会发短信**）。
  *
  * 判定规则全在 lib/auth/phone-login.ts 的 planPhoneLogin（纯函数、有单测）；这里只执行：
@@ -120,13 +120,18 @@ export async function authUserByMsisdn(
 export async function preparePhoneIdentity(
   e164: string,
   existing: { id: string; authId: string | null } | null,
+  organisationId: string,
 ) {
   const admin = await createAdminClient();
   const found = await authUserByMsisdn(admin, e164);
   if (found.error) return { ok: false as const, error: found.error };
   const holder = found.user;
+  // ⚠️ 必须问**本店**："这个号码的持有账号，在本店是不是已经挂在另一条客户档案上"。
+  // 2026-09-30（P3b 第 2 步）：Customer.authId 已经是租户内唯一，同一个人在两家店
+  // 各有一条客户档案是**正常**的 —— 不带租户就会把"别家店那条"误判成冲突，
+  // 或者反过来漏判（多条时 findFirst 挑到哪条全看运气）。
   const holderLinked = holder
-    ? await db.customer.findUnique({ where: { authId: holder.id }, select: { id: true } })
+    ? await db.customer.findFirst({ where: { authId: holder.id, organisationId }, select: { id: true } })
     : null;
   const plan = planPhoneLogin({
     customerAuthId: existing?.authId ?? null,
