@@ -47,13 +47,32 @@ branch: feat/tenancy-tenant-scoped-authid
   且第 3 步前置已把接线补进业务代码 —— 但部署前仍要再查一次。
 - **部署顺序（关键）**：必须先在生产执行 DDL，**再**合并。否则 Vercel 构建期的 schema 同步
   看到 `DROP INDEX` 会 exit 1，部署被卡住（生产仍跑旧版本，不是事故，但白跑一轮）。
+  ⚠️ **Vercel preview 反而会通过**（preview 只检查不动手），所以顺序错了要等合并到 main 才暴露。
 
 ## 交接说明
 
-### 生产发布清单（按顺序）
+### ✅ 生产已执行（2026-09-30，按下面的清单走完）
+
+| 步骤 | 结果 |
+|---|---|
+| 备份 | `docs/backups/prod-backup-2026-09-30T08-12-12-200Z.sql`（84 张表 / **1900 行** / 0.83 MB，脚本自复验：每表都有 DELETE 且 INSERT 条数与实际行数一致）+ 索引清单 `…-indexes.txt` |
+| 回滚留档 | `docs/backups/p3b-authid-rollback-2026-09-30T08-12-37-523Z.sql`（含"有跨店同 authId 就回不去"的告警） |
+| 执行 | `node scripts/apply-prod-authid-tenant-scope.mjs --apply --backup-taken` → 提交 + **复验通过** |
+| 幂等复跑 | 第二次输出「已经是目标状态，无需改动」 |
+| schema 漂移 | `DRIFT_CHECK_URL=… node scripts/sync-prod-schema.mjs --check` → **schema and database agree** |
+| AuthLink 漂移 | 员工 **0** / 骑手 **0**（新解析链靠它） |
+| 旧查询兼容性 | 抽一个真实 authId 对照：旧写法（全局唯一）与新写法（带租户）命中**同一行**，行数都是 1 |
+| 数据完整性 | User 20 / Customer 4 / AuthLink 24 / ServiceJob 35 —— 与备份时一致 |
+| 生产 HTTP | `/` 200 ｜ `/login` 200 ｜ `/qr/rider/x` 307 |
+
+**为什么旧代码在索引变更后仍然可用**：`findUnique({ where: { authId } })` 的"唯一"是
+**Prisma schema 层面**的要求（编译期），运行时发出的就是一条 `WHERE "authId" = $1` ——
+不依赖数据库上那个唯一索引存在。上面第 7 行是实测证据，不是推断。
+
+### 原始清单（留档，以后同类改动照这个走）
 
 ```bash
-# 0) 备份（必做；没有备份脚本，用 Supabase 控制台或 pg_dump）
+# 0) 备份（本次补了脚本：node scripts/backup-prod.mjs → docs/backups/，自复验行数）
 # 1) 演练：看清楚要动什么、重复键检查是否为 0
 set -a; . ./.env; set +a
 node scripts/apply-prod-authid-tenant-scope.mjs

@@ -18,6 +18,8 @@
  * 本机 Prisma client 是 SQLite 生成的，连不上 PG —— 所以这里一律用原生 pg。
  */
 import { Client } from "pg";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 
 const APPLY = process.argv.includes("--apply");
 const BACKUP_TAKEN = process.argv.includes("--backup-taken");
@@ -49,6 +51,22 @@ const DUPLICATE_CHECKS = [
 
 const EXPECTED = ["Customer_organisationId_authId_key", "Customer_organisationId_phone_idx", "User_organisationId_authId_key"];
 const FORBIDDEN = ["Customer_authId_key", "User_authId_key"];
+
+/**
+ * 回滚（这个变更的逆操作）。执行前会连同运行日志一起打印出来。
+ *
+ * ⚠️ **只有"还没有出现跨店同 authId"时才回滚得回去**：一旦同一个 authId 在两家店
+ * 各有一条业务身份，重建全局唯一索引会直接失败。先查：
+ *   select "authId", count(*) from "User" where "authId" is not null group by 1 having count(*) > 1;
+ *   select "authId", count(*) from "Customer" where "authId" is not null group by 1 having count(*) > 1;
+ */
+const ROLLBACK = [
+  `DROP INDEX IF EXISTS "User_organisationId_authId_key"`,
+  `DROP INDEX IF EXISTS "Customer_organisationId_authId_key"`,
+  `DROP INDEX IF EXISTS "Customer_organisationId_phone_idx"`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "User_authId_key" ON "User"("authId")`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS "Customer_authId_key" ON "Customer"("authId")`,
+];
 
 async function indexNames(c) {
   const r = await c.query(
@@ -95,11 +113,29 @@ for (const t of ["User", "Customer"]) {
 console.log("\n[p3b-ddl] 将要执行：");
 for (const s of PLAN) console.log("  · " + s.what + "\n    " + s.sql);
 
+console.log("\n[p3b-ddl] 回滚语句（逆操作，留档；改了数据之后可能已经回不去，见脚本里 ROLLBACK 的说明）：");
+for (const s of ROLLBACK) console.log("    " + s + ";");
+
 if (!APPLY) {
   console.log("\n[p3b-ddl] （演练模式：什么也没写。确认无误后加 --apply --backup-taken）");
   await c.end();
   process.exit(0);
 }
+
+// 回滚脚本落盘（与备份放一起）：出事时不用现场回忆
+const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+const rbPath = path.join("docs/backups", `p3b-authid-rollback-${stamp}.sql`);
+mkdirSync("docs/backups", { recursive: true });
+writeFileSync(
+  rbPath,
+  "-- P3b 第 2 步回滚（authId 租户内唯一 → 全局唯一）\n" +
+    "-- ⚠️ 先确认没有跨店同 authId，否则重建全局唯一索引会失败：\n" +
+    "--   select \"authId\", count(*) from \"User\" where \"authId\" is not null group by 1 having count(*) > 1;\n" +
+    "--   select \"authId\", count(*) from \"Customer\" where \"authId\" is not null group by 1 having count(*) > 1;\n\n" +
+    ROLLBACK.map((s) => s + ";").join("\n") + "\n",
+  "utf8",
+);
+console.log("[p3b-ddl] 回滚脚本已写入:", rbPath);
 
 await c.query("BEGIN");
 try {
