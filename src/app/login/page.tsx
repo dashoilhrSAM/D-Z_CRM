@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { LoginShell } from "@/components/login/login-shell";
 import { signInWithPassword, signInWithOtp, verifyOtp } from "@/actions/auth-supabase";
+import { safeNextPath } from "@/lib/auth/next-path";
 import { useLang } from "@/components/shared/language-context";
 import { t, tpl } from "@/lib/i18n";
 
@@ -12,6 +13,10 @@ type LoginMode = "password" | "otp";
 export default function LoginPage() {
   const router = useRouter();
   const lang = useLang();
+  // `?next=` 回跳：门店链接 `/t/<slug>`、QR 落地页都靠它把用户送回原处。
+  // 必须过 safeNextPath —— 直接 push 就是开放重定向（见 lib/auth/next-path.ts）。
+  const searchParams = useSearchParams();
+  const nextPath = safeNextPath(searchParams.get("next"), "");
   const [loginMode, setLoginMode] = useState<LoginMode>("password");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,7 +32,7 @@ export default function LoginPage() {
     const res = await signInWithPassword({ email, password });
     setBusy(false);
     if (!res.ok) { setError(res.error); return; }
-    router.push(res.role === "MECHANIC" ? "/mechanic-app" : "/workshop/dashboard");
+    router.push(nextPath || (res.role === "MECHANIC" ? "/mechanic-app" : "/workshop/dashboard"));
     router.refresh();
   }
 
@@ -47,7 +52,7 @@ export default function LoginPage() {
     const res = await verifyOtp({ email, token: otpToken });
     setBusy(false);
     if (!res.ok) { setError(res.error); return; }
-    router.push("/rider/home");
+    router.push(nextPath || "/rider/home");
     router.refresh();
   }
 

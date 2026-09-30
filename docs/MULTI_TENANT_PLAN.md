@@ -655,19 +655,21 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
    测试：`tests/tenant-resolve.test.ts`（10 条，含"cookie 指向的店没有他 → 不许翻别家店"、
    "同一 authId 两家店各取各店那条行"、以及"别处不许绕过解析链"的结构守卫 + 正向对照）。
    详见 `docs/changes/2026-09-30-p3b-resolve-chain.md`。
-4. 🟡 **部分完成（2026-09-30）—— 多店选择器已落地，`/t/<slug>` 入口页还差**。
-   ✅ 新增 `/select-workshop`（页面 + action）：三个端（workshop / rider / mechanic-app）的布局
-   在 `needsWorkshopChoice` 为真时把人送过去；action **只能**从
-   `identitiesForAuthUser(authId)` 的候选里选（不变式变成代码）。
-   ✅ 解析链第 ③ 级已换成候选链（0 条 = 没身份、1 条 = 唯一所属、≥2 条 = 送选择器），
-   与第 2 步同一批完成 —— 因为松键之后"多条"才真的可能发生。
-   ⏳ 还差 **`/t/<slug>` 入口页**：`resolveEntryTenant({ slug })` 从第 1 步起就能收 slug，
-   但还没有路由接上；今天进店的显式来源只有签名 cookie。
-   ⏳ 第 5 步的两项仍未做：删死代码 `dz_org`；`User.email` 的复合唯一**生产上已存在**
-   （`User_organisationId_email_key`），但是否已写进 schema 待核。
+4. ✅ **已完成（2026-09-30）—— 入口与选择器**。
+   - **多店选择器**：`/select-workshop`（页面 + action）；三个端（workshop / rider /
+     mechanic-app）的布局在 `needsWorkshopChoice` 为真时把人送过去；action **只能**从
+     `identitiesForAuthUser(authId)` 的候选里选（不变式变成代码）。
+   - **解析链第 ③ 级换成候选链**（0 条 = 没身份、1 条 = 唯一所属、≥2 条 = 送选择器），
+     与第 2 步同一批完成 —— 因为松键之后"多条"才真的可能发生。
+   - **门店专属链接 `/t/<slug>`**：route handler + 可单测的 `planShopEntry`。
+     slug 优先于 cookie；**进店前提是 AuthLink 里确实有这家店**；不是这家店的人 →
+     选择器（不签 cookie、不猜一家）。顺带让 `/login`、`/rider/login` 真正消费 `?next=`，
+     修好了三个 QR 落地页一直"生成了 next 却没人读"的回跳。
+   - ⏳ **剩下的**：注册流程的门店显式化（`/t/<slug>/signup` + 把 slug 传进 `signUpRider`）。
+     今天注册仍走 `resolveEntryTenant()`：多店并存时**拒绝而不是猜**（安全），但不能由链接指定。
 5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
    不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
-   `User.email` → `@@unique([organisationId, email])`。
+   `User.email` → `@@unique([organisationId, email])`（生产上已有该索引，核对 schema）。
 6. **claim 迁 `app_metadata`**：P0 把 `app_jwt_claim()` 改成只认 `app_metadata`
    （`user_metadata` 用户自己就能改），于是 PostgREST 面现在**一律拒绝** ——
    要等 `injectBizClaims` 改写才会对合法用户重新开放。这是 P0 有意留下的 fail-closed 状态。
