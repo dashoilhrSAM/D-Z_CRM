@@ -18,6 +18,8 @@ export default async function MechanicAppLayout({ children }: { children: React.
   if (isAuthPage) return <>{children}</>;
 
   if (session.kind === "customer") redirect("/rider/home"); // rider 顾客不能进 mechanic app
+  // 多家店都有身份却没选店 → 先选（**不能**替他挑一家；P3b 第 4 步）
+  if (session.needsWorkshopChoice) redirect("/select-workshop");
   if (session.kind === "none") redirect("/mechanic-app/login"); // 未登录 → 技师专属登录页
   if (session.role !== "MECHANIC") redirect("/workshop/dashboard"); // 其他员工 → workshop OS
 

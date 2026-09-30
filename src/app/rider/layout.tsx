@@ -20,6 +20,11 @@ export default async function RiderLayout({ children }: { children: React.ReactN
     redirect("/rider/login");
   }
 
+  // 多家店都有身份却没选店 → 先选（**不能**替他挑一家；P3b 第 4 步）
+  if (!isAuthPage && session.needsWorkshopChoice) {
+    redirect("/select-workshop");
+  }
+
   // 已登录员工/技师：rider 端仅顾客可用 → 重定向各自入口
   if (!isAuthPage && session.authenticated && session.kind === "staff") {
     redirect(session.role === "MECHANIC" ? "/mechanic-app" : "/workshop/dashboard");

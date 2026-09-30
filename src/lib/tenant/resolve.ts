@@ -3,30 +3,34 @@
  *
  * 四级来源，顺序固定：
  *   ① 签名 cookie `dz_tenant` —— 用户选过的店（见 active-tenant.ts，客户端改不动）
- *   ② `/t/<slug>` 或 QR 扫码 —— 第 4 步接线（门店写在 URL 里）
- *   ③ 唯一所属 —— 今天 `User.authId` / `Customer.authId` 是**全局唯一**，
- *      所以"唯一"是数据库保证的，一次 findUnique 就是答案
+ *   ② `/t/<slug>` 或 QR 扫码 —— 门店写在 URL 里（入口页在 P3b 第 4 步后半段接）
+ *   ③ 唯一所属 —— 他在平台上**恰好**一条身份（`identitiesForAuthUser` 数出来的"恰好"，
+ *      **不是**数据库唯一键的巧合）
  *   ④ ≥2 条 → **必须让用户选**（绝不静默挑一个 —— 那是这类系统最典型的串店入口）
  *   第 0 级（子域）留空占位，将来接法写在这里。
  *
- * 为什么本文件只做到第 ③ 级：**第 ④ 级今天不可能发生**（唯一键还在）。
- * 第 2 步松开那两个唯一键时，本文件末尾 `uniqueOwnerLookup` 的两行
- * `findUnique({ where: { authId } })` 会**直接编译不过** —— 这正是我们要的：
- * 编译器会逼着把它换成 `identitiesForAuthUser(authId)` 的候选链 + 选择器，
- * 而不是靠人记得回来改（本项目已经用过两次同一个手法：把规则做成类型/编译期约束）。
+ * 2026-09-30（第 2 步）：`User.authId` / `Customer.authId` 已从全局唯一降为租户内唯一，
+ * 所以第 ③ 级不再能用 `findUnique({ where: { authId } })` —— 那正是编译器在上一步点出来的
+ * 三处报错。现在第 ③/④ 级都由 AuthLink 的候选数决定：0 条 = 没身份、1 条 = 唯一所属、
+ * ≥2 条 = 送选择器。代价是热路径多一次 AuthLink 查询（authId 上有索引），换来的是
+ * "多条时到底该进哪家店"这个判断不再依赖巧合。
  *
  * 这一层只回答"**是谁**"，不回答"他能看什么"——后者仍由各 service / 守卫负责。
  */
 import { db } from "@/lib/db";
 import { readActiveTenant, type ActiveTenant } from "@/lib/tenant/active-tenant";
-import { identityInTenant, type ResolvedIdentity } from "@/lib/tenant/identity";
+import { identityInTenant, identitiesForAuthUser, type ResolvedIdentity } from "@/lib/tenant/identity";
 import type { Prisma } from "@prisma/client";
 
 export type RequestPersonRef =
   /** 本请求指定了门店：**只认这一家**（identity 为 null = 他在本店没有身份） */
   | { source: "tenant"; organisationId: string; identity: ResolvedIdentity | null }
-  /** 本请求没有指定门店：走第 ③ 级「唯一所属」（今天 = 全局唯一键） */
-  | { source: "unique" };
+  /** 没指定门店，但他在平台上**恰好**一条身份 → 唯一所属，直接用它（单店体验不变） */
+  | { source: "unique"; identity: ResolvedIdentity }
+  /** 没指定门店，他在**多家店**都有身份 → **必须让他选**，绝不静默挑一个 */
+  | { source: "choice"; candidates: ResolvedIdentity[] }
+  /** 已认证，但平台里没有任何业务身份 */
+  | { source: "none" };
 
 /**
  * 可测的主体：cookie 值由调用方传入（`readActiveTenant()` 依赖请求上下文，测试里调不了）。
@@ -36,10 +40,18 @@ export type RequestPersonRef =
  * 后者会把 A 店的人放进 B 店。
  */
 export async function requestPersonRefFor(authId: string, tenant: ActiveTenant | null): Promise<RequestPersonRef> {
-  if (!authId) return { source: "unique" };
-  if (!tenant?.organisationId) return { source: "unique" };
-  const identity = await identityInTenant(authId, tenant.organisationId);
-  return { source: "tenant", organisationId: tenant.organisationId, identity };
+  if (!authId) return { source: "none" };
+  if (tenant?.organisationId) {
+    const identity = await identityInTenant(authId, tenant.organisationId);
+    return { source: "tenant", organisationId: tenant.organisationId, identity };
+  }
+  // 第 ③/④ 级：AuthLink 是"他属于哪几家店"的唯一事实来源。
+  // 注意这里**不能**用 `findFirst({ where: { authId } })` 图省事 —— 多条时它会静默挑一条，
+  // 而那正是串店。"唯一"必须由**数出来**，不能由查询的巧合决定。
+  const candidates = await identitiesForAuthUser(authId);
+  if (candidates.length === 0) return { source: "none" };
+  if (candidates.length === 1) return { source: "unique", identity: candidates[0] };
+  return { source: "choice", candidates };
 }
 
 /** 生产入口：读签名 cookie 后委托给 `requestPersonRefFor`。 */
@@ -48,52 +60,38 @@ export async function requestPersonRef(authId: string): Promise<RequestPersonRef
 }
 
 /**
- * 第 ③ 级「唯一所属」：今天靠的是 `User.authId` / `Customer.authId` 的全局唯一键。
- *
- * ⚠️ **第 2 步松键时这里必须改**：`findUnique({ where: { authId } })` 在 authId 不再是
- * 唯一键之后会编译失败（Prisma 只允许对唯一字段用 findUnique），这是**有意的护栏**。
- * 换法：`identitiesForAuthUser(authId)` → 0 条 = 没身份、1 条 = 用它、
- * ≥2 条 = 交给多店选择器（第 4 步）。
+ * 本请求"就是这一条"的业务身份；`choice` / `none` 一律 null ——
+ * 这两条路调用方必须自己处理（前者送选择器、后者当没有业务账号），**不许猜一条**。
  */
-export function uniqueOwnerStaffWhere(authId: string): Prisma.UserWhereUniqueInput {
-  return { authId };
-}
-
-/** 见 `uniqueOwnerStaffWhere` 的说明（同一处护栏）。 */
-export function uniqueOwnerCustomerWhere(authId: string): Prisma.CustomerWhereUniqueInput {
-  return { authId };
+export function boundIdentity(ref: RequestPersonRef): ResolvedIdentity | null {
+  if (ref.source === "tenant" || ref.source === "unique") return ref.identity;
+  return null;
 }
 
 /**
- * 本请求该取哪一条**员工**行：指定了门店 → 链接里那一条（= 本店那条）；
- * 没有指定 → 唯一所属。**null = 这个请求下他没有员工身份**（不要再去别家店找）。
- *
- * 为什么"该取哪条"要单独成函数：三个消费者（session-user / rider-customer /
- * injectBizClaims）各写一遍"先看 cookie 再看唯一键"就必然漂移 —— 规则只写一遍，
- * 取行只是把它变成查询。
+ * 本请求该取哪一条**员工**行；**null = 这个请求下他没有员工身份**
+ * （不要再去别家店找）。规则只写一遍，取行只是把它变成查询。
  */
-export function staffWhereFor(ref: RequestPersonRef, authId: string): Prisma.UserWhereUniqueInput | null {
-  if (ref.source === "unique") return uniqueOwnerStaffWhere(authId);
-  if (ref.identity?.kind !== "STAFF" || !ref.identity.userId) return null;
-  return { id: ref.identity.userId };
+export function staffWhereFor(ref: RequestPersonRef): Prisma.UserWhereUniqueInput | null {
+  const id = boundIdentity(ref);
+  return id?.kind === "STAFF" && id.userId ? { id: id.userId } : null;
 }
 
 /** 骑手版，见 `staffWhereFor`。 */
-export function customerWhereFor(ref: RequestPersonRef, authId: string): Prisma.CustomerWhereUniqueInput | null {
-  if (ref.source === "unique") return uniqueOwnerCustomerWhere(authId);
-  if (ref.identity?.kind !== "CUSTOMER" || !ref.identity.customerId) return null;
-  return { id: ref.identity.customerId };
+export function customerWhereFor(ref: RequestPersonRef): Prisma.CustomerWhereUniqueInput | null {
+  const id = boundIdentity(ref);
+  return id?.kind === "CUSTOMER" && id.customerId ? { id: id.customerId } : null;
 }
 
 /** 按解析结果取**员工**行。 */
-export async function loadStaffForRef(ref: RequestPersonRef, authId: string) {
-  const where = staffWhereFor(ref, authId);
+export async function loadStaffForRef(ref: RequestPersonRef) {
+  const where = staffWhereFor(ref);
   return where ? db.user.findUnique({ where }) : null;
 }
 
 /** 按解析结果取**骑手**行（不带关联）。 */
-export async function loadCustomerForRef(ref: RequestPersonRef, authId: string) {
-  const where = customerWhereFor(ref, authId);
+export async function loadCustomerForRef(ref: RequestPersonRef) {
+  const where = customerWhereFor(ref);
   return where ? db.customer.findUnique({ where }) : null;
 }
 
@@ -103,9 +101,8 @@ export async function loadCustomerForRef(ref: RequestPersonRef, authId: string) 
  */
 export async function loadCustomerForRefWith<T extends Prisma.CustomerInclude>(
   ref: RequestPersonRef,
-  authId: string,
   include: T,
 ): Promise<Prisma.CustomerGetPayload<{ include: T }> | null> {
-  const where = customerWhereFor(ref, authId);
+  const where = customerWhereFor(ref);
   return where ? db.customer.findUnique({ where, include }) : null;
 }

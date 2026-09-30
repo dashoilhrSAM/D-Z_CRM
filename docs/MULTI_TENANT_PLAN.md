@@ -628,12 +628,19 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
    `tests/tenant-entry-tenant.test.ts`（+24，变异测试验证过会红）。
    详见 `docs/changes/2026-09-30-p3b-step1-signup-tenant.md`。
    ⏳ 有意留到第 2 步一起做：`@@index([organisationId, phone])`（纯性能项，并进那次双 schema 改动）。
-2. **再松唯一键**（前置已于第 1 步满足、解析链已于第 3 步就位）：`User.authId` / `Customer.authId`
-   去全局唯一，改为 `@@unique([organisationId, authId])`。真正的"一人一店一条"由 `AuthLink` 的
-   `@@unique([authId, organisationId])` 守。**这一步之后才可能出现"同一个人两家店"。**
-   ⚠️ **松键会同时点出三处编译错误，这是有意的护栏**（`resolve.ts` 里唯一所属的两处
-   `{ authId }` where、以及 `phone-identity.ts` 的平台级检查）—— 按报错逐个换掉即可；
-   换第 ③ 级时必须同时把第 ④ 级（选择器）接上，因为"多条"从这一刻起真的会发生。
+2. ✅ **已完成（2026-09-30）—— 松唯一键**：`User.authId` / `Customer.authId`
+   去全局唯一，改为 `@@unique([organisationId, authId])`（双 schema + 迁移
+   `20260930234000_p3b_tenant_scoped_authid` + `Customer` 的 `@@index([organisationId, phone])`）。
+   真正的"一人一店一条"由 `AuthLink` 的 `@@unique([authId, organisationId])` 守。
+   **这一步之后"同一个人两家店"才真的可能出现。**
+   - 编译器护栏**如期点出三处**（`resolve.ts` 里唯一所属的两处 `{ authId }` where、
+     `phone-identity.ts` 的平台级检查），照报错逐个换掉；第 ③ 级同时换成候选链、
+     第 ④ 级选择器同批接上。
+   - **生产侧是破坏性 DDL**（`DROP INDEX`），`sync-prod-schema.mjs` 会拒绝自动执行：
+     用新增的 `scripts/apply-prod-authid-tenant-scope.mjs`（默认演练、幂等、事务内、执行后复验）
+     **先在生产执行，再合并**。详见 `docs/changes/2026-09-30-p3b-tenant-scoped-authid.md`。
+   - ⚠️ 新解析链信任 `AuthLink`：**有 authId 却没有映射的账号会被当成"没有业务身份"**。
+     部署前必须查一次漂移（实测生产 0/0）。
 3. ✅ **已完成（2026-09-30）—— 解析链落地。**
    新增 `src/lib/tenant/resolve.ts`：四级来源固定顺序
    **① 签名 cookie → ② `/t/<slug>`/QR（第 4 步接）→ ③ 唯一所属 → ④ ≥2 条必须让用户选**，
@@ -648,11 +655,16 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
    测试：`tests/tenant-resolve.test.ts`（10 条，含"cookie 指向的店没有他 → 不许翻别家店"、
    "同一 authId 两家店各取各店那条行"、以及"别处不许绕过解析链"的结构守卫 + 正向对照）。
    详见 `docs/changes/2026-09-30-p3b-resolve-chain.md`。
-4. **入口与选择器**：`/t/<slug>/login`；`/login`、`/rider/login` 保留为无租户入口 +
-   多店选择器（`needsTenantChoice()` 为 true 时**必须**让用户选）。
-   `setActiveTenant` 的调用方**只能**传 `identitiesForAuthUser(authId)` 里的候选
-   （不变式写在 `active-tenant.ts` 的注释里）。
-   ⏳ 第 ③ 级换成候选链必须在**这一步**一起做（解析链已经为它留好位置）。
+4. 🟡 **部分完成（2026-09-30）—— 多店选择器已落地，`/t/<slug>` 入口页还差**。
+   ✅ 新增 `/select-workshop`（页面 + action）：三个端（workshop / rider / mechanic-app）的布局
+   在 `needsWorkshopChoice` 为真时把人送过去；action **只能**从
+   `identitiesForAuthUser(authId)` 的候选里选（不变式变成代码）。
+   ✅ 解析链第 ③ 级已换成候选链（0 条 = 没身份、1 条 = 唯一所属、≥2 条 = 送选择器），
+   与第 2 步同一批完成 —— 因为松键之后"多条"才真的可能发生。
+   ⏳ 还差 **`/t/<slug>` 入口页**：`resolveEntryTenant({ slug })` 从第 1 步起就能收 slug，
+   但还没有路由接上；今天进店的显式来源只有签名 cookie。
+   ⏳ 第 5 步的两项仍未做：删死代码 `dz_org`；`User.email` 的复合唯一**生产上已存在**
+   （`User_organisationId_email_key`），但是否已写进 schema 待核。
 5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
    不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
    `User.email` → `@@unique([organisationId, email])`。

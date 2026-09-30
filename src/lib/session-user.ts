@@ -16,13 +16,18 @@ export interface SessionUser {
   branchId: string | null;
   /** 已通过 Supabase 认证 */
   authenticated: boolean;
+  /**
+   * 他在**多家店**都有身份，而这次请求没有指定门店 → **必须让他选**，不许静默挑一个。
+   * 布局看到这个标志就把人送去 `/select-workshop`（P3b 第 4 步）。
+   */
+  needsWorkshopChoice: boolean;
 }
 
 function initialsOf(name: string): string {
   return name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase();
 }
 
-const ANONYMOUS: SessionUser = { kind: "none", user: null, role: "", name: "", initials: "", orgId: "", branchId: null, authenticated: false };
+const ANONYMOUS: SessionUser = { kind: "none", user: null, role: "", name: "", initials: "", orgId: "", branchId: null, authenticated: false, needsWorkshopChoice: false };
 
 /**
  * 统一当前用户解析：Supabase session → User.authId/Customer.authId 查业务记录。
@@ -36,20 +41,25 @@ export const getSessionUser = cache(async (): Promise<SessionUser> => {
   const identity = await readRequestIdentity();
   if (!identity) return ANONYMOUS;
 
-  // P3b 第 3 步：先看"本请求指定了哪家店"（签名 cookie），没有才走唯一所属。
-  // "指定了本店但他在本店没有身份"与"没指定、系统按唯一所属猜"是两件事 ——
-  // 前者返回"没有身份"，绝不回退到别家店（见 lib/tenant/resolve.ts）。
+  // P3b 第 2/3 步：先看"本请求指定了哪家店"（签名 cookie），没有才数候选（AuthLink）。
+  // "指定了本店但他在本店没有身份"与"没指定、系统替他挑一家"是两件事 ——
+  // 前者返回"没有身份"，后者在**多家**时必须让他自己选（见 lib/tenant/resolve.ts）。
   const ref = await requestPersonRef(identity.id);
 
+  // 多家店都有身份，而这次请求没指定 → 交给 /select-workshop，**不许挑一个**
+  if (ref.source === "choice") {
+    return { ...ANONYMOUS, authenticated: true, needsWorkshopChoice: true };
+  }
+
   // 员工
-  const staff = await loadStaffForRef(ref, identity.id);
+  const staff = await loadStaffForRef(ref);
   if (staff) {
-    return { kind: "staff", user: staff, role: staff.role, name: staff.name, initials: initialsOf(staff.name), orgId: staff.organisationId, branchId: staff.branchId, authenticated: true };
+    return { kind: "staff", user: staff, role: staff.role, name: staff.name, initials: initialsOf(staff.name), orgId: staff.organisationId, branchId: staff.branchId, authenticated: true, needsWorkshopChoice: false };
   }
   // rider 顾客
-  const rider = await loadCustomerForRef(ref, identity.id);
+  const rider = await loadCustomerForRef(ref);
   if (rider) {
-    return { kind: "customer", user: rider, role: "CUSTOMER", name: rider.name, initials: initialsOf(rider.name), orgId: rider.organisationId, branchId: rider.branchId, authenticated: true };
+    return { kind: "customer", user: rider, role: "CUSTOMER", name: rider.name, initials: initialsOf(rider.name), orgId: rider.organisationId, branchId: rider.branchId, authenticated: true, needsWorkshopChoice: false };
   }
   // 已登录但未关联业务账号（或本店没有他的身份）
   return { ...ANONYMOUS, authenticated: true };
