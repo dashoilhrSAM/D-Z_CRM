@@ -13,9 +13,23 @@
 // 不能只改一半的地方 —— 只把"回看最大号"按租户收窄而计数器仍是全局的，
 // 会把全局序列建到另一家的 max 之下，那家随后取号撞自己已有的号 → 同样是完工事务回滚。
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import os from "node:os";
 
 const saved = { databaseUrl: process.env.DATABASE_URL };
 const tag = "inv" + Date.now().toString(36);
+/**
+ * 并发度：`min(5, 本机可用 CPU 数)`，下限 2。
+ *
+ * 为什么要跟着机器走：Prisma 在 SQLite 上跑**交互事务**时，并发数一旦超过查询引擎的
+ * worker 线程数就会把引擎自己锁死 —— 全部请求 P1008（连持锁的那个也一起失败），
+ * 上游 issue：prisma/orm#29870「concurrent interactive transactions deadlock the query
+ * engine at N > worker threads」。本机 15 核跑 5 个没事，GitHub 的 2 核 runner 上必红：
+ * 那是 runner 的能力问题，不是这段代码的问题（2026-09-30 CI 实测，连红两轮）。
+ *
+ * 下限保 2：**两个并发就足以让"各读到同一个 count"的实现重号**（见文件头那个真 bug），
+ * 所以守卫没有被削弱 —— 只是不再要求机器能同时跑 5 个交互事务。
+ */
+const CONCURRENCY = Math.max(2, Math.min(5, os.availableParallelism?.() ?? os.cpus().length));
 // **合成年份**：避免与并行跑的其它测试文件（完工链路）互相推进计数器。
 // 全量跑第一次就是这么红的：单独跑绿、并行跑红，正是"共享状态"的典型症状。
 const YEAR = 2099;
@@ -119,8 +133,8 @@ describe("发票号：唯一、单调、从不回退", () => {
   });
 
   it("**并发取号不重号**（这正是原来 count+1 会撞唯一键的场景）", async () => {
-    const got = await Promise.all([allocate(A), allocate(A), allocate(A), allocate(A), allocate(A)]);
-    expect(new Set(got).size).toBe(5); // 5 个号互不相同
+    const got = await Promise.all(Array.from({ length: CONCURRENCY }, () => allocate(A)));
+    expect(new Set(got).size).toBe(CONCURRENCY); // 号互不相同
     for (const n of got) expect(n.startsWith(PREFIX)).toBe(true);
   });
 

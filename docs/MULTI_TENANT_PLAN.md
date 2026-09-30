@@ -573,14 +573,23 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 > `src/lib/tenant/active-tenant.ts`（**签名**的 `dz_tenant` cookie）+ 7 条测试。
 > 详见 `docs/changes/2026-09-30-p3a-auth-link.md`。
 >
-> ⏸ **P3b 已勘察、尚未施工**，施工单与两个必须先解决的隐患见本节末尾的「P3b 施工单」。
+> ✅ **P3b 第 1 步已完成（2026-09-30）**：注册路径的邮箱/手机匹配全部加上租户条件，
+> `organisation.findFirst({ orderBy: { name: "asc" } })` 两处删除，新增
+> `src/lib/tenant/entry-tenant.ts`（slug → 签名 cookie → 唯一在营门店 → **否则拒绝**）
+> + 24 条测试（含变异验证过的跨店回归测试）。详见
+> `docs/changes/2026-09-30-p3b-step1-signup-tenant.md`。
+> **第 2 步（松唯一键）的前置已满足，但它必须与第 3 步（解析链）同一批做** ——
+> 因为 `injectBizClaims` 与 session 解析今天用的是 `findUnique({ where: { authId } })`，
+> 唯一键一松它们会直接失败。
 > **P3a 刻意没有松开那两个唯一约束** —— 理由就写在那份施工单里，不是没做完，是**不能先松**。
 
 - `AuthLink` 建表 + 回填生产 24 条；`session-user.ts` / `rider-customer.ts` 改为按 **(authId, organisationId)** 解析。
 - `User.email` → `@@unique([organisationId, email])`；`Customer.authId` / `User.authId` 去全局唯一。
 - `src/lib/tenant/resolve.ts`：四级解析链（签名 cookie → `/t/<slug>` 或 QR → 唯一所属 → 候选列表），**第 0 级（子域）留空占位并注释将来接法**。
 - 登录入口 `/t/<slug>/login`；`/login`、`/rider/login` 保留为无租户入口 + **多店选择器**。
-- 租户内手机匹配（`customersByPhone(orgId, phone)`）+ `@@index([organisationId, phone])`；店外/店内重号不再硬报错。
+- 租户内手机匹配（`customersByPhone(orgId, phone)`）—— ✅ **已完成**（P3b 第 1 步，租户参数**必需**）；
+  `@@index([organisationId, phone])` **仍待做**：它是纯性能项，并进第 2 步那次 schema 变更一起上；
+  店外/店内重号不再硬报错。
 - `setWorkshopContext` 从死代码改为**写库 + 写签名 `dz_tenant` cookie**，删除 `dz_org`/`dz_branch`。
 - claim 迁 `app_metadata`；`updateStaff` 后刷新 claim；`active` 进入校验链 + Supabase ban / 会话吊销。
 
@@ -607,12 +616,25 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 
 **施工顺序（每一步都能独立验证）**
 
-1. **先加租户条件，后松约束。** `auth-supabase.ts` 的两处匹配改为
-   `findFirst({ where: { email, organisationId } })` / `customersByPhone(orgId, phone)`；
-   注册的 org 改为来自 `/t/<slug>`（隐患 ①）。此时行为与今天一致（单店），但已经安全。
-2. **再松唯一键**：`User.authId` / `Customer.authId` 去全局唯一，改为
+1. ✅ **已完成（2026-09-30）—— 先加租户条件，后松约束。**
+   `customersByPhone(organisationId, local)`（租户参数**必需**，`tsc` 兜住漏写）/
+   `customerByEmailInTenant(organisationId, email)`；注册路径四处（`signUpRider`、
+   `requestRiderPhoneOtp`、`verifyRiderPhoneOtp`、`completeRiderPhoneSignup`）**先定租户再匹配**，
+   且租户解析放在建 auth 用户**之前**（判不出门店时不留下孤儿账号）。
+   注册的 org 来自新增的 `src/lib/tenant/entry-tenant.ts`：
+   **显式 slug → 签名 cookie → 平台恰好一家在营门店 → 否则拒绝**（不再按字母序抛硬币）。
+   登录入口的手机匹配**暂时**仍是跨租户的（`customersByPhoneAnyTenant`，结构守卫钉住只有一处），
+   第 3/4 步随解析链收掉。测试：`tests/tenant-signup-scope.test.ts`、
+   `tests/tenant-entry-tenant.test.ts`（+24，变异测试验证过会红）。
+   详见 `docs/changes/2026-09-30-p3b-step1-signup-tenant.md`。
+   ⏳ 有意留到第 2 步一起做：`@@index([organisationId, phone])`（纯性能项，并进那次双 schema 改动）。
+2. **再松唯一键**（前置已于第 1 步满足）：`User.authId` / `Customer.authId` 去全局唯一，改为
    `@@unique([organisationId, authId])`。真正的"一人一店一条"由 `AuthLink` 的
    `@@unique([authId, organisationId])` 守。**这一步之后才可能出现"同一个人两家店"。**
+   ⚠️ **必须与第 3 步同一批做**：`injectBizClaims`（`auth-supabase.ts:26/39`）与
+   `session-user.ts:40/45`、`rider-customer.ts:14` 今天都是
+   `findUnique({ where: { authId } })` —— 唯一键一松，`findUnique` 立刻不成立（编译/运行都会失败）。
+   只改 schema 不改编排链会把登录整个弄挂。
 3. **解析链落地**：`session-user.ts:40/45`、`rider-customer.ts:14` 三处
    `findUnique({ where: { authId } })` 改为
    `readActiveTenant()` → `identityInTenant(authId, tenant.organisationId)`，
@@ -630,7 +652,8 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 
 **验收**：同一邮箱在两家店各有一个 `User`，各自登录且互不可见；跨店骑手在两家店各有 `Customer`
 档案；`/login` 用多店邮箱登录时**必须出现选择器**（不得静默进入任一店）；被停用员工立即无法登录；
-**在 B 店用 A 店客户的邮箱注册，不得绑上 A 店那条记录**（隐患 ② 的回归测试）。
+**在 B 店用 A 店客户的邮箱注册，不得绑上 A 店那条记录**（隐患 ② 的回归测试 ——
+✅ 已由 `tests/tenant-signup-scope.test.ts` 覆盖，并用变异测试确认过它会红）。
 
 ### P4 · 平台管理台（10–15 天）
 

@@ -17,9 +17,25 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # Prisma client 必须先生成。`build` 脚本自带 `prisma generate`，但这个 job 是**直接**跑
+      # tsc/vitest 的 —— 缺了它 `@prisma/client` 没有生成类型，全仓 `db.*` 调用退化成 any，
+      # tsc 会以 100+ 条 TS7006 失败（而 Production Build job 反而是绿的：
+      # 它的脚本里已经 generate 过了 —— 这正是这个门一直红着却看不出原因的地方）。
+      - run: pnpm exec prisma generate
       - run: pnpm lint
       - run: pnpm exec tsc --noEmit
+      # 单测**直接打本地 SQLite**：CI 是干净 checkout，既没有 dev.db 也没有 DATABASE_URL。
+      # 空库会让用例红；只 migrate 不 seed 也会红（实测：service-catalogue 期望的
+      # 6 条历史老服务为 0）。所以三者都要：generate → migrate deploy → seed。
+      - run: pnpm exec prisma migrate deploy
+        env:
+          DATABASE_URL: "file:./dev.db"
+      - run: pnpm db:seed
+        env:
+          DATABASE_URL: "file:./dev.db"
       - run: pnpm test
+        env:
+          DATABASE_URL: "file:./dev.db"
 
   e2e:
     name: Playwright (§74 mandatory journey + matrix)

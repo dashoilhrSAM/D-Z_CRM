@@ -95,8 +95,9 @@ export async function requestRiderPhoneChange(input: { countryCode?: string; pho
     return { ok: false as const, error: "This is already your current number." };
   }
 
-  // 新号码不能挂在别的客户档案上（Customer.phone 无唯一约束，命中多个也一并拒绝）。
-  const owners = await customersByPhone(normalizePhoneLoose(e164));
+  // 新号码不能挂在本店**别的**客户档案上（Customer.phone 无唯一约束，命中多个也一并拒绝）。
+  // 只看本店：别家店有同号码是正常的（同一个人可以在两家店各留一次资料）。
+  const owners = await customersByPhone(customer.organisationId, normalizePhoneLoose(e164));
   if (owners.some((c) => c.id !== customer.id)) {
     return { ok: false as const, error: "This number is already used by another customer — please contact the workshop." };
   }
