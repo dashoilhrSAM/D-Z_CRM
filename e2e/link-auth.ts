@@ -34,13 +34,20 @@ async function main() {
   }
 
   // 2. User 按 email 绑定
-  const users = await prisma.user.findMany({ select: { id: true, email: true } });
+  const users = await prisma.user.findMany({ select: { id: true, email: true, organisationId: true } });
   console.log("[link-auth] business users:", users.length);
   let linked = 0;
   for (const u of users) {
     const authId = u.email ? idByEmail.get(u.email.toLowerCase()) : undefined;
     if (authId) {
       await prisma.user.update({ where: { id: u.id }, data: { authId } });
+      // AuthLink 也得补：它是「这个账号属于哪几家店」的唯一事实来源（P3b 第 3 步的解析链读它）。
+      // e2e.db 每次 wipe + seed 后这张表是空的 —— 不补，等第 3 步上线后 e2e 会整片登录失败。
+      await prisma.authLink.upsert({
+        where: { authId_organisationId: { authId, organisationId: u.organisationId } },
+        create: { authId, organisationId: u.organisationId, kind: "STAFF", userId: u.id },
+        update: { kind: "STAFF", userId: u.id, customerId: null },
+      });
       linked++;
     }
   }
@@ -48,17 +55,22 @@ async function main() {
   const phoneToEmail: Record<string, string> = {
     "012-345 6789": "ahmad.danial@dz.my",
   };
-  const customers = await prisma.customer.findMany({ select: { id: true, email: true, phone: true } });
+  const customers = await prisma.customer.findMany({ select: { id: true, email: true, phone: true, organisationId: true } });
   for (const c of customers) {
     const byEmail = c.email ? idByEmail.get(c.email.toLowerCase()) : undefined;
     const byPhone = c.phone ? phoneToEmail[c.phone] : undefined;
     const authId = byEmail ?? (byPhone ? idByEmail.get(byPhone.toLowerCase()) : undefined);
     if (authId) {
       await prisma.customer.update({ where: { id: c.id }, data: { authId } });
+      await prisma.authLink.upsert({
+        where: { authId_organisationId: { authId, organisationId: c.organisationId } },
+        create: { authId, organisationId: c.organisationId, kind: "CUSTOMER", customerId: c.id },
+        update: { kind: "CUSTOMER", customerId: c.id, userId: null },
+      });
       linked++;
     }
   }
-  console.log("[link-auth] linked " + linked + " records");
+  console.log("[link-auth] linked " + linked + " records (+AuthLink 映射)");
   await prisma.$disconnect();
 }
 

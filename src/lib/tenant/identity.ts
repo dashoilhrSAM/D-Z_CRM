@@ -111,3 +111,27 @@ export async function linkIdentity(input: {
   });
   return toResolved(row);
 }
+
+/**
+ * 员工账号的租户映射 —— **建 User、或给 User 绑上 authId 时必须调用**（幂等）。
+ *
+ * 为什么包一层而不直接在调用点写 `linkIdentity({kind: "STAFF"})`：
+ * `kind` 与 `userId`/`customerId` 的搭配是易错处（给错就产出一条指向空用户的身份，
+ * 而且它**不会报错**，只会让解析链在将来返回一个假身份）。包一层之后，
+ * 调用点只需要回答"哪个人、哪家店"。
+ *
+ * ⚠️ 这张表是「这个 auth 账号属于哪几家店」的**唯一事实来源**（P3b 第 3 步的解析链读它）。
+ * 漏写一条不会当场出错 —— 老账号因为 P3a 回填过所以照常登录，只有**新建**的账号
+ * 将来会登不进去。所以每一处写 `User.authId` 的地方都必须配一条。
+ */
+export async function linkStaffIdentity(input: { authId: string; organisationId: string; userId: string }) {
+  return linkIdentity({ authId: input.authId, organisationId: input.organisationId, kind: "STAFF", userId: input.userId, customerId: null });
+}
+
+/**
+ * 骑手账号的租户映射 —— **建 Customer、或认领/绑定 authId 时必须调用**（幂等）。
+ * 同 `linkStaffIdentity`：漏写 = 这个骑手将来登不进去。
+ */
+export async function linkCustomerIdentity(input: { authId: string; organisationId: string; customerId: string }) {
+  return linkIdentity({ authId: input.authId, organisationId: input.organisationId, kind: "CUSTOMER", userId: null, customerId: input.customerId });
+}

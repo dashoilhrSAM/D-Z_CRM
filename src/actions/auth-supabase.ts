@@ -9,6 +9,7 @@ import { markOtpVerified } from "@/lib/otp-attempt";
 import { createAdminClient, customersByPhone, customersByPhoneAnyTenant, customerByEmailInTenant, preparePhoneIdentity } from "@/lib/auth/phone-identity";
 import { clientIpHash, otpRateCheck } from "@/lib/otp-rate";
 import { resolveEntryTenant } from "@/lib/tenant/entry-tenant";
+import { linkCustomerIdentity } from "@/lib/tenant/identity";
 
 /** 业务身份（JWT claims）——A2 RLS 读取 request.jwt.claims 依赖这些字段。 */
 export interface BizClaims {
@@ -218,6 +219,13 @@ export async function signUpRider(input: { name: string; phone?: string; country
         data: { authId: authUserId, ...(fullPhone && !customer.phone ? { phone: fullPhone } : {}), ...(email && !customer.email ? { email } : {}), ...(gender && !customer.gender ? { gender } : {}) },
       });
     }
+    // ★ 绑上了 authId 就必须同时写 AuthLink —— 它是「这个账号属于哪几家店」的唯一事实来源
+    //   （P3b 第 3 步的解析链读它）。漏写不会当场报错：老账号因 P3a 回填过照常登录，
+    //   只有**新建**的账号将来会登不进去。判据用 customer.authId（而不是分支），
+    //   这样"新建"和"认领老客"两条路都覆盖到。
+    if (customer.authId === authUserId) {
+      await linkCustomerIdentity({ authId: authUserId, organisationId: customer.organisationId, customerId: customer.id });
+    }
 
     // 3. 注入 CUSTOMER claims（RLS 用）
     const claims: BizClaims = {
@@ -396,6 +404,8 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
     // 老客认领：验证码证明了号码归属，把历史档案绑到当前账号。
     await db.customer.update({ where: { id: cust.id }, data: { authId: data.user.id } });
   }
+  // ★ 认领与登入都要保证映射存在（幂等）：「老客认领」正是新写 authId 的那条路，最容易漏。
+  await linkCustomerIdentity({ authId: data.user.id, organisationId: cust.organisationId, customerId: cust.id });
   await db.customerAuthProfile.upsert({
     where: { customerId: cust.id },
     create: { customerId: cust.id, phoneVerified: true },
@@ -476,6 +486,10 @@ export async function completeRiderPhoneSignup(input: { name: string; gender?: s
           },
         });
       }
+    }
+    // ★ 无论走"认领老客"还是"新建档案"，只要这条档案挂在他名下就写映射（幂等）。
+    if (customer.authId === user.id) {
+      await linkCustomerIdentity({ authId: user.id, organisationId: customer.organisationId, customerId: customer.id });
     }
     await db.customerAuthProfile.upsert({
       where: { customerId: customer.id },
