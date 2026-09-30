@@ -9,6 +9,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
 import { scopedDb } from "@/lib/tenant/guard";
+import { accrueForJob } from "@/modules/commission/engine";
+import { completionService } from "@/services/completion";
 
 const ORG_A = "test_guard_org_a";
 const ORG_B = "test_guard_org_b";
@@ -96,6 +98,48 @@ describe("scopedDb：写不出租户条件的操作直接拒绝", () => {
 
   it("空 organisationId 直接抛错（空值会让隔离静默失效）", () => {
     expect(() => scopedDb(db as never, "")).toThrow(/需要 organisationId/);
+  });
+});
+
+describe("完工 / 计提入口：跨租户必须被挡住（这条链路上全是钱）", () => {
+  let jobA = "";
+
+  beforeAll(async () => {
+    const branch = await db.branch.create({ data: { organisationId: ORG_A, name: "Guard branch", city: "PJ" } });
+    const bike = await db.motorcycle.create({
+      data: { organisationId: ORG_A, customerId: aId, brand: "Honda", model: "Wave", year: 2020, plate: "GUARD-A-1" },
+    });
+    jobA = (
+      await db.serviceJob.create({
+        data: { organisationId: ORG_A, jobNumber: "GUARD-JOB-1", branchId: branch.id, customerId: aId, motorcycleId: bike.id, mileage: 1000 },
+      })
+    ).id;
+  });
+
+  it("accrueForJob 用别家的租户查 → Job not found（佣金是按 jobId 计提的）", async () => {
+    await expect(
+      db.$transaction((tx) => accrueForJob(tx, jobA, ORG_B)),
+    ).rejects.toThrow(/Job not found/);
+  });
+
+  it("complete 用别家的租户推 → Job not found（否则能推动别家工单完工并开票）", async () => {
+    await expect(completionService.complete(jobA, ORG_B)).rejects.toThrow(/Job not found/);
+  });
+
+  it("对照：本租户查得到（否则上面两条可能只是「工单根本不存在」）", async () => {
+    // 计提会因为"还没有发票"而返回空结果，但**不会抛 Job not found** —— 这正是对照点
+    const summary = await db.$transaction((tx) => accrueForJob(tx, jobA, ORG_A));
+    expect(summary.totalSen).toBe(0);
+  });
+
+  afterAll(async () => {
+    await db.commissionLedger.deleteMany({ where: { jobId: jobA } });
+    await db.jobStatusHistory.deleteMany({ where: { jobId: jobA } });
+    await db.serviceJobItem.deleteMany({ where: { jobId: jobA } });
+    await db.serviceJobPart.deleteMany({ where: { jobId: jobA } });
+    await db.serviceJob.deleteMany({ where: { id: jobA } });
+    await db.motorcycle.deleteMany({ where: { organisationId: ORG_A } });
+    await db.branch.deleteMany({ where: { organisationId: ORG_A } });
   });
 });
 

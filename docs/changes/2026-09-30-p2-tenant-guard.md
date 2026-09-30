@@ -89,13 +89,46 @@ node scripts/tenant-guard-audit.mjs      # 跑全量单测 + 聚合，输出生�
 构建中断还把 `.next/BUILD_ID` 删了，三个本地服务因此起不来。
 **教训：新加文件之后必须跑完整基线（tsc + test + build），不能只跑测试。**
 
+## 续：修掉分诊出来的两处真问题（同一轮）
+
+审计清单里抽查出的两处**真问题**都在"钱"的链路上，已修：
+
+- **`src/modules/commission/engine.ts` `accrueForJob(tx, jobId, …)`** —— 原来按裸 id 查工单：
+  谁拿到一个 `jobId` 就能给它**计提佣金**。租户改为必需参数，查询改成带租户的 `findFirst`。
+- **`src/services/completion.ts` `complete(jobId)`** —— 完工链路的入口（发票 / 收款 / 库存扣减 /
+  佣金 / 服务提醒全在它后面），原来也是裸 id。同样加必需租户参数。
+  它内部原先从 `job.customer.organisationId` 派生租户，现在统一用**入口参数**
+  （查询就是按它过滤的；两处若不一致反而自相矛盾）。
+- **顺手：岗位看板**。`boardWhere` 原先只按 `branchId`/`mechanicId` 收窄，而 `branchId`
+  不传时等于"全部" —— 看板因此没有租户边界。`listBoardRows` / `listBoardColumns` /
+  `boardSummary` 三个入口都加上必需租户参数（4 个页面调用点由编译器点名）。
+
+**又是"必需参数"在起作用**：改完 `tsc` 一次性指出 **45 个调用点**（生产 7 处 + 测试 38 处）。
+如果只是"记得在 where 里加"，漏掉的会一直躺在那里。
+
+### 新增的跨租户断言（`tests/tenant-guard.test.ts`，+3 条）
+
+- `accrueForJob` 用别家租户 → 抛 `Job not found`（佣金路径）；
+- `complete` 用别家租户 → 抛 `Job not found`（不能推动别家工单完工并开票）；
+- **对照组**：本租户查得到（否则上面两条可能只是"工单根本不存在"）。
+
+### 中途两次自己的失误（都是同一类）
+
+1. 参数名与函数内已有的局部变量撞车（P1a 加过 `const organisationId = job.customer.organisationId`），
+   `tsc` 报 `Duplicate identifier` / `used before declaration` —— 删掉局部、统一用参数。
+2. 补丁脚本里 Python 字符串嵌了 ASCII 双引号，语法错误导致**整个脚本一条都没执行**，
+   而我一度以为改完了。同类错误这轮犯了三次：**改完必须看 tsc/测试的实际输出，不能凭"脚本跑过了"下结论。**
+
 ## 交接说明
 
-- **P2 剩余工作（有据可查，不用再猜）**：直接看 `node scripts/tenant-guard-audit.mjs` 的
-  "生产代码里的未收窄查询"清单，按次数从高到低分诊。已抽查的两类：
-  · **误报**（查询后有手工校验）：`src/modules/bulk/apply.ts:60`、`:65`、`src/modules/bulk/export.ts`；
-  · **真问题**（查完没有任何归属校验）：`src/modules/commission/engine.ts:45`、
-    `src/services/completion.ts:95` —— 都是 `serviceJob.findUnique({ where: { id } })`。
+- **P2 剩余工作（有据可查，不用再猜）**：跑 `node scripts/tenant-guard-audit.mjs` 看
+  "生产代码里的未收窄查询"清单。**已修的**：客户列表/详情、岗位看板、佣金计提、完工入口。
+  **剩下的两类**：
+  · **误报**（查询后紧跟手工归属校验，守卫看不到）：`bulk/apply.ts:60/65`、
+    `bulk/export.ts:89/105`。这些不用改，但值得在文件里写一句说明，免得下一个人重复分诊。
+  · **传递安全但依赖上下文**：`completion.ts` 里那些按 `job.id`/`invoice.id` 的写
+    （InvoiceItem / Payment / Motorcycle / ServiceReminder / Review / Notification / …）——
+    入口已验过归属，所以安全；但"安全"依赖调用顺序。真要收紧就在这些 where 上加 `job: { organisationId }`。
 - **改造的推广路径**：像 customers 那样把 `organisationId` 做成**必需参数**，
   编译器会给出完整的调用点清单；`scopedDb` 适合用在拿不到干净签名的地方。
 - **审计不要做成硬门禁**：它有已知误报（手工校验、传递安全），设成 CI 阻断会逼人加豁免注释。

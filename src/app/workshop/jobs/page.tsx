@@ -27,10 +27,10 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const isKanban = view === "kanban";
   // 数字与行分开取：数字走 groupBy（不取行），行走上限查询。
   // 原来是一次 listBoard() 把整张工单表读进来，再在内存里过滤、切片、给看板每列切 12 条。
-  const summary = await jobService.boardSummary(branchId, mechanicId);
+  const summary = await jobService.boardSummary(branchId, mechanicId, session.orgId);
   const PAGE_SIZE = 25;
-  const table = isKanban ? null : await jobService.listBoardRows({ branchId, status, mechanicId, page, pageSize: PAGE_SIZE });
-  const columnsData = isKanban ? await jobService.listBoardColumns({ branchId, mechanicId, perColumn: 12 }) : null;
+  const table = isKanban ? null : await jobService.listBoardRows({ organisationId: session.orgId, branchId, status, mechanicId, page, pageSize: PAGE_SIZE });
+  const columnsData = isKanban ? await jobService.listBoardColumns({ organisationId: session.orgId, branchId, mechanicId, perColumn: 12 }) : null;
   const pageItems = table?.jobs ?? [];
   const totalPages = table?.totalPages ?? 1;
 

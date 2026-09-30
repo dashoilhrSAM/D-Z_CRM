@@ -125,7 +125,7 @@ const WINDOW = () => new Date().toISOString().slice(0, 7); // 当前窗口（按
 
 describe("链路第 1 步：卖出去 → 完工 → 计提（带作用域身份）", () => {
   it("完工后台账里有一条 BASE，件数 10，且**记着这是哪个商品**", async () => {
-    const result = await completionService.complete(jobIds[0]);
+    const result = await completionService.complete(jobIds[0], orgId);
     expect(result.commissionAccruedSen).toBe(1900); // 38000 × 5%
 
     const rows = await db.commissionLedger.findMany({ where: { jobId: jobIds[0] } });

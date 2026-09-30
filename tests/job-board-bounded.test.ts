@@ -72,19 +72,19 @@ afterAll(async () => {
 
 describe("工单列表的取数是有界的", () => {
   it("表格视图只返回一页：jobs.length === min(pageSize, total)", async () => {
-    const { jobs, total, totalPages } = await jobService.listBoardRows({ branchId: fx.branchId, page: 1, pageSize: 3 });
+    const { jobs, total, totalPages } = await jobService.listBoardRows({ organisationId: fx.orgId, branchId: fx.branchId, page: 1, pageSize: 3 });
     expect(total).toBe(TOTAL);
     expect(jobs.length).toBe(3);
     expect(totalPages).toBe(Math.ceil(TOTAL / 3));
 
-    const p3 = await jobService.listBoardRows({ branchId: fx.branchId, page: 3, pageSize: 3 });
+    const p3 = await jobService.listBoardRows({ organisationId: fx.orgId, branchId: fx.branchId, page: 3, pageSize: 3 });
     expect(p3.jobs.length).toBe(TOTAL - 6);
     const firstIds = new Set(jobs.map((j) => j.id));
     expect(p3.jobs.some((j) => firstIds.has(j.id))).toBe(false);
   });
 
   it("计数是聚合算出来的，且与夹具的真实分布一致", async () => {
-    const summary = await jobService.boardSummary(fx.branchId);
+    const summary = await jobService.boardSummary(fx.branchId, undefined, fx.orgId);
     expect(summary.counts.COMPLETED).toBe(5);
     expect(summary.counts.WAITING).toBe(2);
     expect(summary.counts.READY).toBe(1);
@@ -94,13 +94,13 @@ describe("工单列表的取数是有界的", () => {
   });
 
   it("状态过滤在数据库里做：取回来的每一行都必须是该状态", async () => {
-    const waiting = await jobService.listBoardRows({ branchId: fx.branchId, status: "WAITING", pageSize: 50 });
+    const waiting = await jobService.listBoardRows({ organisationId: fx.orgId, branchId: fx.branchId, status: "WAITING", pageSize: 50 });
     expect(waiting.total).toBe(2);
     expect(waiting.jobs.every((j) => j.status === "WAITING")).toBe(true);
   });
 
   it("看板每列各自截断，而不是为了 5 列把整表取 5 遍", async () => {
-    const { columns } = await jobService.listBoardColumns({ branchId: fx.branchId, perColumn: 2 });
+    const { columns } = await jobService.listBoardColumns({ organisationId: fx.orgId, branchId: fx.branchId, perColumn: 2 });
     // COMPLETED 有 5 张，但每列上限 2 —— 这条就是「有界」的证据
     expect(columns.COMPLETED.length).toBe(2);
     expect(columns.WAITING.length).toBe(2);
@@ -108,7 +108,7 @@ describe("工单列表的取数是有界的", () => {
   });
 
   it("今日过滤用的是日期区间，不是把行取回来逐行判断", async () => {
-    const today = await jobService.listBoardRows({ branchId: fx.branchId, todayOnly: true, pageSize: 50 });
+    const today = await jobService.listBoardRows({ organisationId: fx.orgId, branchId: fx.branchId, todayOnly: true, pageSize: 50 });
     expect(today.total).toBe(TOTAL);
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -125,7 +125,7 @@ describe("dashboard 的生命周期分布：分组计数与逐行归类等价", 
   // 而「已挂到工单上的预约要跳过（由工单那侧计）」这个条件也从 continue 挪进了 where。
   it("夹具分店的生命周期桶与工单状态分布一致", async () => {
     const { dashboardService } = await import("@/services/dashboard");
-    const dash = await dashboardService.get(fx.branchId);
+    const dash = await dashboardService.get(fx.branchId, fx.orgId);
     const byLabel = new Map(dash.lifecycleDist.map((d) => [d.label, d.count]));
     // 夹具：2 张 WAITING、1 张 READY（5 张 COMPLETED 不在「在办」状态里，不该被计入）
     expect(byLabel.get("checked_in")).toBe(2); // WAITING

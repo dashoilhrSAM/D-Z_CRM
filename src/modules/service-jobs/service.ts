@@ -8,8 +8,13 @@ import { db } from "@/lib/db";
 export type JobStatusInput = JobStatus;
 
 /** 工单列表/看板的过滤条件（branch 隔离 + 状态 + 机修本人）。 */
-function boardWhere(opts: { branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean }): Prisma.ServiceJobWhereInput {
-  const where: Prisma.ServiceJobWhereInput = {};
+/**
+ * 2026-09-30（P2）：**organisationId 是必需项**。
+ * 看板原先只按 branchId / mechanicId 收窄 —— 而 branchId 在不传时是"全部"，
+ * 于是这里等于没有租户边界（`ServiceJob` 有 organisationId 列，用它最直接）。
+ */
+function boardWhere(opts: { organisationId: string; branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean }): Prisma.ServiceJobWhereInput {
+  const where: Prisma.ServiceJobWhereInput = { organisationId: opts.organisationId };
   if (opts.branchId) where.branchId = opts.branchId;
   if (opts.todayOnly) {
     const { start, end } = serverDayRange(new Date());
@@ -59,8 +64,8 @@ export class JobService {
    * jobsToday 与计数，却把整张工单表连同明细读进内存 —— 而 dashboard 占全部
    * 渲染的 67%（自动刷新）。数字不该用取全表的代价换。
    */
-  async boardSummary(branchId?: string | null, mechanicId?: string): Promise<{ counts: Record<string, number>; jobsToday: number; total: number }> {
-    const where = boardWhere({ branchId, mechanicId });
+  async boardSummary(branchId: string | null | undefined, mechanicId: string | undefined, organisationId: string): Promise<{ counts: Record<string, number>; jobsToday: number; total: number }> {
+    const where = boardWhere({ organisationId, branchId, mechanicId });
     const { start, end } = serverDayRange(new Date());
     const dayWhere: Prisma.ServiceJobWhereInput = { ...where, createdAt: { gte: start, lt: end } };
     const [byStatus, jobsToday] = await Promise.all([
@@ -77,7 +82,7 @@ export class JobService {
   }
 
   /** 表格视图：**有界分页**，状态过滤与分页都在数据库里做（原来是全量取回来再内存过滤切片）。 */
-  async listBoardRows(opts: { branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean; page?: number; pageSize?: number }) {
+  async listBoardRows(opts: { organisationId: string; branchId?: string | null; status?: string; statuses?: string[]; mechanicId?: string; todayOnly?: boolean; page?: number; pageSize?: number }) {
     const pageSize = Math.max(1, opts.pageSize ?? 25);
     const page = Math.max(1, opts.page ?? 1);
     const where = boardWhere(opts);
@@ -92,7 +97,7 @@ export class JobService {
    * 看板视图：**每一列各取前 N 条**。
    * 原来是先取全量、再在内存里 filter 出每列前 12 条 —— 一列一个全表扫描的代价。
    */
-  async listBoardColumns(opts: { branchId?: string | null; mechanicId?: string; perColumn?: number }) {
+  async listBoardColumns(opts: { organisationId: string; branchId?: string | null; mechanicId?: string; perColumn?: number }) {
     const perColumn = Math.max(1, opts.perColumn ?? 12);
     const base = boardWhere(opts);
     const statuses = ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY", "COMPLETED"] as const;
@@ -103,7 +108,7 @@ export class JobService {
           return [s, rows.map((j) => this.toBoardRow(j))] as const;
         }),
       ),
-      this.boardSummary(opts.branchId, opts.mechanicId),
+      this.boardSummary(opts.branchId, opts.mechanicId, opts.organisationId),
     ]);
     return { columns: Object.fromEntries(columns) as Record<(typeof statuses)[number], ReturnType<JobService["toBoardRow"]>[]>, counts: summary.counts, jobsToday: summary.jobsToday };
   }

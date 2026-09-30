@@ -44,7 +44,7 @@ async function main() {
     await db.booking.update({ where: { id: booking.id }, data: { jobId: job.id } });
 
     // 3. complete it
-    await completionService.complete(job.id);
+    await completionService.complete(job.id, org.id);
 
     const inv = await db.invoice.findUnique({ where: { jobId: job.id }, include: { payments: true } });
     record("invoice subtotal is the undiscounted work", inv?.subtotalSen === subtotal, "subtotalSen=" + inv?.subtotalSen);

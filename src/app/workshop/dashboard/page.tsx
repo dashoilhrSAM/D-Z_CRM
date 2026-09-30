@@ -25,7 +25,7 @@ export default async function DashboardPage() {
     ? (await db.branch.findUnique({ where: { id: scopedId } }))
     : (await db.branch.findFirst({ where: { isMain: true } }));
   const [dash, recs] = await Promise.all([
-    dashboardService.get(branch?.id),
+    dashboardService.get(branch?.id, session.orgId),
     aiService.recommendations(branch?.id, lang),
   ]);
 
@@ -54,6 +54,7 @@ export default async function DashboardPage() {
   // 原来是取回**全部工单**再内存过滤 + slice —— 而 dashboard 占全部渲染的 67%（自动刷新）。
   const todayJobs = (
     await jobService.listBoardRows({
+      organisationId: session.orgId,
       branchId: branch?.id,
       mechanicId: isMechanic && user ? user.id : undefined,
       todayOnly: true,
@@ -61,7 +62,7 @@ export default async function DashboardPage() {
     })
   ).jobs;
   // 「我的进行中工单」这个数字走聚合计数，不为一个数字把行取回来
-  const scopedCounts = isMechanic && user ? (await jobService.boardSummary(branch?.id, user.id)).counts : null;
+  const scopedCounts = isMechanic && user ? (await jobService.boardSummary(branch?.id, user.id, session.orgId)).counts : null;
   const myActiveCount = scopedCounts
     ? ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"].reduce((s, k) => s + (scopedCounts[k] ?? 0), 0)
     : 0;

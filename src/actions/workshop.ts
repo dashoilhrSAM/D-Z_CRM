@@ -86,7 +86,10 @@ export async function createJob(input: {
 
 export async function transitionJob(id: string, to: "WAITING" | "IN_PROGRESS" | "AWAITING_APPROVAL" | "QC_CHECK" | "WAITING_PARTS" | "ON_HOLD" | "READY" | "COMPLETED" | "CANCELLED") {
   if (to === "COMPLETED") {
-    const result = await completionService.complete(id);
+    // 租户来自会话：完工链路的入口（发票/收款/佣金/提醒都在它后面），不能按裸 id 推动。
+    const session = await getSessionUser();
+    if (session.kind !== "staff") return { ok: false as const, error: "Not signed in" };
+    const result = await completionService.complete(id, session.orgId);
     revalidatePath("/", "layout");
     return { ok: true, result };
   }
