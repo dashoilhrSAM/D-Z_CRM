@@ -3,12 +3,12 @@
 import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { generateQrToken } from "@/lib/qr-token";
-import { normalizePhoneLoose, combinePhone, digitsOnly, matchKey } from "@/lib/phone";
+import { normalizePhoneLoose, combinePhone, digitsOnly } from "@/lib/phone";
 import { isAllowedPhone, normalizeToE164 } from "@/lib/otp";
 import { markOtpVerified } from "@/lib/otp-attempt";
-import { createAdminClient, customersByPhone, preparePhoneIdentity } from "@/lib/auth/phone-identity";
+import { createAdminClient, customersByPhone, customersByPhoneAnyTenant, customerByEmailInTenant, preparePhoneIdentity } from "@/lib/auth/phone-identity";
 import { clientIpHash, otpRateCheck } from "@/lib/otp-rate";
-import type { Customer } from "@prisma/client";
+import { resolveEntryTenant } from "@/lib/tenant/entry-tenant";
 
 /** 业务身份（JWT claims）——A2 RLS 读取 request.jwt.claims 依赖这些字段。 */
 export interface BizClaims {
@@ -55,12 +55,7 @@ export async function injectBizClaims(authUserId: string) {
 
 // createAdminClient / customersByPhone / preparePhoneIdentity 等执行侧逻辑已移到
 // lib/auth/phone-identity.ts，限流在 lib/otp-rate.ts——两个 action 文件共用同一份实现。
-
-/** 手机号 → Customer.phone（归一化匹配）→ authId。 */
-async function customerByPhone(local: string): Promise<(Pick<Customer, "id" | "phone" | "authId" | "organisationId" | "branchId" | "gender"> & { email: string | null }) | null> {
-  const candidates = await db.customer.findMany({ where: { phone: { not: null } }, select: { id: true, phone: true, authId: true, email: true, organisationId: true, branchId: true, gender: true } });
-  return candidates.find((c) => matchKey(c.phone) === matchKey(normalizePhoneLoose(local))) ?? null;
-}
+// 租户判定在 lib/tenant/entry-tenant.ts：**注册路径先问"这是哪家店"，再匹配邮箱/手机**。
 
 /**
  * 登录：email（workshop/rider）或手机号（rider，identifier 二选一）。
@@ -82,7 +77,10 @@ export async function signInWithPassword(input: { email?: string; identifier?: s
       const full = combinePhone(cc, id);
       if (digitsOnly(full).length < 7) return { ok: false as const, error: "Invalid phone number — enter at least 7 digits." };
       const local = normalizePhoneLoose(full);
-      const cust = await customerByPhone(local);
+      // ⚠️ 登录仍用**跨租户**匹配：这一步只回答"号码在哪家店"，随后仍要密码，
+      // 且不绑定任何档案。P3b 第 3/4 步会把登录收到解析链 + 多店选择器上（那时删掉它）。
+      // 注册路径**绝不能**这样做 —— 见 lib/tenant/entry-tenant.ts 的注释。
+      const cust = (await customersByPhoneAnyTenant(local))[0] ?? null;
       if (!cust) return { ok: false as const, error: "No account found with this phone number — try signing up." };
       if (!cust.authId) return { ok: false as const, error: "No D&Z account linked to this phone." };
       const admin = await createAdminClient();
@@ -151,13 +149,21 @@ export async function signUpRider(input: { name: string; phone?: string; country
 
   const admin = await createAdminClient();
 
-  // 老客匹配：手机号 → Customer.phone（老客注册，绑定 authId）
-  const existing = await customerByPhone(phoneLocal);
+  // 0. **先定租户，再匹配**（P3b 第 1 步）。
+  //    顺序不能反：匹配一旦跑在"哪家店"之前，没有租户条件的邮箱/手机查询就可能命中**别家店**的
+  //    客户档案，并把 authId 绑上去（隐患 ②，见 MULTI_TENANT_PLAN §P3b）。
+  //    放在建 auth 用户之前还有第二个好处：租户判不出来时**不留下任何孤儿 auth 账号**。
+  const tenant = await resolveEntryTenant();
+  if (!tenant.ok) return { ok: false as const, error: tenant.error };
+  const organisationId = tenant.organisationId;
+
+  // 老客匹配：手机号 → **本店** Customer.phone（老客注册，绑定 authId）
+  const existing = (await customersByPhone(organisationId, phoneLocal))[0] ?? null;
   // 老客有 email 且本次未填 → 用老客 email 建 auth（保持双通道同一账号）
   if (!email && existing?.email) email = existing.email;
-  // 重复检测
+  // 重复检测（同样只在本店内）
   if (email) {
-    const dup = await db.customer.findFirst({ where: { email } });
+    const dup = await customerByEmailInTenant(organisationId, email);
     if (dup?.authId) return { ok: false as const, error: "An account with this email already exists — try signing in." };
   } else if (existing?.authId) {
     return { ok: false as const, error: "An account with this phone already exists — try signing in." };
@@ -199,12 +205,12 @@ export async function signUpRider(input: { name: string; phone?: string; country
 
   // 2. 绑定 Customer：老客（phone/email 匹配）→ 绑 authId；新客 → 创建
   try {
-    let customer = existing ?? (email ? await db.customer.findFirst({ where: { email } }) : null);
+    // 两条匹配都只在本店内（`customersByPhone` / `customerByEmailInTenant` 的租户参数是必需的）
+    let customer = existing ?? (email ? await customerByEmailInTenant(organisationId, email) : null);
     if (!customer) {
-      const org = await db.organisation.findFirst({ orderBy: { name: "asc" } });
-      if (!org) return { ok: false as const, error: "No workshop organisation configured." };
+      // 租户在第 0 步已经确定并校验过存在 —— 这里不再"按名字排序找一家店"（隐患 ①）
       customer = await db.customer.create({
-        data: { organisationId: org.id, name, email: email ?? null, phone: fullPhone || undefined, gender, authId: authUserId, qrToken: generateQrToken() },
+        data: { organisationId, name, email: email ?? null, phone: fullPhone || undefined, gender, authId: authUserId, qrToken: generateQrToken() },
       });
     } else if (!customer.authId) {
       customer = await db.customer.update({
@@ -286,9 +292,14 @@ export async function requestRiderPhoneOtp(input: {
     return { ok: false as const, error: "SMS codes are currently sent to Malaysian numbers (+60) only." };
   }
 
-  const matches = await customersByPhone(normalizePhoneLoose(e164));
+  // 租户先定：发码这一步会把号码挂到"他已有的账号"上（preparePhoneIdentity），
+  // 所以命中的**必须是本店**的档案 —— 否则等于用别家店的客户档案决定给谁发码、挂哪个账号。
+  const tenant = await resolveEntryTenant();
+  if (!tenant.ok) return { ok: false as const, error: tenant.error };
+
+  const matches = await customersByPhone(tenant.organisationId, normalizePhoneLoose(e164));
   if (matches.length > 1) {
-    // 同一号码挂在多个客户档案上——先让人合并，别猜该登进哪一个。
+    // 同一号码在本店挂在多个客户档案上——先让人合并，别猜该登进哪一个。
     return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
   }
   const existing = matches[0] ?? null;
@@ -345,6 +356,11 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
   if (!e164) return { ok: false as const, error: "Enter a valid phone number." };
   if (!/^\d{4,8}$/.test(token)) return { ok: false as const, error: "Enter the code from the SMS." };
 
+  // 租户先定，**在验码之前**：验码会用掉一次性验证码、还会建立 session，
+  // 定不出门店就该在消耗验证码之前拒绝（否则用户白白丢一个码）。
+  const tenant = await resolveEntryTenant();
+  if (!tenant.ok) return { ok: false as const, error: tenant.error };
+
   const supabase = await createClient();
   const { data, error } = await supabase.auth.verifyOtp({ phone: e164, token, type: "sms" });
   if (error) return { ok: false as const, error: error.message };
@@ -354,7 +370,9 @@ export async function verifyRiderPhoneOtp(input: { phone: string; countryCode?: 
   // 只有确实投递出去的那一行（SENT/REQUESTED）才配被标注，FAILED 与拒绝类都不配。
   await markOtpVerified(e164);
 
-  const matches = await customersByPhone(normalizePhoneLoose(e164));
+  // ⚠️ 只在本店内匹配：下面 `if (!cust.authId)` 会**把这条档案绑到当前账号**上，
+  // 所以这里命中别家店的档案就是跨店劫持（隐患 ②）。
+  const matches = await customersByPhone(tenant.organisationId, normalizePhoneLoose(e164));
   if (matches.length > 1) {
     await supabase.auth.signOut();
     return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
@@ -408,17 +426,25 @@ export async function completeRiderPhoneSignup(input: { name: string; gender?: s
   const phone = user.phone;
   if (!phone) return { ok: false as const, error: "This session has no verified phone number." };
 
+  // 租户先定：这一步会**创建或认领**客户档案，所以匹配与新建必须落在同一家店（P3b 第 1 步）。
+  const tenant = await resolveEntryTenant();
+  if (!tenant.ok) return { ok: false as const, error: tenant.error };
+  const organisationId = tenant.organisationId;
+
   if (email) {
-    const dup = await db.customer.findFirst({ where: { email } });
+    const dup = await customerByEmailInTenant(organisationId, email);
     if (dup && dup.authId && dup.authId !== user.id) {
       return { ok: false as const, error: "An account with this email already exists — try signing in." };
     }
   }
 
   try {
+    // ⚠️ 这一条按 authId 的查询**还没**收窄租户 —— 多店解析链是 P3b 第 3 步。
+    // 它不会跨店绑定（绑的是这个人自己的账号），但多店时可能读到他**另一家店**的档案；
+    // 第 3 步会把它改成 identityInTenant(authId, tenant)。
     let customer = await db.customer.findUnique({ where: { authId: user.id } });
     if (!customer) {
-      const byPhoneMatches = await customersByPhone(normalizePhoneLoose(phone));
+      const byPhoneMatches = await customersByPhone(organisationId, normalizePhoneLoose(phone));
       if (byPhoneMatches.length > 1) {
         return { ok: false as const, error: "This phone number is on more than one customer record — please contact the workshop." };
       }
@@ -437,11 +463,10 @@ export async function completeRiderPhoneSignup(input: { name: string; gender?: s
           },
         });
       } else {
-        const org = await db.organisation.findFirst({ orderBy: { name: "asc" } });
-        if (!org) return { ok: false as const, error: "No workshop organisation configured." };
+        // 租户已在上面确定并校验过存在 —— 不再"按名字排序找一家店"（隐患 ①）
         customer = await db.customer.create({
           data: {
-            organisationId: org.id,
+            organisationId,
             name,
             phone,
             email,

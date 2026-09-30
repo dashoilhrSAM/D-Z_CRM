@@ -22,16 +22,72 @@ export async function createAdminClient() {
   );
 }
 
-/** 同一号码命中的**全部**客户档案。Customer.phone 没有唯一约束，重复号会造成"登进哪一个"的歧义，
- *  所以调用方要显式拒绝（让人去后台合并），不要静默挑第一个。 */
-export async function customersByPhone(local: string) {
+/** 客户档案上"判断归属够用"的字段（两个匹配函数共用，避免两份 select 漂移）。 */
+const CUSTOMER_MATCH_SELECT = {
+  id: true,
+  organisationId: true,
+  branchId: true,
+  phone: true,
+  authId: true,
+  name: true,
+  email: true,
+  gender: true,
+};
+
+/**
+ * 同一号码在**本租户内**命中的全部客户档案。Customer.phone 没有唯一约束，重复号会造成
+ * "登进哪一个"的歧义，所以调用方要显式拒绝（让人去后台合并），不要静默挑第一个。
+ *
+ * ⚠️ `organisationId` 是**必需参数**，不是可选过滤器 —— 这是刻意的：
+ * 一旦松开 `Customer.authId` 全局唯一（P3b 第 2 步），"没有租户条件的手机匹配"
+ * 就等于"在 B 店注册可以认领 A 店同号码的客户档案"（隐患 ②，见 MULTI_TENANT_PLAN §P3b）。
+ * 做成必需参数后，漏掉租户的调用点会被 `tsc` 拦住，而不是靠人记得写。
+ */
+export async function customersByPhone(organisationId: string, local: string) {
+  if (!organisationId) return [];
+  const key = matchKey(normalizePhoneLoose(local));
+  if (!key) return [];
+  const candidates = await db.customer.findMany({
+    where: { organisationId, phone: { not: null } },
+    select: CUSTOMER_MATCH_SELECT,
+  });
+  return candidates.filter((c) => matchKey(c.phone) === key);
+}
+
+/**
+ * ⚠️ **跨租户**的号码匹配 —— 只允许**登录入口**调用（今天全仓只有 `signInWithPassword` 一处）。
+ *
+ * 为什么登录还敢用跨租户匹配：这一步只回答"这个号码在哪儿"，随后仍要密码/验证码，
+ * 且**不绑定任何档案**。P3b 第 3/4 步会把登录也收到解析链 + 多店选择器上，
+ * 那时这个函数就该删掉 —— 所以它必须有一个显眼的名字，
+ * 免得有人顺手在注册路径上用它（那正是隐患 ②）。
+ */
+export async function customersByPhoneAnyTenant(local: string) {
   const key = matchKey(normalizePhoneLoose(local));
   if (!key) return [];
   const candidates = await db.customer.findMany({
     where: { phone: { not: null } },
-    select: { id: true, phone: true, authId: true, name: true, email: true, gender: true },
+    select: CUSTOMER_MATCH_SELECT,
   });
   return candidates.filter((c) => matchKey(c.phone) === key);
+}
+
+/**
+ * 本租户内按邮箱找客户档案 —— 注册路径的**唯一**邮箱匹配入口。
+ *
+ * 与 `customersByPhone` 同理：租户条件必须是必需的。今天它安全只是因为
+ * `Customer.authId` 全局唯一兜住了；唯一键一松，无租户条件的邮箱匹配就是跨店劫持。
+ *
+ * ⚠️ `Customer.email` **没有**任何唯一约束（同表的 `authId` / `qrToken` 才有），
+ * 所以租户内也可能命中多条，这里按 `findFirst` 取第一条 —— 与改造前的语义一致。
+ * 收成 `@@unique([organisationId, email])` 是 P3b 第 5 步的事。
+ */
+export async function customerByEmailInTenant(organisationId: string, email: string) {
+  if (!organisationId || !email) return null;
+  return db.customer.findFirst({
+    where: { organisationId, email },
+    select: CUSTOMER_MATCH_SELECT,
+  });
 }
 
 /**
