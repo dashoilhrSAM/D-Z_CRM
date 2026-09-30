@@ -1,14 +1,21 @@
 -- P0：让工单行带上"目录身份"——佣金按 SKU / 服务 / 套餐配置的前提。
 --
--- 三个列都有意可空：历史行与柜台自由文本行必须能存下来。未链接的行在佣金侧按 LEGACY
--- 处理，并出现在"无法归因"报告里（不假装准确）。
+-- ⚠️ 本迁移现在是**空操作（no-op）**，这是有意的，不要"修好"它、也不要把语句加回来。
 --
--- 为什么"套餐"也要一列：工单里最大的一笔钱通常不是某个 SKU 行，而是套餐行
--- （如 Standard Service RM120），它不对应任何 Product/ServiceType。
-ALTER TABLE "ServiceJobItem" ADD COLUMN "productId" TEXT REFERENCES "Product"("id");
-ALTER TABLE "ServiceJobItem" ADD COLUMN "serviceTypeId" TEXT REFERENCES "ServiceType"("id");
-ALTER TABLE "ServiceJobItem" ADD COLUMN "packageId" TEXT REFERENCES "ServicePackage"("id");
-
-CREATE INDEX "ServiceJobItem_productId_idx" ON "ServiceJobItem"("productId");
-CREATE INDEX "ServiceJobItem_serviceTypeId_idx" ON "ServiceJobItem"("serviceTypeId");
-CREATE INDEX "ServiceJobItem_packageId_idx" ON "ServiceJobItem"("packageId");
+-- 为什么（2026-09-30 实测）：这三列与这三个索引**已经由 `20260923072852_invoice_counter`
+-- 建好了** —— 那个迁移里有一段 "RedefineTables"，把 ServiceJobItem 整表重建并带上了
+-- productId / serviceTypeId / packageId，末尾也建了同样的三个索引。
+--
+-- 而两个迁移的**执行顺序在两种库里是相反的**：
+--   · 已经迁移过的库（dev.db / 生产）：本文件先执行，随后 invoice_counter 才被加入并执行
+--     （它在 _prisma_migrations 里的 finished_at 更晚）——所以当时没有冲突；
+--   · **全新的库**：Prisma 按目录名字典序执行，`20260923072852` 在前、本文件在后，
+--     于是这里的三条 ADD COLUMN 全部撞上 "duplicate column name: productId"，
+--     整条迁移链中断 —— 表现为 `prisma migrate deploy` / `db:reset` / e2e 的
+--     global-setup 在新建库时直接失败（新同事上手、CI、Playwright 全都会卡在这里）。
+--
+-- SQLite 没有 `ADD COLUMN IF NOT EXISTS`，所以唯一能让新库建起来的做法就是：
+-- 保留这段说明、去掉重复的语句。列与索引的最终形态不变（由 invoice_counter 提供）。
+--
+-- 对已迁移的库无影响：Prisma 按**目录名**记录已应用的迁移，不会因为文件内容变化而重跑。
+-- 唯一的副作用是 `prisma migrate dev` 可能提示该迁移在应用后被修改过（`migrate deploy` 不校验）。

@@ -27,7 +27,7 @@ beforeAll(async () => {
     data: { organisationId: org.id, branchId: branch.id, name: "Test Mechanic", email: "mech-" + tag + "@dsh.test", role: "MECHANIC" },
   });
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "Test Customer " + tag, phone: "0120000" + tag.slice(-4) } });
-  const moto = await db.motorcycle.create({ data: { customerId: customer.id, plate: "T" + tag.toUpperCase().slice(0, 6), brand: "Test", model: "Test Bike", year: 2020, currentMileage: 1000 } });
+  const moto = await db.motorcycle.create({ data: { organisationId: org.id, customerId: customer.id, plate: "T" + tag.toUpperCase().slice(0, 6), brand: "Test", model: "Test Bike", year: 2020, currentMileage: 1000 } });
 
   // 一张 5% 的默认规则：覆盖所有未单独配置的行
   await db.commissionRule.create({
@@ -36,24 +36,24 @@ beforeAll(async () => {
 
   // 工单 A：有技师、有计费行 + 一张免费行、发票带 900 sen 折扣
   const jobA = await db.serviceJob.create({
-    data: { jobNumber: "TEST-A-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id, mileage: 1000, mechanicId: mech.id, status: "COMPLETED", completedAt: new Date() },
+    data: { organisationId: org.id, jobNumber: "TEST-A-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id, mileage: 1000, mechanicId: mech.id, status: "COMPLETED", completedAt: new Date() },
   });
   jobIds.push(jobA.id);
   await db.serviceJobItem.create({ data: { jobId: jobA.id, description: "Engine Oil Change", kind: "SERVICE", quantity: 1, unitPriceSen: 9000, lineTotalSen: 9000, status: "INCLUDED", source: "COUNTER" } });
   await db.serviceJobItem.create({ data: { jobId: jobA.id, description: "Free 20-point check", kind: "SERVICE", quantity: 1, unitPriceSen: 0, lineTotalSen: 0, status: "INCLUDED", source: "COUNTER" } });
   const inv = await db.invoice.create({
-    data: { branchId: branch.id, customerId: customer.id, jobId: jobA.id, invoiceNumber: "TESTINV-" + tag, subtotalSen: 9000, discountSen: 900, totalSen: 8100 },
+    data: { organisationId: org.id, branchId: branch.id, customerId: customer.id, jobId: jobA.id, invoiceNumber: "TESTINV-" + tag, subtotalSen: 9000, discountSen: 900, totalSen: 8100 },
   });
   invoiceId = inv.id;
 
   // 工单 B：**没有指派技师**（决定 1 的边界：不许静默算 0）
   const jobB = await db.serviceJob.create({
-    data: { jobNumber: "TEST-B-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id, mileage: 1000, status: "COMPLETED", completedAt: new Date() },
+    data: { organisationId: org.id, jobNumber: "TEST-B-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id, mileage: 1000, status: "COMPLETED", completedAt: new Date() },
   });
   jobIds.push(jobB.id);
   await db.serviceJobItem.create({ data: { jobId: jobB.id, description: "Tyre Replacement", kind: "SERVICE", quantity: 1, unitPriceSen: 7500, lineTotalSen: 7500, status: "INCLUDED", source: "COUNTER" } });
   await db.invoice.create({
-    data: { branchId: branch.id, customerId: customer.id, jobId: jobB.id, invoiceNumber: "TESTINV-B-" + tag, subtotalSen: 7500, discountSen: 0, totalSen: 7500 },
+    data: { organisationId: org.id, branchId: branch.id, customerId: customer.id, jobId: jobB.id, invoiceNumber: "TESTINV-B-" + tag, subtotalSen: 7500, discountSen: 0, totalSen: 7500 },
   });
 });
 
@@ -104,7 +104,7 @@ describe("完工计提（工单 A：有技师 + 免费行 + 发票折扣）", ()
 
   it("发票不存在时不计提（计提时点＝完工开票）", async () => {
     const job = await db.serviceJob.create({
-      data: { jobNumber: "TEST-C-" + tag, branchId: (await db.branch.findFirst({ where: { organisationId: orgId } }))!.id, customerId: (await db.customer.findFirst({ where: { organisationId: orgId } }))!.id, motorcycleId: (await db.motorcycle.findFirst({ where: { plate: "T" + tag.toUpperCase().slice(0, 6) } }))!.id, mileage: 1 },
+      data: { organisationId: orgId, jobNumber: "TEST-C-" + tag, branchId: (await db.branch.findFirst({ where: { organisationId: orgId } }))!.id, customerId: (await db.customer.findFirst({ where: { organisationId: orgId } }))!.id, motorcycleId: (await db.motorcycle.findFirst({ where: { plate: "T" + tag.toUpperCase().slice(0, 6) } }))!.id, mileage: 1 },
     });
     jobIds.push(job.id);
     const res = await accrueForJob(db, job.id);

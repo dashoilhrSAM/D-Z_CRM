@@ -29,18 +29,24 @@ const INVOICE_PAD = 5;
  * 取号天然不重号、不需要重试；只有"计数器行第一次被创建"那一瞬间的并发会撞唯一键，
  * 重试一次即可（那时对方已经建好，走 UPDATE 分支）。
  *
- * 为什么按**年份全局**而不是按组织：invoiceNumber 是全局唯一键，按组织分号会跨组织重号。
+ * 计数器与"回看最大号"**必须同时按租户收窄**（2026-09-30 P1b 完成，两者是一件事）：
+ *   · 只收窄其中一边就会引入一个真实故障 —— 某年计数器行不存在时（新表、被清过、发票是导入的），
+ *     种子取自 A 店的最大号，而 B 店当年已有更大的号 → 序列被建到 B 的 max 之下 →
+ *     B 随后取到的号撞**自己已有**的号 → (organisationId, invoiceNumber) 复合唯一 P2002 →
+ *     **整个完工事务回滚**（2026-09-23 修过的那个 bug 的形态）。
+ *   · 两边一起收窄后，每家店各自从自己的 max 起步，永不回退、也永不撞自己；
+ *     跨店重号是允许的（那正是 invoiceNumber 改成租户内唯一的目的）。
  */
 /** 导出是为了让测试能直接钉住"唯一 + 单调 + 不回退"这三条契约（本地 sqlite 复现不了真实竞态）。 */
-export async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: number): Promise<string> {
-  const existing = await tx.invoiceCounter.findUnique({ where: { year } });
+export async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: number, organisationId: string): Promise<string> {
+  const existing = await tx.invoiceCounter.findUnique({ where: { organisationId_year: { organisationId, year } } });
   // 只在计数器还不存在时回看既有发票：**从最大号起步，绝不回退**（新建表那天必须接得上）
-  const start = existing ? existing.value : await maxIssuedInvoiceNumber(tx, year);
+  const start = existing ? existing.value : await maxIssuedInvoiceNumber(tx, year, organisationId);
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const row = await tx.invoiceCounter.upsert({
-        where: { year },
-        create: { year, value: start + 1 },
+        where: { organisationId_year: { organisationId, year } },
+        create: { organisationId, year, value: start + 1 },
         update: { value: { increment: 1 } },
       });
       return INVOICE_PREFIX + year + "-" + String(row.value).padStart(INVOICE_PAD, "0");
@@ -52,11 +58,11 @@ export async function nextInvoiceNumber(tx: Prisma.TransactionClient, year: numb
   throw new Error("Could not allocate an invoice number after 5 attempts");
 }
 
-/** 这一年已经发出去的最大号（没有就返回 0）。号码补零所以字符串排序等于数值排序。 */
-async function maxIssuedInvoiceNumber(tx: Prisma.TransactionClient, year: number): Promise<number> {
+/** 这一年**本租户**已经发出去的最大号（没有就返回 0）。号码补零所以字符串排序等于数值排序。 */
+async function maxIssuedInvoiceNumber(tx: Prisma.TransactionClient, year: number, organisationId: string): Promise<number> {
   const prefix = INVOICE_PREFIX + year + "-";
   const last = await tx.invoice.findFirst({
-    where: { invoiceNumber: { startsWith: prefix } },
+    where: { organisationId, invoiceNumber: { startsWith: prefix } },
     orderBy: { invoiceNumber: "desc" },
     select: { invoiceNumber: true },
   });
@@ -146,7 +152,10 @@ export class CompletionService {
 
       // 2. Build the invoice
       const year = new Date().getFullYear();
-      const invoiceNumber = await nextInvoiceNumber(tx, year);
+      // 发票的租户取自车主（job.customer 已 include；Customer.organisationId 是必填的，
+      // 而 job.organisationId 这一列对迁移前的历史工单还是 NULL —— 不能用可空值写唯一键）。
+      const organisationId = job.customer.organisationId;
+      const invoiceNumber = await nextInvoiceNumber(tx, year, organisationId);
       const subtotal = acceptedItems.reduce((s, i) => s + i.lineTotalSen, 0) + acceptedParts.reduce((s, p) => s + p.lineTotalSen, 0);
       const cogs = acceptedParts.reduce((s, p) => s + p.unitCostSen * p.quantity, 0);
       // MKT-017: honour the promotional discount the customer was quoted. The amount was fixed
@@ -158,6 +167,8 @@ export class CompletionService {
       const totalSen = subtotal - discountSen;
       const invoice = await tx.invoice.create({
         data: {
+          // (organisationId, invoiceNumber) 复合唯一键不约束 organisationId 为 NULL 的行，这一列必须写
+          organisationId,
           branchId,
           customerId: job.customerId,
           jobId: job.id,

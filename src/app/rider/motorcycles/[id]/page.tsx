@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { ChevronLeft, CalendarPlus, ShieldCheck, Droplets, Filter, Link2 } from "lucide-react";
 import { motorcycleService } from "@/modules/motorcycles/service";
 import { db } from "@/lib/db";
+import { getRiderCustomer } from "@/lib/rider-customer";
 import { fmtKM, fmtDate } from "@/lib/format";
 import { formatRM } from "@/lib/money";
 import { motorcycleTypeInfo } from "@/lib/motorcycle-types";
@@ -17,8 +18,11 @@ export const dynamic = "force-dynamic";
 export default async function MotorcyclePassportPage({ params }: { params: Promise<{ id: string }> }) {
   const lang = await getLang();
   const { id } = await params;
+  // 2026-09-30 越权修正（P0）：整页只按 URL 里的车辆 id 取数（保养/消费/检查发现），
+  // 原先不比对车主 —— 任何已登录骑手改一下 id 就能读别人的维修史与花费，这里收窄到本人车辆。
+  const rider = await getRiderCustomer();
   const passport = await motorcycleService.getPassport(id);
-  if (!passport) notFound();
+  if (!passport || passport.customer.id !== rider?.id) notFound();
   const jobs = await db.serviceJob.findMany({
     where: { motorcycleId: id, status: "COMPLETED" },
     include: { invoice: true, items: true, parts: { include: { product: true } }, mechanic: true },

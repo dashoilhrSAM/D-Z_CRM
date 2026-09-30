@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { BellRing, CalendarClock, Megaphone, MessageSquare, Info, CheckCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { markNotificationsRead } from "@/actions/rider";
@@ -32,7 +33,9 @@ export function NotificationsList({ customerId, notifications }: { customerId: s
 
   const markAll = () =>
     start(async () => {
-      await markNotificationsRead(customerId);
+      // 2026-09-30（P0）：customerId 不再上传（服务端从会话取），并判返回值。
+      const res = await markNotificationsRead();
+      if (!res.ok) { toast.error(res.error); return; }
       router.refresh();
     });
 

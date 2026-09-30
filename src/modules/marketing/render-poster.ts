@@ -86,7 +86,8 @@ export async function renderScriptPoster(
   scriptId: string,
   opts?: { size?: PosterSizeKey; style?: PosterStyleKey },
 ): Promise<RenderResult> {
-  const script = await db.contentScript.findUnique({ where: { id: scriptId } });
+  // 2026-09-30（P1）：组织从脚本所属分行取，不再用 organisation.findFirst()（多租户下那是第一家店）。
+  const script = await db.contentScript.findUnique({ where: { id: scriptId }, include: { branch: { select: { organisationId: true } } } });
   if (!script) throw new Error("Script not found");
   const expanded = script.expandedJson as ExpandedContent | null;
   if (!expanded?.posterText) throw new Error("Script has not been expanded yet — expand it before rendering a poster");
@@ -96,9 +97,9 @@ export async function renderScriptPoster(
   const dims = SIZE_MAP[size];
 
   const product = script.includeProduct && script.productSku
-    ? await db.promoProduct.findUnique({ where: { sku: script.productSku } })
+    ? await db.promoProduct.findFirst({ where: { sku: script.productSku, organisationId: script.branch.organisationId } })
     : null;
-  const org = await db.organisation.findFirst();
+  const org = await db.organisation.findUnique({ where: { id: script.branch.organisationId } });
   const brandName = org?.name ?? "D&Z Smart Workshop";
 
   // The occasion makes a good badge — "PROMO CUTI" is more useful than a blank corner.

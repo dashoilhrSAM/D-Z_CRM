@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { createClient } from "@/lib/supabase/server";
 import { getSessionUser } from "@/lib/session-user";
 import { MODULES, defaultAllowed, type PermissionAction } from "@/lib/auth/permissions";
+import { BUSINESS_DATA_DELETE_ORDER, accessorFor } from "@/lib/tenant/business-data-scope";
 
 /** Developer Settings 门禁 cookie（HttpOnly，15 分钟）。 */
 const DEV_COOKIE = "dz_dev";
@@ -121,34 +122,39 @@ export async function applyFirstWavePreset() {
 }
 
 /* ---- 数据管理：清空业务数据（保留配置：org/branch/user/服务目录/套餐/时段/产品/权限等） ---- */
-/** 业务表删除顺序（先子后父；CustomerApproval 引用 InspectionFinding，须在其前）。 */
-const BUSINESS_TABLES = [
-  "ChecklistExecutionItem", "ChecklistExecution", "ServiceJobPart", "ServiceJobItem",
-  "CustomerApproval", "InspectionFinding", "JobStatusHistory", "ServiceHistory",
-  "InvoiceItem", "Payment", "StaffPayoutPayment", "PurchaseOrderItem",
-  "RewardRedemption", "LoyaltyTransaction", "LeadActivity", "StockMovement",
-  "Attendance", "Message", "Notification", "Review", "TestRide", "Task", "Referral",
-  "StaffPayout", "Campaign", "MarketingAsset", "ContentScript", "PurchaseOrder",
-  "Booking", "ServiceJob", "Invoice", "ServiceReminder", "Lead", "LoyaltyAccount",
-  "CustomerAddress", "CustomerConsent", "CustomerAuthProfile", "Attachment", "AutomationExecution",
-  "Motorcycle", "Customer",
-] as const;
-/** 模型名 → Prisma client 访问器（PascalCase → camelCase）。 */
-const camel = (s: string) => s[0].toLowerCase() + s.slice(1);
 
-/** 清空全部业务数据（事务；保留 Organisation/Branch/User/配置表）。返回各表删除数。 */
+/**
+ * 清空本租户的全部业务数据（事务；保留 Organisation/Branch/User/配置表）。返回各表删除数。
+ *
+ * 2026-09-30 多租户修正（P0）：原实现对 40 张表 `deleteMany({})` —— **没有任何租户收窄**。
+ * 单租户时看不出来；库里有第二家门店后，任何一家的 owner 点一下这个按钮，
+ * **所有租户的业务数据一起被删**，且审计行只记录了操作者自己的 orgId，事后无法界定范围。
+ *
+ * 现在每张表的收窄条件由 `lib/tenant/business-data-scope.ts` 唯一定义
+ * （删除顺序与作用域写在同一处，避免"加了表忘了加作用域"的漂移），
+ * 并由 `tests/business-data-scope.test.ts` 断言"没有任何一项退化成空条件"。
+ */
 export async function resetBusinessData() {
   const who = await assertOwner();
   if ("error" in who) return { ok: false as const, error: who.error };
   const counts: Record<string, number> = {};
   await db.$transaction(async (tx) => {
     const deleter = tx as unknown as Record<string, { deleteMany: (args: unknown) => Promise<{ count: number }> }>;
-    for (const t of BUSINESS_TABLES) {
-      const r = await deleter[camel(t)].deleteMany({});
-      counts[t] = r.count;
+    for (const table of BUSINESS_DATA_DELETE_ORDER) {
+      const r = await deleter[accessorFor(table.model)].deleteMany({ where: table.where(who.orgId) });
+      counts[table.model] = r.count;
     }
   });
-  await db.auditLog.create({ data: { organisationId: who.orgId, userId: who.userId, action: "DATA_RESET", entity: "BusinessData", entityId: "all", after: "cleared business data" } });
+  await db.auditLog.create({
+    data: {
+      organisationId: who.orgId,
+      userId: who.userId,
+      action: "DATA_RESET",
+      entity: "BusinessData",
+      entityId: who.orgId,
+      after: "cleared business data for organisation " + who.orgId + " (" + JSON.stringify(counts) + ")",
+    },
+  });
   return { ok: true as const, counts };
 }
 
@@ -156,15 +162,17 @@ export async function resetBusinessData() {
 export async function getDeveloperOverview() {
   const who = await assertOwner();
   if ("error" in who) return { ok: false as const, error: who.error };
+  const scope = { organisationId: who.orgId };
   const [customers, motorcycles, jobs, bookings, invoices, reminders, products, users] = await Promise.all([
-    db.customer.count({ where: { organisationId: who.orgId } }),
-    db.motorcycle.count(),
-    db.serviceJob.count(),
-    db.booking.count(),
-    db.invoice.count(),
-    db.serviceReminder.count(),
-    db.product.count({ where: { organisationId: who.orgId } }),
-    db.user.count({ where: { organisationId: who.orgId } }),
+    db.customer.count({ where: scope }),
+    // 下列模型没有 organisationId，经关系收窄（与 business-data-scope 同一套路径）。
+    db.motorcycle.count({ where: { customer: scope } }),
+    db.serviceJob.count({ where: { branch: scope } }),
+    db.booking.count({ where: { branch: scope } }),
+    db.invoice.count({ where: { branch: scope } }),
+    db.serviceReminder.count({ where: { customer: scope } }),
+    db.product.count({ where: scope }),
+    db.user.count({ where: scope }),
   ]);
   return { ok: true as const, data: { customers, motorcycles, jobs, bookings, invoices, reminders, products, users } };
 }

@@ -18,6 +18,7 @@ import { scopedBranchId } from "@/lib/branch-scope";
 import { normalizeEmail } from "@/lib/staff-identity";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { createClient } from "@supabase/supabase-js";
+import { generateAiReplyDraft } from "@/lib/ai-reply-draft";
 
 export async function createJob(input: {
   customerId: string; motorcycleId: string; mileage: number; customerRequest?: string;
@@ -78,6 +79,8 @@ export async function createJob(input: {
     // 同步 job.booking 反向关系（可选：jobService.create 未连 booking，这里统一由 booking.jobId 驱动）
   }
   revalidatePath("/", "layout");
+  // 非阻塞：新工单创建后，异步生成本地 AI 回复草稿（未配置 AI_DRAFT_WEBHOOK_URL 时静默跳过）
+  void generateAiReplyDraft(job.id).catch(() => {});
   return { ok: true, id: job.id, jobNumber: job.jobNumber };
 }
 
@@ -541,8 +544,12 @@ export async function resetRiderPassword(customerId: string, password?: string) 
   );
   if (!allowed) return { ok: false as const, error: "No permission to reset rider passwords" };
 
-  const customer = await db.customer.findUnique({
-    where: { id: customerId },
+  // 2026-09-30 多租户修正（P0）：原来按 id 取客户后**不比对 organisationId**，
+  // 而下面会用 service role 直接改那个账号的密码 —— 任何租户里有 CUSTOMERS:edit 的员工，
+  // 只要知道（或猜到）别家客户的 id，就能**改掉别人的 rider 密码 = 跨租户账号接管**。
+  // 用 findFirst + organisationId 收窄：查不到就与"客户不存在"同一条错误，不泄露别家是否有这条记录。
+  const customer = await db.customer.findFirst({
+    where: { id: customerId, organisationId: session.orgId },
     select: { id: true, name: true, authId: true, email: true },
   });
   if (!customer) return { ok: false as const, error: "Customer not found" };

@@ -35,10 +35,11 @@ export const leadsModule = {
     return dupes;
   },
 
-  async nextLeadNumber(): Promise<string> {
+  async nextLeadNumber(organisationId: string): Promise<string> {
     const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
     const prefix = "LD-" + today + "-";
-    const last = await db.lead.findFirst({ where: { leadNumber: { startsWith: prefix } }, orderBy: { leadNumber: "desc" } });
+    // 线索号是租户内唯一：取号范围必须一起收窄，否则一家店的线索量决定另一家的号段
+    const last = await db.lead.findFirst({ where: { organisationId, leadNumber: { startsWith: prefix } }, orderBy: { leadNumber: "desc" } });
     const seq = last ? parseInt(last.leadNumber.slice(prefix.length), 10) + 1 : 1;
     return prefix + String(seq).padStart(3, "0");
   },
@@ -49,7 +50,7 @@ export const leadsModule = {
       const first = await db.leadStage.findFirst({ where: { organisationId: input.organisationId, active: true }, orderBy: { order: "asc" } });
       stageId = first?.id ?? null;
     }
-    const leadNumber = await this.nextLeadNumber();
+    const leadNumber = await this.nextLeadNumber(input.organisationId);
     const lead = await db.lead.create({
       data: {
         leadNumber,

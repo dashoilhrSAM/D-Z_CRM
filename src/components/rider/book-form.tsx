@@ -23,8 +23,11 @@ const TOMORROW = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
 export interface BikeOption { id: string; brand: string; model: string; plate: string; type: string }
 export interface PackageOption { id: string; name: string; tier: string; priceSen: number; isBestValue?: boolean; description?: string | null }
 
-export function BookForm({ customerId, bikes, packages, campaignId, availableSlots = [], branchId, activePromos = [] }: {
-  customerId: string; bikes: BikeOption[]; packages: PackageOption[]; campaignId?: string | null; availableSlots?: { date: string; time: string; remaining?: number }[]; branchId?: string;
+// 2026-09-30（P0）：**刻意不接收 customerId**。这个值以前是由客户端传上来的，
+// 服务端直接拿它下单 —— 于是任何人都能替别人（含别的租户的顾客）建预约。
+// 顾客身份现在只在服务端由会话解析；不要再把这个 prop 加回来。
+export function BookForm({ bikes, packages, campaignId, availableSlots = [], branchId, activePromos = [] }: {
+  bikes: BikeOption[]; packages: PackageOption[]; campaignId?: string | null; availableSlots?: { date: string; time: string; remaining?: number }[]; branchId?: string;
   /** MKT-013: promos that apply to this booking; the server narrows them (campaign link
    *  wins, otherwise the best active promo). Punched through the same pure engine the
    *  server uses, so the displayed price matches the charged price. */
@@ -83,7 +86,8 @@ export function BookForm({ customerId, bikes, packages, campaignId, availableSlo
       const serviceType = isRepairType ? t("job-type.repair", lang) : ([pkg?.name, ...extrasList.map((x) => x.label)].filter(Boolean).join(" + ") || t("book.general-checkup", lang));
       // 结构化 service：套餐 + 附加服务（Check In 时同步到 job）；维修只带描述
       const addons = isRepairType ? undefined : extrasList.map((x) => ({ description: x.label, kind: "SERVICE" as const, quantity: 1, unitPriceSen: x.priceSen }));
-      await bookService({ customerId, motorcycleId: motorcycleId === "none" ? "" : motorcycleId, serviceType, packageId: isRepairType ? undefined : pkg?.id, addons, type: isRepairType ? "REPAIR" : "SERVICE", date, timeSlot, notes: notes || undefined, campaignId: campaignId || undefined, branchId });
+      // customerId 不再上传：服务端从会话取当前顾客（旧版由客户端指定，可替他人下单）
+      await bookService({ motorcycleId: motorcycleId === "none" ? "" : motorcycleId, serviceType, packageId: isRepairType ? undefined : pkg?.id, addons, type: isRepairType ? "REPAIR" : "SERVICE", date, timeSlot, notes: notes || undefined, campaignId: campaignId || undefined, branchId });
       router.push("/rider/bookings");
       toast.success(t("toast.booking-requested", lang));
     });

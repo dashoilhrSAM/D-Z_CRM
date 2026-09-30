@@ -46,7 +46,7 @@ beforeAll(async () => {
     await db.organisation.create({ data: { id: orgId, name: "Scan isolation " + tag } });
     const customer = await db.customer.create({ data: { organisationId: orgId, name: "Scan cust " + tag } });
     const moto = await db.motorcycle.create({
-      data: { customerId: customer.id, brand: "Honda", model: "Wave", year: 2020, plate },
+      data: { organisationId: orgId, customerId: customer.id, brand: "Honda", model: "Wave", year: 2020, plate },
     });
     await db.serviceReminder.create({
       data: {

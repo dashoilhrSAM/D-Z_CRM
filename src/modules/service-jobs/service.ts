@@ -150,9 +150,17 @@ export class JobService {
     customerRequest?: string; packageId?: string; mechanicId?: string; type?: "SERVICE" | "REPAIR";
     addons?: { description: string; kind: string; quantity: number; unitPriceSen: number }[];
   }): Promise<{ id: string; jobNumber: string }> {
-    const jobNumber = await this.repo.nextJobNumber();
+    // 工单的租户取自**分行**（Branch.organisationId 是必填的，分行是权威来源），
+    // 不接受调用方传值：传错就会写出与分行不一致的工单，而 (organisationId, jobNumber)
+    // 复合唯一键只认这一列。分行不存在时**必须报错**，不能放 undefined ——
+    // 复合唯一键不约束 organisationId 为 NULL 的行，静默写 NULL 等于唯一性失效。
+    const branch = await db.branch.findUnique({ where: { id: input.branchId }, select: { organisationId: true } });
+    if (!branch) throw new Error("Cannot create a job: branch not found (" + input.branchId + ")");
+    const organisationId = branch.organisationId;
+    const jobNumber = await this.repo.nextJobNumber(organisationId);
     const created = await this.repo.create({
       jobNumber,
+      organisationId,
       branchId: input.branchId,
       customerId: input.customerId,
       motorcycleId: input.motorcycleId,

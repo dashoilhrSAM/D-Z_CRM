@@ -17,7 +17,7 @@ async function main() {
 
   const tag = "__mktverify_" + Date.now().toString(36);
   const customer = await db.customer.create({ data: { organisationId: org.id, branchId: branch.id, name: tag, phone: "+60100000000" } });
-  const bike = await db.motorcycle.create({ data: { customerId: customer.id, brand: "Test", model: tag, plate: tag.slice(-8).toUpperCase(), year: 2020, currentMileage: 1000, type: "AUTO" } });
+  const bike = await db.motorcycle.create({ data: { organisationId: org.id, customerId: customer.id, brand: "Test", model: tag, plate: tag.slice(-8).toUpperCase(), year: 2020, currentMileage: 1000, type: "AUTO" } });
   const pointsBonus = 50;
   const campaign = await db.campaign.create({ data: { branchId: branch.id, name: tag, type: "PROMO", status: "ACTIVE", startDate: new Date(Date.now() - 86400000), endDate: new Date(Date.now() + 86400000), discountPercent: 20, pointsBonus, audience: "ALL" } });
 
@@ -36,7 +36,7 @@ async function main() {
     // 2. build a job linked to that booking, priced at 6000 sen of labour
     const job = await db.serviceJob.create({
       data: {
-        jobNumber: tag, branchId: branch.id, customerId: customer.id, motorcycleId: bike.id,
+        jobNumber: tag, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: bike.id,
         mileage: 1500, status: "READY", type: "SERVICE",
         items: { create: [{ description: "Labour", kind: "SERVICE", quantity: 1, unitPriceSen: subtotal, lineTotalSen: subtotal, status: "INCLUDED", source: "COUNTER" }] },
       },

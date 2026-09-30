@@ -41,7 +41,7 @@ beforeAll(async () => {
   }
   // 一台车：用来验证「按车牌搜索」走的是 EXISTS 那条分支，且大小写不敏感
   const bike = await db.motorcycle.create({
-    data: { customerId: customerIds[0], brand: "Honda", model: "Wave", year: 2020, plate: "PLP" + tag.toUpperCase() + "9" },
+    data: { organisationId: orgId, customerId: customerIds[0], brand: "Honda", model: "Wave", year: 2020, plate: "PLP" + tag.toUpperCase() + "9" },
   });
   motorcycleIds.push(bike.id);
 });

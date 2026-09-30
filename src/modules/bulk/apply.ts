@@ -242,7 +242,8 @@ async function staleFields(
   if (plan.changes.length === 0) return { stale: [] };
   let current: Record<string, unknown> | null = null;
   if (plan.sheet === PRODUCTS_SHEET.key) {
-    current = await tx.product.findUnique({ where: { sku: plan.key } }) as never;
+    // 2026-09-30（P1）：SKU 现在是租户内唯一 —— 必须带上 organisationId，否则会串到别家店同名的 SKU
+    current = await tx.product.findUnique({ where: { organisationId_sku: { organisationId, sku: plan.key } } }) as never;
   } else if (plan.sheet === PACKAGES_SHEET.key) {
     current = await tx.servicePackage.findFirst({ where: { branchId, name: plan.key } }) as never;
   } else if (plan.sheet === PACKAGE_ITEMS_SHEET.key) {
@@ -300,10 +301,10 @@ async function applyProduct(
     });
     out.created += 1;
   } else if (plan.action === "update") {
-    await tx.product.update({ where: { sku: plan.key }, data: data as never });
+    await tx.product.update({ where: { organisationId_sku: { organisationId: input.organisationId, sku: plan.key } }, data: data as never });
     out.updated += 1;
   } else if (plan.action === "delete") {
-    const product = await tx.product.findUnique({ where: { sku: plan.key }, select: { id: true } });
+    const product = await tx.product.findUnique({ where: { organisationId_sku: { organisationId: input.organisationId, sku: plan.key } }, select: { id: true } });
     if (!product) {
       out.skipped += 1;
       return;
@@ -535,6 +536,9 @@ async function applyMotorcycle(
     if (!customerId) throw new Error("Customer phone is required for a new vehicle: " + plan.key);
     await tx.motorcycle.create({
       data: {
+        // 与 applyProduct 同源：租户来自会话（applyPlans 的 input.organisationId）。
+        // 不写这一列，(organisationId, plate) 复合唯一键对 NULL 行不生效 —— 导入能塞进重复车牌。
+        organisationId: input.organisationId,
         customerId,
         plate: String(plan.values.plate ?? plan.key),
         brand: String(plan.values.brand ?? ""),

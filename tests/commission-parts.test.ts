@@ -25,7 +25,7 @@ const jobIds: string[] = [];
 async function makeJobWithPart(partPriceSen: number, qty: number, jobNumber: string) {
   const job = await db.serviceJob.create({
     data: {
-      jobNumber, branchId, customerId, motorcycleId: motoId, mileage: 1000, mechanicId: mechId,
+      jobNumber, organisationId: orgId, branchId, customerId, motorcycleId: motoId, mileage: 1000, mechanicId: mechId,
       status: "COMPLETED", completedAt: new Date(),
     },
   });
@@ -40,7 +40,7 @@ async function makeJobWithPart(partPriceSen: number, qty: number, jobNumber: str
   }
   await db.invoice.create({
     data: {
-      branchId, customerId, jobId: job.id, invoiceNumber: "PART-" + jobNumber,
+      organisationId: orgId, branchId, customerId, jobId: job.id, invoiceNumber: "PART-" + jobNumber,
       subtotalSen: partPriceSen * qty, discountSen: 0, totalSen: partPriceSen * qty,
     },
   });
@@ -60,7 +60,7 @@ beforeAll(async () => {
   mechId = mech.id;
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "Parts Customer " + tag } });
   customerId = customer.id;
-  const moto = await db.motorcycle.create({ data: { customerId, plate, brand: "Test", model: "Parts Bike", year: 2019, currentMileage: 1000 } });
+  const moto = await db.motorcycle.create({ data: { organisationId: org.id, customerId, plate, brand: "Test", model: "Parts Bike", year: 2019, currentMileage: 1000 } });
   motoId = moto.id;
   const product = await db.product.create({
     data: { organisationId: org.id, name: "Parts Oil " + tag, sku: "POIL-" + tag, sellPriceSen: 3500, costPriceSen: 2500, category: "ENGINE_OIL" },

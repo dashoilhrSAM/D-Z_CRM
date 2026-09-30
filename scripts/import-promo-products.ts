@@ -82,8 +82,9 @@ export async function seedPromoProducts(opts?: { imageSource?: string }) {
       sortOrder: i,
       active: true,
     };
-    const existing = await db.promoProduct.findUnique({ where: { sku: r.sku }, select: { id: true } });
-    if (existing) { await db.promoProduct.update({ where: { sku: r.sku }, data }); updated++; }
+    // 2026-09-30（P1）：PromoProduct.sku 改成租户内唯一，改走复合唯一键（组织取本脚本已解析的 org）
+    const existing = await db.promoProduct.findUnique({ where: { organisationId_sku: { organisationId: org.id, sku: r.sku } }, select: { id: true } });
+    if (existing) { await db.promoProduct.update({ where: { organisationId_sku: { organisationId: org.id, sku: r.sku } }, data }); updated++; }
     else { await db.promoProduct.create({ data }); created++; }
   }
   return { created, updated, copied, missing, total: await db.promoProduct.count(), expected: ROWS.length };

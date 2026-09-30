@@ -26,7 +26,10 @@ export function ApprovalCard({ approval }: { approval: { id: string; title: stri
 
   const respond = (d: "APPROVED" | "DECLINED") =>
     start(async () => {
-      await respondApproval(approval.id, d);
+      // 2026-09-30（P0）：服务端现在会校验"这条审批确实属于当前登录顾客"，被拒时返回 ok:false。
+      // 旧代码不看返回值就弹成功 —— 那会让用户以为审批已经生效。
+      const res = await respondApproval(approval.id, d);
+      if (!res.ok) { toast.error(res.error); return; }
       router.refresh();
       toast.success(d === "APPROVED" ? t("toast.approved", lang) : t("toast.declined", lang));
     });

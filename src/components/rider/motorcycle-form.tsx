@@ -81,7 +81,8 @@ export function MotorcycleForm({
         await updateMotorcycle({ motorcycleId, brand: effectiveBrand, model: effectiveModel, year: y, type, color, currentMileage: km });
         toast.success(t("toast.bike-updated", lang));
       } else if (customerId) {
-        await addMotorcycle({ customerId, brand: effectiveBrand, model: effectiveModel, year: y, type, color, currentMileage: km });
+        // 不再把 customerId 传给 server action：车主身份由会话推导，customerId 只用于判断「新增」模式
+        await addMotorcycle({ brand: effectiveBrand, model: effectiveModel, year: y, type, color, currentMileage: km });
         toast.success(t("toast.bike-added", lang));
       }
       onDone();

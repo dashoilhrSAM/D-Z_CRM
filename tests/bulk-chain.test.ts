@@ -54,7 +54,7 @@ beforeAll(async () => {
     data: { organisationId: org.id, name: "Bulk Owner " + tag, phone: "018-492 8009", email: "owner" + tag + "@dsh.test" },
   });
   await db.motorcycle.create({
-    data: { customerId: owner.id, plate: "VLL 3302 " + tag, brand: "Honda", model: "EX5 Dream", year: 2017, type: "UNDERBONE", currentMileage: 43215 },
+    data: { organisationId: org.id, customerId: owner.id, plate: "VLL 3302 " + tag, brand: "Honda", model: "EX5 Dream", year: 2017, type: "UNDERBONE", currentMileage: 43215 },
   });
   await db.serviceType.create({
     data: { organisationId: org.id, name: "Engine Oil Change", code: "ENGINE_OIL-" + tag, category: "ENGINE", durationMin: 30, priceSen: 8000, active: true },

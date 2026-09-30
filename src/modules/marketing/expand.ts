@@ -126,13 +126,15 @@ export function normalisePosterLine(raw: unknown, maxWords: number): string {
  * would be published as-is.
  */
 export async function expandScript(scriptId: string, opts?: { platforms?: readonly string[] }) {
-  const script = await db.contentScript.findUnique({ where: { id: scriptId } });
+  // 2026-09-30（P1）：PromoProduct.sku 改成租户内唯一，查产品必须带本租户 ——
+  // 组织经脚本所属分行取（ContentScript.branchId 是必填）。
+  const script = await db.contentScript.findUnique({ where: { id: scriptId }, include: { branch: { select: { organisationId: true } } } });
   if (!script) throw new Error("Script not found");
 
   const platforms = opts?.platforms ?? PLATFORMS;
 
   const product = script.productSku
-    ? await db.promoProduct.findUnique({ where: { sku: script.productSku } })
+    ? await db.promoProduct.findFirst({ where: { sku: script.productSku, organisationId: script.branch.organisationId } })
     : null;
   const productArg = product
     ? {

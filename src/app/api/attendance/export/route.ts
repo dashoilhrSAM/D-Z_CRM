@@ -31,7 +31,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
   }
 
-  const org = await db.organisation.findFirst();
+  // 2026-09-30 多租户修正（P0）：原来是 db.organisation.findFirst() —— 即"库里第一家公司"。
+  // 这张 CSV 是**按人按天的行踪明细**（给财务算工资用），导错店比导不到更糟。
+  // 租户只能来自会话；时区/门店名也从这一行取。
+  const org = await db.organisation.findUnique({ where: { id: session.orgId } });
   if (!org) return NextResponse.json({ ok: false, error: "No organisation" }, { status: 500 });
 
   const sp = req.nextUrl.searchParams;

@@ -9,7 +9,12 @@ const { mockSend, mockMessageCreate, dbMock } = vi.hoisted(() => {
   const dbMock = {
     customer: { findUnique: vi.fn(), findMany: vi.fn() },
     customerConsent: { findUnique: vi.fn() },
-    campaign: { findUnique: vi.fn() },
+    // 2026-09-30（P0）：broadcastCampaign 现在先证明 campaign 属于本组织，
+    // 用的是 findFirst（update/findUnique 只能吃唯一键，带不了关系过滤）。
+    campaign: { findUnique: vi.fn(), findFirst: vi.fn() },
+    // 权限判定会读 Permission 覆盖行；permissions.ts 用 .catch(() => null) 兜错误，
+    // 但 db.permission 本身不存在会**同步抛** TypeError，兜不住 —— 所以必须给一个空实现。
+    permission: { findUnique: vi.fn().mockResolvedValue(null) },
     branch: { findFirst: vi.fn() },
     organisation: { findFirst: vi.fn() },
     // frequency cap looks up recent marketing messages; default to "none"
@@ -22,8 +27,12 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/modules/marketing/service", () => ({ marketingService: {} }));
 vi.mock("@/providers", () => ({ messagingProvider: { name: "mock-whatsapp", send: mockSend } }));
 vi.mock("@/lib/db", () => ({ db: dbMock }));
+// getSessionUser 现在要返回完整的 SessionUser 形状：门禁读 .kind 判断是不是员工，
+// 读 .user.id 做权限判定的主体，读 .orgId 做租户收窄（旧 mock 只有 role/branchId）。
 vi.mock("@/lib/session-user", () => ({
-  getSessionUser: vi.fn().mockResolvedValue({ role: "MANAGER", branchId: "b-testing" }),
+  getSessionUser: vi.fn().mockResolvedValue({
+    kind: "staff", user: { id: "u-1" }, role: "MANAGER", orgId: "o1", branchId: "b-testing",
+  }),
 }));
 
 import { broadcastCampaign } from "@/actions/marketing";
@@ -36,7 +45,7 @@ describe("broadcastCampaign", () => {
     vi.clearAllMocks();
     dbMock.organisation.findFirst.mockResolvedValue({ id: "o1" });
     dbMock.branch.findFirst.mockResolvedValue({ id: "b-testing" });
-    dbMock.campaign.findUnique.mockResolvedValue({ id: "camp1", name: "Raya", audience: "ALL", audienceRules: null, branchId: "b-kl", discountPercent: 10 });
+    dbMock.campaign.findFirst.mockResolvedValue({ id: "camp1", name: "Raya", audience: "ALL", audienceRules: null, branchId: "b-kl", discountPercent: 10 });
     dbMock.customer.findMany.mockResolvedValue([customerA, customerB]);
     dbMock.customer.findUnique.mockImplementation(({ where }: { where: { id: string } }) =>
       Promise.resolve(where.id === "c1" ? customerA : customerB));

@@ -34,7 +34,11 @@ export function ReviewCard({ customerId, branchId, jobId, existingRating }: { cu
   const submit = () =>
     start(async () => {
       if (rating === 0) { toast.error(t("toast.pick-rating", lang)); return; }
-      await submitReview({ customerId, branchId, jobId, rating, comment: comment || undefined });
+      // 2026-09-30（P0）：服务端不再接受客户端传的 customerId/branchId（那让任何人都能
+      // 以别人名义写评价），改为从会话推导。这里必须判返回值 —— 旧代码不判，
+      // 于是被拒时也会弹"谢谢评价"，等于对用户说谎。
+      const res = await submitReview({ jobId, rating, comment: comment || undefined });
+      if (!res.ok) { toast.error(res.error); return; }
       setOpen(false);
       router.refresh();
       toast.success(t("toast.review-thanks", lang));

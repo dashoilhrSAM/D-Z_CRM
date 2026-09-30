@@ -64,7 +64,8 @@ export class PrismaJobRepository implements IJobRepository {
     return this.c(client).serviceJob.findUnique({ where: { id }, include: jobInclude });
   }
   getByNumber(jobNumber: string, client?: DbLike) {
-    return this.c(client).serviceJob.findUnique({ where: { jobNumber }, include: rowInclude });
+    // 2026-09-30（P1）：jobNumber 改成租户内唯一，findUnique 不再可用；要精确到某一家店请带 branch.organisationId。
+    return this.c(client).serviceJob.findFirst({ where: { jobNumber }, include: rowInclude });
   }
   create(data: Prisma.ServiceJobUncheckedCreateInput, client?: DbLike) {
     return this.c(client).serviceJob.create({ data, include: jobInclude });
@@ -78,9 +79,11 @@ export class PrismaJobRepository implements IJobRepository {
   countByStatus(status: import("@prisma/client").JobStatus, client?: DbLike) {
     return this.c(client).serviceJob.count({ where: { status } });
   }
-  async nextJobNumber(client?: DbLike) {
+  async nextJobNumber(organisationId: string, client?: DbLike) {
     const c = this.c(client);
-    const last = await c.serviceJob.findFirst({ orderBy: { jobNumber: "desc" } });
+    // 2026-09-30（P1）：工单号改成租户内唯一，取号范围必须一起收窄 ——
+    // 否则一家店的工单量会决定另一家店的号段（号码本身还会泄露别家的业务量）。
+    const last = await c.serviceJob.findFirst({ where: { organisationId }, orderBy: { jobNumber: "desc" } });
     const base = last ? parseInt(last.jobNumber.replace(/\D/g, ""), 10) : 1023;
     return "DZ" + (isNaN(base) ? 1024 : base + 1);
   }

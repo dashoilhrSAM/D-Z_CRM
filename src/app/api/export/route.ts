@@ -8,8 +8,11 @@ export async function GET(req: NextRequest) {
   if ("response" in auth) return auth.response;
 
   const type = req.nextUrl.searchParams.get("type") ?? "customers";
-  const org = await db.organisation.findFirst();
-  if (!org) return NextResponse.json({ error: "no org" }, { status: 500 });
+  // 2026-09-30 多租户修正（P0）：原来是 db.organisation.findFirst() —— 即"库里第一家公司"。
+  // 单租户时完全看不出来；一旦有第二家门店，**任何登录用户导出的都是第一家店的客户/线索/产品**，
+  // 而 products 这一路还带成本价（costPriceSen）。租户只能来自会话。
+  const org = { id: auth.session.orgId };
+  if (!org.id) return NextResponse.json({ error: "no org" }, { status: 500 });
   let csv = "";
   if (type === "customers") {
     const rows = await db.customer.findMany({ where: { organisationId: org.id }, orderBy: { createdAt: "desc" } });

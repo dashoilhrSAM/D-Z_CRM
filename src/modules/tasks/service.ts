@@ -15,6 +15,15 @@ export interface TaskCreateInput {
 
 export const tasksModule = {
   async create(input: TaskCreateInput) {
+    // ownerId 是**客户端可传**的字段。不校验的话可以指派给别的组织的员工，
+    // 并顺手往那个人的通知栏写一条（下面的 notification.create 用的是同一个 id）。
+    if (input.ownerId) {
+      const owner = await db.user.findFirst({
+        where: { id: input.ownerId, organisationId: input.organisationId },
+        select: { id: true },
+      });
+      if (!owner) throw new Error("TASK_OWNER_NOT_IN_ORG");
+    }
     const task = await db.task.create({
       data: {
         organisationId: input.organisationId,
@@ -66,24 +75,42 @@ export const tasksModule = {
     return { items: filtered, total: filtered.length, rawTotal: items.length };
   },
 
-  async complete(id: string, userId: string) {
-    const task = await db.task.update({
-      where: { id },
+  /**
+   * 状态变更一律带 organisationId：这四个方法原先只按裸 id 更新，
+   * 任何登录者拿到一个 id 就能改别的租户的任务（Task 自己有 organisationId，直接用）。
+   * 用 updateMany 而不是 update —— update 的 where 只接受唯一键，无法带 org 过滤；
+   * 返回 count 让调用方区分"改到了"与"不是你的"。
+   */
+  async complete(id: string, userId: string, organisationId: string) {
+    const res = await db.task.updateMany({
+      where: { id, organisationId },
       data: { status: "COMPLETED", completedAt: new Date(), completedById: userId },
     });
-    return task;
+    if (res.count === 0) return null;
+    return db.task.findFirst({ where: { id, organisationId } });
   },
 
-  async reopen(id: string) {
-    return db.task.update({ where: { id }, data: { status: "OPEN", completedAt: null, completedById: null } });
+  async reopen(id: string, organisationId: string) {
+    const res = await db.task.updateMany({
+      where: { id, organisationId },
+      data: { status: "OPEN", completedAt: null, completedById: null },
+    });
+    return res.count > 0;
   },
 
-  async cancel(id: string) {
-    return db.task.update({ where: { id }, data: { status: "CANCELLED" } });
+  async cancel(id: string, organisationId: string) {
+    const res = await db.task.updateMany({ where: { id, organisationId }, data: { status: "CANCELLED" } });
+    return res.count > 0;
   },
 
-  async update(id: string, data: { title?: string; description?: string | null; dueAt?: Date | null; priority?: string; ownerId?: string | null }) {
-    return db.task.update({ where: { id }, data });
+  async update(id: string, organisationId: string, data: { title?: string; description?: string | null; dueAt?: Date | null; priority?: string; ownerId?: string | null }) {
+    // 改派也要落在本组织内（与 create 同一条规则）
+    if (data.ownerId) {
+      const owner = await db.user.findFirst({ where: { id: data.ownerId, organisationId }, select: { id: true } });
+      if (!owner) throw new Error("TASK_OWNER_NOT_IN_ORG");
+    }
+    const res = await db.task.updateMany({ where: { id, organisationId }, data });
+    return res.count > 0;
   },
 
   /** TASK-016 hook: auto-create follow-up tasks (e.g. after test ride completion). */

@@ -242,7 +242,10 @@ export class BookingService {
       return { bookingId, jobId: null, jobNumber: null, type: "REPAIR", customerId: booking.customerId, motorcycleId: booking.motorcycleId };
     }
     const res = await db.$transaction(async (tx: DbLike) => {
-      const lastJob = await (tx as PrismaClient).serviceJob.findFirst({ orderBy: { jobNumber: "desc" } });
+      // 租户取自预约的车主（booking 已 include customer）。工单号是**租户内**唯一，
+      // 取号范围也必须跟着收窄 —— 否则第二家店的号段会由第一家的工单量决定。
+      const organisationId = booking.customer.organisationId;
+      const lastJob = await (tx as PrismaClient).serviceJob.findFirst({ where: { organisationId }, orderBy: { jobNumber: "desc" } });
       const base = lastJob ? parseInt(lastJob.jobNumber.replace(/\D/g, ""), 10) : 1023;
       const jobNumber = "DZ" + (isNaN(base) ? 1024 : base + 1);
       // service 内容：counter 可覆盖，缺省用 booking 里 rider 选好的（套餐 + 附加服务）
@@ -251,6 +254,8 @@ export class BookingService {
       const job = await (tx as PrismaClient).serviceJob.create({
         data: {
           jobNumber,
+          // (organisationId, jobNumber) 复合唯一键不约束 organisationId 为 NULL 的行，这一列必须写
+          organisationId,
           // job 归属 booking 所在 branch（多分支时不能用 main branch 硬绑）
           branchId: opts.branchId ?? booking.branchId,
           customerId: booking.customerId,

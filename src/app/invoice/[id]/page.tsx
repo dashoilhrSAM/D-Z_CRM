@@ -18,8 +18,12 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
   const session = await getSessionUser();
   if (session.kind !== "staff") redirect("/workshop/dashboard");
 
-  const invoice = await db.invoice.findUnique({
-    where: { id },
+  // 2026-09-30 多租户修正（P0）：这里原来是 db.invoice.findUnique({ where: { id } }) —— 只判了
+  // "是不是员工"，**没有判这张发票属不属于他所在的租户**，而 /invoice/* 也不在 middleware 的
+  // matcher 里。于是任何一家店的员工，只要拿到（或猜到）发票 id，就能读到别家的客户资料、
+  // 明细与收款记录。发票没有 organisationId 列，经 branch 收窄。
+  const invoice = await db.invoice.findFirst({
+    where: { id, branch: { organisationId: session.orgId } },
     include: {
       customer: true,
       branch: true,
@@ -29,7 +33,8 @@ export default async function InvoicePrintPage({ params }: { params: Promise<{ i
     },
   });
   if (!invoice) notFound();
-  const org = await db.organisation.findFirst();
+  // 抬头必须是**本租户**的公司资料；findFirst 在多租户下会把别家的名字/地址/税号印在发票上。
+  const org = await db.organisation.findUnique({ where: { id: session.orgId } });
   const paidSen = invoice.payments.filter((p) => p.status === "PAID" && p.method !== "PAY_LATER").reduce((s, p) => s + p.amountSen, 0);
   const remaining = Math.max(0, invoice.totalSen - paidSen);
   const isPaid = invoice.status === "PAID" || remaining <= 0;

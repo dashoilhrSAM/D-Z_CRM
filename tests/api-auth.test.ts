@@ -34,6 +34,16 @@ describe("middleware 覆盖 API", () => {
     expect(matcher, "matcher 必须包含 /api/:path*").toContain("/api/:path*");
   });
 
+  it("matcher 覆盖三个曾漏掉的打印/扫码页前缀", () => {
+    // 2026-09-30 多租户审计：/invoice/[id]、/quotation/[id]、/qr/* 先前**完全不在 matcher 里**，
+    // 于是 middleware 的 updateSession 不跑（会话不刷新），角色跳转矩阵也不适用。
+    // 进 matcher 不等于自动鉴权（归属校验在这三个页面里），但漏掉它会让页面拿到过期身份。
+    const matcher = read("src/middleware.ts").slice(read("src/middleware.ts").indexOf("matcher:"));
+    for (const p of ["/invoice/:path*", "/quotation/:path*", "/qr/:path*"]) {
+      expect(matcher, "matcher 必须包含 " + p).toContain(p);
+    }
+  });
+
   it("API 的默认是拒绝：无用户即 401，且公开名单是显式的", () => {
     const src = read("src/middleware.ts");
     expect(src, "必须有显式的公开名单").toContain("API_PUBLIC");

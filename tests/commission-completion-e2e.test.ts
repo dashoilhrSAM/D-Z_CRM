@@ -31,7 +31,7 @@ beforeAll(async () => {
   });
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "E2E Customer " + tag } });
   const moto = await db.motorcycle.create({
-    data: { customerId: customer.id, plate, brand: "Test", model: "E2E Bike", year: 2021, currentMileage: 1000 },
+    data: { organisationId: org.id, customerId: customer.id, plate, brand: "Test", model: "E2E Bike", year: 2021, currentMileage: 1000 },
   });
   await db.commissionRule.create({
     data: { organisationId: org.id, scope: "DEFAULT", basis: "PERCENT", value: 500, effectiveFrom: new Date("2020-01-01T00:00:00Z") },
@@ -40,7 +40,7 @@ beforeAll(async () => {
   // 工单 A：有技师，一条计费行(90.00) + 一条免费行
   const jobA = await db.serviceJob.create({
     data: {
-      jobNumber: "E2E-A-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
+      jobNumber: "E2E-A-" + tag, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
       mileage: 1000, mechanicId: mech.id, status: "READY",
     },
   });
@@ -51,7 +51,7 @@ beforeAll(async () => {
   // 工单 B：**没有技师**（完工时应当写 PENDING 而不是静默 0）
   const jobB = await db.serviceJob.create({
     data: {
-      jobNumber: "E2E-B-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
+      jobNumber: "E2E-B-" + tag, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
       mileage: 1000, status: "READY",
     },
   });
@@ -89,6 +89,9 @@ afterAll(async () => {
   await db.customer.deleteMany({ where: { organisationId: orgId } });
   await db.user.deleteMany({ where: { organisationId: orgId } });
   await db.branch.deleteMany({ where: { organisationId: orgId } });
+  // 完工流程会 upsert 一行 InvoiceCounter（见 commission-chain-e2e 里的同一处说明）：
+  // P1b 之后它的 organisationId 是 NOT NULL + ON DELETE RESTRICT，会挡住删组织。
+  await db.invoiceCounter.deleteMany({ where: { organisationId: orgId } });
   await db.organisation.delete({ where: { id: orgId } });
 });
 

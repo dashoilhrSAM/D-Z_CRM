@@ -1,7 +1,9 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { Bike, Phone, MapPin, Wrench, User as UserIcon } from "lucide-react";
 import { db } from "@/lib/db";
+import { getRiderCustomer } from "@/lib/rider-customer";
+import { getSessionUser } from "@/lib/session-user";
 import { fmtKM, fmtDate } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
@@ -11,15 +13,32 @@ import { formatRM } from "@/lib/money";
 export const dynamic = "force-dynamic";
 
 /**
- * QR 落地页 A（QR-001 车辆码）：Workshop 员工扫码 → 车辆 + 车主全套资料。
- * Deep link：/qr/motorcycle/<Motorcycle.id>
+ * QR 落地页 A（QR-001 车辆码）：扫码 → 车辆 + 车主资料。
+ * Deep link：/qr/motorcycle/<Motorcycle.qrToken>
+ *
+ * 2026-09-30 越权修正（P0）：本页原先零鉴权、且用 `OR [{qrToken}, {id}]` 兜底 ——
+ * id 是 cuid，按序枚举即可绕过不可枚举的 token，匿名读到车主姓名/电话/邮箱与消费总额。
+ * 现在只认 qrToken。
+ *
+ * 两种合法读者（**不要退化成只剩骑手**：这张码本来是印给店里扫的）：
+ *   ① 车主本人（rider 扫自己的车）；
+ *   ② **本租户的员工**（柜台/技师扫车上的码调资料）—— 令牌证明"这码是真的"，
+ *      租户归属证明"这个员工有权看这条记录"。两者缺一不可。
  */
 export default async function QrMotorcyclePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const lang = await getLang();
-  // QR 编码 qrToken（不可枚举）；兼容旧 id 直查
+  // 先要身份，再谈令牌：未登录直接去登录页（next 指回本页），连库都不查。
+  // 去 /login 而不是 /rider/login —— 那个页面同时有员工与骑手两个 tab，
+  // 而这张码的两类读者都会扫到它（2026-09-30：原先只跳骑手登录，会把员工挡在门外）。
+  const [rider, session] = await Promise.all([getRiderCustomer(), getSessionUser()]);
+  if (!rider && session.kind !== "staff") {
+    redirect("/login?next=" + encodeURIComponent("/qr/motorcycle/" + id));
+  }
+  // 只认 QR 编码的 qrToken（不可枚举）——原先的 OR [{qrToken}, {id}] 兜底让 token 的
+  // 防护形同虚设：id 是 cuid，攻击者按序枚举即可绕过 token 看到任意车主与其车辆档案。
   const bike = await db.motorcycle.findFirst({
-    where: { OR: [{ qrToken: id }, { id }] },
+    where: { qrToken: id },
     include: {
       customer: {
         include: {
@@ -28,7 +47,11 @@ export default async function QrMotorcyclePage({ params }: { params: Promise<{ i
       },
     },
   });
-  if (!bike) notFound();
+  // 归属校验：车主本人，或本租户的员工。否则 404（不暴露该车是否存在）。
+  // 注意 Motorcycle 没有 organisationId，租户归属经 customer 取。
+  const isOwner = !!rider && bike?.customerId === rider.id;
+  const isOwnStaff = session.kind === "staff" && bike?.customer.organisationId === session.orgId;
+  if (!bike || (!isOwner && !isOwnStaff)) notFound();
 
   const owner = bike.customer;
   const ti = motorcycleTypeInfo(bike.type);

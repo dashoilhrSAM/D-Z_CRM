@@ -36,7 +36,7 @@ beforeAll(async () => {
   const customer = await db.customer.create({ data: { organisationId: fx.orgId, name: "PLPJ " + tag + " Customer" } });
   fx.customerId = customer.id;
   const moto = await db.motorcycle.create({
-    data: { customerId: fx.customerId, brand: "Honda", model: "Wave", year: 2020, plate: ("PLPJ" + tag).toUpperCase().slice(0, 14) },
+    data: { organisationId: fx.orgId, customerId: fx.customerId, brand: "Honda", model: "Wave", year: 2020, plate: ("PLPJ" + tag).toUpperCase().slice(0, 14) },
   });
   fx.motorcycleId = moto.id;
 
@@ -47,6 +47,7 @@ beforeAll(async () => {
       const job = await db.serviceJob.create({
         data: {
           jobNumber: "PLPJ-" + tag + "-" + i,
+          organisationId: fx.orgId,
           branchId: fx.branchId,
           customerId: fx.customerId,
           motorcycleId: fx.motorcycleId,

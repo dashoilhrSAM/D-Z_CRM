@@ -24,6 +24,12 @@ export function BroadcastButton({ campaignId, stats }: { campaignId: string; sta
   const send = () =>
     start(async () => {
       const r = await broadcastCampaign({ campaignId, message: message || undefined });
+      // 被服务端拒绝时（未登录 / 无权限 / 不是本组织的 campaign）不能报成功：
+      // 旧版这里无条件 toast.success，于是"没发出去"看起来跟"发出去了"一样。
+      if (!r.ok) {
+        toast.error(t("toast.failed", lang));
+        return;
+      }
       setOpen(false);
       router.refresh();
       toast.success(tpl("broadcast.toast-sent", lang, { n: r.sent }));

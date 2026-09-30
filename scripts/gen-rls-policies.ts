@@ -62,14 +62,20 @@ function gen(): string {
   out.push("-- 可重复执行：所有策略 DROP IF EXISTS");
   out.push("");
   out.push("-- ============ helper 函数 ============");
-  out.push("CREATE OR REPLACE FUNCTION app_jwt_claim(name text) RETURNS text LANGUAGE sql STABLE AS $$ SELECT COALESCE(NULLIF(current_setting('request.jwt.claims', true)::jsonb->'user_metadata'->>name, ''), NULLIF(current_setting('request.jwt.claims', true)::jsonb->>name, ''), '') $$;");
+  // 2026-09-30（P0）只认 app_metadata：user_metadata 登录用户自己就能改（updateUser({data})），
+  // 而策略把里面的 orgId 当租户身份 —— 等于用户可以自选租户。app_metadata 只有 service role 能写。
+  // 刻意不回退 user_metadata：留回退等于没修。代价是 P3 把 injectBizClaims 改写到 app_metadata 之前，
+  // PostgREST 面一律拒绝 —— 应用不走 PostgREST，零影响，宁可 fail-closed。
+  out.push("CREATE OR REPLACE FUNCTION app_jwt_claim(name text) RETURNS text LANGUAGE sql STABLE AS $$ SELECT COALESCE(NULLIF(current_setting('request.jwt.claims', true)::jsonb->'app_metadata'->>name, ''), NULLIF(current_setting('request.jwt.claims', true)::jsonb->>name, ''), '') $$;");
   out.push("CREATE OR REPLACE FUNCTION app_current_org_id() RETURNS text LANGUAGE sql STABLE AS $$ SELECT app_jwt_claim('orgId') $$;");
   out.push("CREATE OR REPLACE FUNCTION app_current_branch_id() RETURNS text LANGUAGE sql STABLE AS $$ SELECT app_jwt_claim('branchId') $$;");
   out.push("CREATE OR REPLACE FUNCTION app_current_role() RETURNS text LANGUAGE sql STABLE AS $$ SELECT app_jwt_claim('role') $$;");
   out.push("CREATE OR REPLACE FUNCTION app_current_user_id() RETURNS text LANGUAGE sql STABLE AS $$ SELECT app_jwt_claim('userId') $$;");
   out.push("CREATE OR REPLACE FUNCTION app_current_customer_id() RETURNS text LANGUAGE sql STABLE AS $$ SELECT app_jwt_claim('customerId') $$;");
-  out.push("CREATE OR REPLACE FUNCTION app_is_admin() RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT app_current_role() IN ('" + ADMINS.join("','") + "') $$;");
-  out.push("CREATE OR REPLACE FUNCTION app_is_staff() RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT app_current_role() <> 'CUSTOMER' $$;");
+  // 2026-09-30（P0）fail-closed：原来只看角色，**没有 org claim 时 role 是空串**，
+  // 于是 "" <> 'CUSTOMER' 恒为真 —— "没登录 = 员工"。现在要求必须带非空 org claim。
+  out.push("CREATE OR REPLACE FUNCTION app_is_admin() RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT app_current_org_id() <> '' AND app_current_role() IN ('" + ADMINS.join("','") + "') $$;");
+    out.push("CREATE OR REPLACE FUNCTION app_is_staff() RETURNS boolean LANGUAGE sql STABLE AS $$ SELECT app_current_org_id() <> '' AND app_current_role() NOT IN ('', 'CUSTOMER') $$;");
   out.push("");
   out.push("-- ============ 表策略 ============");
   for (const m of models) {
@@ -80,7 +86,9 @@ function gen(): string {
     // 员工分支过滤：admin 跳过；无 branch claim 或行 branchId 为空视为全分支
     let branch = "";
     if (has(t, "branchId")) {
-      branch = ` AND (app_is_admin() OR app_current_branch_id() = '' OR "${t}"."branchId" IS NULL OR "${t}"."branchId" = app_current_branch_id())`;
+      // 2026-09-30（P0）：删掉 `app_current_branch_id() = ''` 这一项 —— 无 claim 时它恒为真，
+      // 等于"没有分行就算全部分行"，分行过滤整体失效。缺 claim 应视为看不到任何行（fail-closed）。
+      branch = ` AND (app_is_admin() OR "${t}"."branchId" IS NULL OR "${t}"."branchId" = app_current_branch_id())`;
     }
     // rider 自见：有 customerId 的表按 customerId；Customer 自身表按 id（无 customerId 列）
     let cust = "";

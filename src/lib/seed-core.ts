@@ -143,7 +143,11 @@ const SUPPLIERS = [
 
 export async function runSeed(): Promise<Record<string, number>> {
   const counts: Record<string, number> = {};
-  const org = await prisma.organisation.create({ data: { name: "D&Z Smart Workshop", currency: "MYR", qrToken: genQr() } });
+  // slug 是租户的**运营句柄**（平台台路由、备份/导出命名、日志、计费都以它为准）——
+  // 建组织时就必须给，否则运维侧只能看到一串 cuid。规则与 scripts/backfill-tenant-columns.ts 一致。
+  const org = await prisma.organisation.create({
+    data: { name: "D&Z Smart Workshop", slug: "d-z-smart-workshop", currency: "MYR", qrToken: genQr() },
+  });
   const branches = [];
   for (const [i, b] of ([
     // 主店用**真实地址**：它不只是展示用的字符串——考勤地理围栏以它为锚点，
@@ -258,8 +262,8 @@ export async function runSeed(): Promise<Record<string, number>> {
   ] } } });
   const packages = { BASIC: basic, STANDARD: standard, PREMIUM: premium };
 
-  // checklist template
-  const template = await prisma.checklistTemplate.create({ data: { name: "Standard Inspection", isDefault: true, items: { create: [
+  // checklist template（带 organisationId：复合唯一键对 NULL 行不生效，种子数据必须自洽）
+  const template = await prisma.checklistTemplate.create({ data: { organisationId: org.id, name: "Standard Inspection", isDefault: true, items: { create: [
     { name: "Engine Oil", order: 1 }, { name: "Oil Filter", order: 2 }, { name: "Brake", order: 3 },
     { name: "Chain", order: 4 }, { name: "Tyres", order: 5 }, { name: "Coolant", order: 6 },
     { name: "Electrical", order: 7 }, { name: "Lights", order: 8 }, { name: "Final Inspection", order: 9 },
@@ -310,9 +314,12 @@ export async function runSeed(): Promise<Record<string, number>> {
       address: "No. 12, Jalan Cempaka 3, Cheras", notes: "Rider app user. Prefers Standard Service.",
     },
   });
+  // 车辆/工单/发票的 organisationId 必须写：它们是租户内唯一（plate / jobNumber / invoiceNumber），
+  // 而复合唯一键**不约束 organisationId 为 NULL 的行** —— 种子库否则会缺了这一层约束。
   const ahmadBike = await prisma.motorcycle.create({
     data: {
       qrToken: genQr(),
+      organisationId: org.id,
       customerId: ahmad.id, brand: "Yamaha", model: "Y15ZR", year: 2019, type: "UNDERBONE", plate: "WXY 8812",
       color: "Black", vin: "MH3RG15V0KJ0" + int(10000, 99999),
       currentMileage: 31800,
@@ -335,6 +342,7 @@ export async function runSeed(): Promise<Record<string, number>> {
     const m = await prisma.motorcycle.create({
       data: {
         qrToken: genQr(),
+        organisationId: org.id,
         customerId: cust.id, brand, model, year, type: typeKey, plate: makePlate(),
         color: pick(["Black", "Red", "Blue", "White", "Grey", "Silver"]),
         currentMileage: mileage,
@@ -352,7 +360,7 @@ export async function runSeed(): Promise<Record<string, number>> {
     for (let k = 0; k < int(1, 2); k++) {
       const [brand, model, year, typeKey] = pick(BIKE_MODELS);
       const m = await prisma.motorcycle.create({
-        data: { customerId: cust.id, brand, model, year, type: typeKey, plate: makePlate(), color: pick(["Black", "Red", "Blue"]), currentMileage: int(500, 20000) },
+        data: { organisationId: org.id, customerId: cust.id, brand, model, year, type: typeKey, plate: makePlate(), color: pick(["Black", "Red", "Blue"]), currentMileage: int(500, 20000) },
       });
       bikeIds.push({ id: m.id, customerId: cust.id, brand, model, plate: m.plate, year, type: typeKey, mileage: m.currentMileage });
     }
@@ -384,6 +392,7 @@ export async function runSeed(): Promise<Record<string, number>> {
     const completedAt = opts.status === "COMPLETED" ? new Date(created.getTime() + (opts.completedHoursAgo ?? int(2, 5)) * 3600000) : null;
     const job = await prisma.serviceJob.create({
       data: {
+        organisationId: org.id,
         jobNumber, branchId: kl.id, customerId: opts.customerId, motorcycleId: opts.motorcycleId,
         mechanicId: opts.mechanicId, mileage: opts.mileage,
         servicePackageId: opts.packageId, packageName: opts.packageName ?? null,
@@ -462,7 +471,7 @@ export async function runSeed(): Promise<Record<string, number>> {
       const issued = job.completedAt ?? new Date();
       const invNo = "DZ-2026-" + String(1028 + jobSeq).padStart(5, "0");
       const invoice = await prisma.invoice.create({
-        data: { branchId: kl.id, customerId: opts.customerId, jobId: job.id, invoiceNumber: invNo, status: "PAID", issuedAt: issued, paidAt: issued, subtotalSen: totalSen, totalSen },
+        data: { organisationId: org.id, branchId: kl.id, customerId: opts.customerId, jobId: job.id, invoiceNumber: invNo, status: "PAID", issuedAt: issued, paidAt: issued, subtotalSen: totalSen, totalSen },
       });
       const jobItems = await prisma.serviceJobItem.findMany({ where: { jobId: job.id, unitPriceSen: { gt: 0 }, status: { not: "DECLINED" } } });
       for (const it of jobItems) {

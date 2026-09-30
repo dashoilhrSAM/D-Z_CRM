@@ -40,7 +40,9 @@ export function QuotationCard({ quotation }: { quotation: QuotationDto }) {
 
   const respond = (d: "APPROVED" | "REJECTED") =>
     start(async () => {
-      await respondQuotation(quotation.id, d);
+      // 2026-09-30（P0）：服务端会校验报价归属，被拒时返回 ok:false；不看返回值会谎报成功。
+      const res = await respondQuotation(quotation.id, d);
+      if (!res.ok) { toast.error(res.error); return; }
       router.refresh();
       toast.success(d === "APPROVED" ? t("quotation.approved", lang) : t("quotation.rejected", lang));
     });

@@ -106,7 +106,6 @@ export default async function BookPage({ searchParams }: { searchParams: Promise
           </div>
 
           <BookForm
-            customerId={customer.id}
             bikes={bikes}
             packages={packages.map((p) => ({ id: p.id, name: p.name, tier: p.tier, priceSen: p.priceSen, isBestValue: p.isBestValue, description: p.description }))}
             campaignId={campaignId}

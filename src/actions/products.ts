@@ -5,10 +5,12 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 
 const CAN_MANAGE = new Set(["OWNER", "SUPER_ADMIN", "HEAD_OFFICE_ADMIN", "MANAGER"]);
-async function requireProductManager(): Promise<{ ok: true } | { ok: false; error: string }> {
+async function requireProductManager(): Promise<{ ok: true; orgId: string } | { ok: false; error: string }> {
   const session = await getSessionUser();
   if (session.kind !== "staff" || !CAN_MANAGE.has(session.role)) return { ok: false, error: "Only owners/managers can manage the product catalogue." };
-  return { ok: true };
+  // 组织取会话，不用 organisation.findFirst()：多租户下后者等于"第一个组织"，
+  // 于是新建产品会落进错误的租户，而按裸 id 的更新/停用则能改到别的租户的产品。
+  return { ok: true, orgId: session.orgId };
 }
 
 export type ProductInput = {
@@ -25,12 +27,11 @@ export type ProductInput = {
 export async function createProduct(input: ProductInput) {
   const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  const org = await db.organisation.findFirst();
-  const exists = await db.product.findFirst({ where: { sku: input.sku } });
+  const exists = await db.product.findFirst({ where: { sku: input.sku, organisationId: auth.orgId } });
   if (exists) return { ok: false as const, error: "SKU already exists." };
   await db.product.create({
     data: {
-      organisationId: org!.id,
+      organisationId: auth.orgId,
       name: input.name, sku: input.sku,
       manufacturerPartNo: input.manufacturerPartNo ?? null, barcode: input.barcode ?? null,
       category: input.category ?? null, brand: input.brand ?? null, unit: input.unit ?? "unit",
@@ -47,8 +48,13 @@ export async function createProduct(input: ProductInput) {
 export async function updateProduct(id: string, input: ProductInput) {
   const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  const clash = await db.product.findFirst({ where: { sku: input.sku, NOT: { id } } });
+  const clash = await db.product.findFirst({ where: { sku: input.sku, organisationId: auth.orgId, NOT: { id } } });
   if (clash) return { ok: false as const, error: "SKU already exists." };
+  // 先查归属再改：Product 有 organisationId，但 update 的 where 只接受唯一键，
+  // 所以要一次 findFirst 判定"存在且属于本组织"，跨租户一律 "Not found"。
+  if (!(await db.product.findFirst({ where: { id, organisationId: auth.orgId }, select: { id: true } }))) {
+    return { ok: false as const, error: "Not found" };
+  }
   await db.product.update({
     where: { id },
     data: {
@@ -68,7 +74,8 @@ export async function updateProduct(id: string, input: ProductInput) {
 export async function deleteProduct(id: string) {
   const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  await db.product.update({ where: { id }, data: { active: false } });
+  const res = await db.product.updateMany({ where: { id, organisationId: auth.orgId }, data: { active: false } });
+  if (res.count === 0) return { ok: false as const, error: "Not found" };
   revalidatePath("/workshop/inventory/products");
   return { ok: true };
 }
@@ -77,7 +84,8 @@ export async function deleteProduct(id: string) {
 export async function setProductActive(id: string, active: boolean) {
   const auth = await requireProductManager();
   if (!auth.ok) return { ok: false as const, error: auth.error };
-  await db.product.update({ where: { id }, data: { active } });
+  const res = await db.product.updateMany({ where: { id, organisationId: auth.orgId }, data: { active } });
+  if (res.count === 0) return { ok: false as const, error: "Not found" };
   revalidatePath("/workshop/inventory/products");
   return { ok: true };
 }

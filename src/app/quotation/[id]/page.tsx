@@ -21,9 +21,14 @@ export default async function QuotationPrintPage({ params }: { params: Promise<{
   const session = await getSessionUser();
   if (session.kind !== "staff") redirect("/workshop/dashboard");
 
+  // 2026-09-30 多租户修正（P0）：jobService.getDetail 走 repo.getById(id)（findUnique by id），
+  // 本身不带租户收窄；这里只判了 "是不是员工"，而 /quotation/* 也不在 middleware 的 matcher 里。
+  // 于是任何一家店的员工拿到工单 id 就能读到别家的报价、明细与价格。
+  // jobInclude 已带 branch，所以归属判定不需要额外查询。
   const detail = await jobService.getDetail(id);
-  if (!detail) notFound();
-  const org = await db.organisation.findFirst();
+  if (!detail || detail.branch?.organisationId !== session.orgId) notFound();
+  // 抬头必须是**本租户**的公司资料（原来是 findFirst，多租户下会印别家的名字/地址/税号）。
+  const org = await db.organisation.findUnique({ where: { id: session.orgId } });
   const q = detail.quotation;
   const lines: QuoteLine[] = q?.itemsJson ? (() => { try { return JSON.parse(q.itemsJson) as QuoteLine[]; } catch { return []; } })() : [];
   const partsSen = lines.filter((l) => l.kind === "PART").reduce((s, l) => s + l.lineTotalSen, 0);

@@ -144,5 +144,12 @@ export async function middleware(req: NextRequest) {
 
 export const config = {
   // ⚠️ /api/:path* 必须在这里：少了它，所有 API 路由都绕过 middleware（2026-09-14 审计实测）。
-  matcher: ["/workshop/:path*", "/rider/:path*", "/mechanic-app/:path*", "/api/:path*"],
+  //
+  // 2026-09-30（P0）补上 /invoice、/quotation、/qr：
+  //   · /invoice/[id] 与 /quotation/[id] 是**打印页**，先前完全不经过 middleware，
+  //     于是既不刷新 Supabase 会话（会话过期后页面拿不到身份），也不走角色跳转矩阵；
+  //   · /qr/* 是扫码落地页，同样需要会话刷新，否则刚扫码的骑手看到的是未登录态。
+  // 注意：进 matcher ≠ 自动鉴权 —— 这三个前缀的**归属校验在页面里**（租户/本人判定），
+  // 因为 middleware 只有 JWT claims，够不上权威（见文件头说明）。
+  matcher: ["/workshop/:path*", "/rider/:path*", "/mechanic-app/:path*", "/api/:path*", "/invoice/:path*", "/quotation/:path*", "/qr/:path*"],
 };

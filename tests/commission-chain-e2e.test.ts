@@ -38,7 +38,7 @@ beforeAll(async () => {
   mechId = mech.id;
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "Chain Customer " + tag } });
   const moto = await db.motorcycle.create({
-    data: { customerId: customer.id, plate, brand: "Test", model: "Chain Bike", year: 2020, currentMileage: 5000 },
+    data: { organisationId: org.id, customerId: customer.id, plate, brand: "Test", model: "Chain Bike", year: 2020, currentMileage: 5000 },
   });
 
   // 商品（机油）与基础规则：5% —— 与生产上那个目标同一个形状
@@ -65,7 +65,7 @@ beforeAll(async () => {
   // 一单卖 10 件（柜台真的这么卖才会有的工单）
   const job = await db.serviceJob.create({
     data: {
-      jobNumber: "CHAIN-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
+      jobNumber: "CHAIN-" + tag, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
       mileage: 5000, mechanicId: mech.id, status: "READY",
     },
   });
@@ -113,6 +113,11 @@ afterAll(async () => {
   await db.customer.deleteMany({ where: { organisationId: ORG() } });
   await db.user.deleteMany({ where: { organisationId: ORG() } });
   await db.branch.deleteMany({ where: { organisationId: ORG() } });
+  // 完工流程会给该组织 upsert 一行 InvoiceCounter（按 (org, year) 取号）。
+  // 2026-09-30（P1b）：InvoiceCounter.organisationId 变成 NOT NULL + ON DELETE RESTRICT，
+  // 于是「组织还有计数器行」会真的挡住删组织 —— 这正是 RESTRICT 想要的行为，
+  // 所以清理要把它一起删掉，而不是去放宽约束。
+  await db.invoiceCounter.deleteMany({ where: { organisationId: ORG() } });
   await db.organisation.delete({ where: { id: ORG() } });
 });
 

@@ -52,12 +52,12 @@ beforeAll(async () => {
   mechB = b.id;
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "Recon Customer " + tag } });
   customerId = customer.id;
-  const moto = await db.motorcycle.create({ data: { customerId: customer.id, plate, brand: "Test", model: "Recon Bike", year: 2020, currentMileage: 1000 } });
+  const moto = await db.motorcycle.create({ data: { organisationId: org.id, customerId: customer.id, plate, brand: "Test", model: "Recon Bike", year: 2020, currentMileage: 1000 } });
 
   // 工单 A：已计提（有一行计费行 + 一条 BASE）
   const jobA = await db.serviceJob.create({
     data: {
-      jobNumber: JOB_A, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
+      jobNumber: JOB_A, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
       mileage: 1000, mechanicId: mechA, status: "COMPLETED", completedAt: new Date("2026-09-10T04:00:00Z"),
     },
   });
@@ -65,7 +65,7 @@ beforeAll(async () => {
     data: { jobId: jobA.id, description: "Recon Service", kind: "SERVICE", quantity: 1, unitPriceSen: 20000, lineTotalSen: 20000, status: "INCLUDED", source: "COUNTER" },
   });
   const invA = await db.invoice.create({
-    data: { branchId: branch.id, customerId: customer.id, jobId: jobA.id, invoiceNumber: "RC-" + tag, issuedAt: new Date("2026-09-10T04:00:00Z"), subtotalSen: 20000, discountSen: 0, totalSen: 20000 },
+    data: { organisationId: org.id, branchId: branch.id, customerId: customer.id, jobId: jobA.id, invoiceNumber: "RC-" + tag, issuedAt: new Date("2026-09-10T04:00:00Z"), subtotalSen: 20000, discountSen: 0, totalSen: 20000 },
   });
   await db.invoiceItem.create({ data: { invoiceId: invA.id, description: "Recon Service", quantity: 1, unitPriceSen: 20000, lineTotalSen: 20000 } });
   await ledgerRow(mechA, "BASE", 1000, new Date("2026-09-10T04:00:00Z"), WINDOW);
@@ -74,7 +74,7 @@ beforeAll(async () => {
   // 工单 B：**历史工单**（P2 之前完工，台账里一行都没有）—— 不该被报成"未覆盖"
   const jobB = await db.serviceJob.create({
     data: {
-      jobNumber: "RC-HIST-" + tag, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
+      jobNumber: "RC-HIST-" + tag, organisationId: org.id, branchId: branch.id, customerId: customer.id, motorcycleId: moto.id,
       mileage: 1000, mechanicId: mechA, status: "COMPLETED", completedAt: new Date("2026-08-01T04:00:00Z"),
     },
   });
@@ -187,7 +187,7 @@ describe("零件行也要覆盖（P4b）", () => {
     const moto = await db.motorcycle.findFirst({ where: { plate } });
     const job = await db.serviceJob.create({
       data: {
-        jobNumber, branchId, customerId, motorcycleId: moto!.id, mileage: 2000, mechanicId: mechA,
+        jobNumber, organisationId: orgId, branchId, customerId, motorcycleId: moto!.id, mileage: 2000, mechanicId: mechA,
         status: "COMPLETED", completedAt: new Date("2026-09-12T04:00:00Z"),
       },
     });

@@ -36,6 +36,13 @@ model Organisation {
   id            String   @id @default(cuid())
   qrToken       String?  @unique // QR-003: unguessable scan token
   name          String
+  // 2026-09-30（P1）运营句柄：平台台路由、备份/导出命名、日志、计费、支持链接都以它为准。
+  // 先可空（生产是加法变更，能自动上）；回填后再收紧为 NOT NULL + @unique。
+  slug          String?  @unique
+  /// ACTIVE | SUSPENDED | TRIAL —— 停用后全端拒绝（含 rider）
+  status        String   @default("ACTIVE")
+  plan          String   @default("STANDARD")
+  trialEndsAt   DateTime?
   currency      String   @default("MYR")
   // PLT-005 company profile
   logo          String?
@@ -100,6 +107,12 @@ model Organisation {
   permissions   Permission[]
   roleConfigs   RoleConfig[]
   serviceHistory ServiceHistory[]
+
+  motorcycles   Motorcycle[]
+  serviceJobs   ServiceJob[]
+  invoices      Invoice[]
+  checklistTemplates ChecklistTemplate[]
+  invoiceCounters InvoiceCounter[]
 }
 
 
@@ -196,7 +209,7 @@ model PromoProduct {
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   name           String
-  sku            String       @unique
+  sku            String   // 租户内唯一，见文件末尾 @@unique
   brand          String?      // DASHCIL | DASHOIL | D&Z
   category       String?      // ENGINE_OIL | CHAIN_LUBE | COOLANT | GEAR_OIL
   series         String?      // E | H | S | R  (product family)
@@ -214,6 +227,7 @@ model PromoProduct {
   sortOrder      Int          @default(0)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+  @@unique([organisationId, sku])
 }
 
 /// Per-brand voice and guardrails for content generation.
@@ -282,6 +296,8 @@ model Branch {
   leads          Lead[]
   tasks          Task[]
   serviceHistory ServiceHistory[]
+  servicePackages ServicePackage[]
+  attendances    Attendance[]
 }
 
 model User {
@@ -292,7 +308,7 @@ model User {
   branch         Branch?  @relation(fields: [branchId], references: [id])
   name           String
   phone          String?
-  email          String?  @unique
+  email          String?  // 租户内唯一，见文件末尾 @@unique
   role           Role     @default(MECHANIC)
   active         Boolean  @default(true)
   // SUPABASE AUTH: auth.users.id (production login); null = demo-only user
@@ -319,6 +335,7 @@ model User {
   attendancePunches AttendancePunch[]
   /** 个人提成算法 { commissionType, commissionValue, addonBonusSen? } — null 用 org 默认 */
   commissionRules String?
+  @@unique([organisationId, email])
 }
 
 // ---------- Customers ----------
@@ -377,13 +394,16 @@ model CustomerAuthProfile {
 
 model Motorcycle {
   id                   String    @id @default(cuid())
+  // 2026-09-30（P1）租户列（先可空：生产是加法变更）。回填后收紧为 NOT NULL。
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
   qrToken              String?   @unique // QR-001: unguessable scan token
   customerId           String
   customer             Customer  @relation(fields: [customerId], references: [id])
   brand                String
   model                String
   year                 Int
-  plate                String    @unique
+  plate                String   // 租户内唯一，见文件末尾 @@unique
   vin                  String?
   engineNo             String?
   color                String?
@@ -406,6 +426,8 @@ model Motorcycle {
   reminders            ServiceReminder[]
   testRides            TestRide[]
   serviceHistory       ServiceHistory[]
+  @@unique([organisationId, plate])
+  @@index([organisationId])
 }
 
 // ---------- Bookings ----------
@@ -492,7 +514,10 @@ enum ItemSource {
 
 model ServiceJob {
   id              String     @id @default(cuid())
-  jobNumber       String     @unique
+  // 2026-09-30（P1）租户列（先可空：生产是加法变更）。回填后收紧为 NOT NULL。
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
+  jobNumber       String   // 租户内唯一，见文件末尾 @@unique
   branchId        String
   branch          Branch     @relation(fields: [branchId], references: [id])
   customerId      String
@@ -532,6 +557,8 @@ model ServiceJob {
   commissionSen   Int?
   /** 该 job 给技师的手工奖金（sen）；结算时可手填 */
   bonusSen        Int?
+  @@unique([organisationId, jobNumber])
+  @@index([organisationId])
 }
 
 // ---------- Mechanic pre-service SOP photos (开工前拍照记录) ----------
@@ -631,10 +658,14 @@ enum CheckResult {
 
 model ChecklistTemplate {
   id        String   @id @default(cuid())
+  // 2026-09-30（P1）租户列（先可空：生产是加法变更）。回填后收紧为 NOT NULL。
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
   name      String
   branchId  String?
   isDefault Boolean  @default(false)
   items     ChecklistItem[]
+  @@index([organisationId])
 }
 
 model ChecklistItem {
@@ -723,6 +754,8 @@ enum PackageTier {
 model ServicePackage {
   id           String   @id @default(cuid())
   branchId     String?
+  /** 2026-09-30（P1b）：补关系 —— 只有裸标量 branchId 时，套餐**根本无法按租户收窄**。 */
+  branch       Branch?  @relation(fields: [branchId], references: [id])
   name         String
   tier         PackageTier
   priceSen     Int
@@ -754,7 +787,7 @@ model Product {
   organisationId String
   organisation   Organisation @relation(fields: [organisationId], references: [id])
   name           String
-  sku            String   @unique
+  sku            String   // 租户内唯一，见文件末尾 @@unique
   manufacturerPartNo String?
   barcode        String?
   imageUrl       String? // product photo (public/products/<sku>.png)
@@ -777,6 +810,7 @@ model Product {
   jobParts       ServiceJobPart[]
   poItems        PurchaseOrderItem[]
   packageItems   ServicePackageItem[]
+  @@unique([organisationId, sku])
 }
 
 model Inventory {
@@ -870,13 +904,16 @@ enum InvoiceSource {
 
 model Invoice {
   id            String        @id @default(cuid())
+  // 2026-09-30（P1）租户列（先可空：生产是加法变更）。回填后收紧为 NOT NULL。
+  organisationId String
+  organisation   Organisation  @relation(fields: [organisationId], references: [id])
   branchId      String
   branch        Branch        @relation(fields: [branchId], references: [id])
   customerId    String
   customer      Customer      @relation(fields: [customerId], references: [id])
   jobId         String?       @unique
   job           ServiceJob?   @relation(fields: [jobId], references: [id])
-  invoiceNumber String        @unique
+  invoiceNumber String   // 租户内唯一，见文件末尾 @@unique
   status        InvoiceStatus @default(ISSUED)
   issuedAt      DateTime      @default(now())
   paidAt        DateTime?
@@ -899,6 +936,8 @@ model Invoice {
   totalSen      Int           @default(0)
   items         InvoiceItem[]
   payments      Payment[]
+  @@unique([organisationId, invoiceNumber])
+  @@index([organisationId])
 }
 
 model InvoiceItem {
@@ -1223,7 +1262,7 @@ model LeadStage {
 
 model Lead {
   id                  String     @id @default(cuid())
-  leadNumber          String     @unique
+  leadNumber          String   // 租户内唯一，见文件末尾 @@unique
   organisationId      String
   organisation        Organisation @relation(fields: [organisationId], references: [id])
   branchId            String?
@@ -1254,6 +1293,7 @@ model Lead {
   updatedAt           DateTime   @updatedAt
   activities          LeadActivity[]
   testRides           TestRide[]
+  @@unique([organisationId, leadNumber])
 }
 
 model LeadActivity {
@@ -1364,6 +1404,8 @@ model Attendance {
   // HRM: 当日汇总（由 AttendancePunch 重算得出）。原字段保留 → 历史数据零迁移，
   // 看板查询也不变；新增的明细只活在 AttendancePunch 里。
   branchId       String?
+  /** 2026-09-30（P1b）：补关系 —— 裸标量 branchId 让考勤无法按租户/分行收窄（只有 user 一条路）。 */
+  branch         Branch?  @relation(fields: [branchId], references: [id])
   firstInAt      DateTime?
   lastOutAt      DateTime?
   workedMinutes  Int      @default(0)
@@ -1405,12 +1447,15 @@ model AttendancePunch {
   @@index([userId, businessDate])
   @@index([branchId, businessDate])
   @@index([photoSha256])
+  corrections  AttendanceCorrection[]
 }
 
 /** 更正申请：原记录永不改，这里追加「谁、何时、把什么改成什么、为什么、谁批的」。 */
 model AttendanceCorrection {
   id          String    @id @default(cuid())
   punchId     String
+  /** 2026-09-30（P1b）：补关系 —— 没有它，更正申请既到不了 punch 也到不了租户。 */
+  punch       AttendancePunch @relation(fields: [punchId], references: [id], onDelete: Cascade)
   requestedBy String
   reason      String
   beforeJson  String
@@ -1568,7 +1613,7 @@ model LoyaltyAccount {
   customer       Customer          @relation(fields: [customerId], references: [id])
   tierId         String?
   tier           LoyaltyTier?      @relation(fields: [tierId], references: [id])
-  membershipId   String            @unique
+  membershipId   String   // 租户内唯一，见文件末尾 @@unique
   pointsBalance  Int               @default(0)
   totalEarned    Int               @default(0)
   totalRedeemed  Int               @default(0)
@@ -1576,6 +1621,7 @@ model LoyaltyAccount {
   createdAt      DateTime          @default(now())
   transactions   LoyaltyTransaction[]
   redemptions    RewardRedemption[]
+  @@unique([organisationId, membershipId])
 }
 
 model LoyaltyTransaction {
@@ -1857,10 +1903,21 @@ model CommissionClaim {
 /// 另：count 还有一个隐患 —— 删掉一张发票会让号码回退、与既有发票重号。
 ///
 /// 按**年份全局**编号（与既有发票号 DZ-YYYY-NNNNN 的语义一致：invoiceNumber 是全局唯一键）。
+/// 发票号计数器：**按租户 + 年份**一条序列。
+///
+/// 2026-09-30（P1b）：主键从 `year` 改成 `[organisationId, year]`。这不是"更隔离"的美化，
+/// 而是修一个真实故障：计数器与"回看最大号"必须**同时**按租户收窄 ——
+/// 只收窄回看的话，某年计数器行不存在时种子会取自 A 店的最大号，而 B 店当年已有更大的号，
+/// 全局序列被建到 B 的 max 之下 → B 随后取到的号撞**自己已有**的号 → P2002 → 完工事务回滚。
+/// 两者一起收窄后，每家店各自从自己的 max 起步，永不回退、永不撞自己。
 model InvoiceCounter {
-  year  Int @id
+  organisationId String
+  organisation   Organisation @relation(fields: [organisationId], references: [id])
+  year           Int
   /// 已发出的最后一个号码（不是「下一个」）—— 语义写清楚才不会在边界上出错
-  value Int
+  value          Int
+
+  @@id([organisationId, year])
 }
 
 /// 文档（文档通路 P0）：客户证件、保险单、发票、采购单、供应商文件、员工证件……

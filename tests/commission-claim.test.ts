@@ -40,7 +40,7 @@ beforeAll(async () => {
   mechA = a.id;
   mechB = b.id;
   const customer = await db.customer.create({ data: { organisationId: org.id, name: "Claim Customer " + tag } });
-  await db.motorcycle.create({ data: { customerId: customer.id, plate, brand: "Test", model: "Claim Bike", year: 2020 } });
+  await db.motorcycle.create({ data: { organisationId: org.id, customerId: customer.id, plate, brand: "Test", model: "Claim Bike", year: 2020 } });
   const product = await db.product.create({ data: { organisationId: org.id, name: "Claim Oil " + tag, sku: "OIL-" + tag, sellPriceSen: 5000, costPriceSen: 3000, category: "OIL" } });
   productId = product.id;
 

@@ -47,7 +47,8 @@ export interface IJobRepository {
   update(id: string, data: Prisma.ServiceJobUpdateInput, client?: DbLike): Promise<JobFull>;
   count(client?: DbLike): Promise<number>;
   countByStatus(status: string, client?: DbLike): Promise<number>;
-  nextJobNumber(client?: DbLike): Promise<string>;
+  /** 取下一个工单号。**必须**带 organisationId：工单号是租户内唯一，全表取号会串号段。 */
+  nextJobNumber(organisationId: string, client?: DbLike): Promise<string>;
 }
 
 export type { DbLike } from "@/modules/customers/repository";
