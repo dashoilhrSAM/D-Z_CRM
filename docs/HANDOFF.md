@@ -1,4 +1,4 @@
-# HANDOFF — D&Z Platform（2026-09-15 16:15）
+# HANDOFF — D&Z Platform（2026-09-30 14:08）
 
 > 本文件由 session-pack 生成，session-resume 可续接。
 
@@ -6,84 +6,140 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**HRM 考勤（打卡 + 照片 + 定位）已合并上线，并在生产上真跑通**（PR #28，今天 15:03 部署）。同一次部署引发过整站 500——生产库缺整批 schema——已用加性 DDL 修好，并新增「生产无法验证 schema 就拦住构建」的护栏。**两条分支待审**：`fix/schema-drift-fails-the-build`（护栏，建议优先合）、`fix/job-number-sequence`（工单号序列，仍未合）。本地基线全绿：tsc 0 / vitest **500**（39 文件）/ build 通过 / Playwright **51 通过·0 失败**；生产 `/` 200、schema 复检 agree。
+**多租户隔离 P0→P1→P2 已全部合并上线**（PR #97/#98/#99；`origin/main = f65bee4`），
+**P3a 身份映射（AuthLink）已建表 + 回填 + 上线**；**P3b 已勘察但刻意未施工** ——
+施工单在 `docs/MULTI_TENANT_PLAN.md` §P3 的「P3b 施工单」（6 步，每步可独立验证）。
+最关键的一条判断：**不能先松开 `authId` 唯一键**，否则会打开跨店劫持（见「关键决策」第 3 条）。
+基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **947**（83 文件）/ build 通过 / Playwright **55**；
+生产 `/` 200、`/qr/rider/x` 307、匿名数据面 7 张探针表全 **401**、schema `agree`。
 
 ## 会话信息
-- 原会话 ID：session-c5af9e3c-d22c-49a6-8fde-3c246dbfe102（「继续 D&Z」；本轮：HRM 考勤 P1 全链路 → 合并上线 → 生产 schema 事故与修复 → 护栏 → 权限矩阵收敛 → 地址/坐标落地 → 本次 session-pack）
-- 上一会话 ID：session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d（三支审计修复合并前的会话）
-- 本次打包：2026-09-15 16:15（session-pack）
-- 续接口令：继续 D&Z
+- 原会话 ID：`session-7fd1ea0d-1a14-4d2c-85f9-9c332e4441d4`（会话名「多租户隔离方案分析」）
+- 本轮范围：多租户方案分析 → P0 止血 → P1a/P1b → P2 → CI 修绿 → P3a → P3b 勘察与地基
+- 前序会话：`session-c5af9e3c-d22c-49a6-8fde-3c246dbfe102`（HRM 考勤）、`session-4b560e7e-2615-41ec-8ad9-de9c53eefa6d`
+- 本次打包：2026-09-30 14:08（session-pack）
+- 续接口令：**继续 D&Z**
 
-## 完成进度（近期，完整逐次记录见 docs/changes/）
-- **HRM 考勤 P1（已合并 PR #28，生产验证过）**：`AttendancePunch` 不可变证据链（服务端时间、照片 key+SHA256、lat/lng/accuracy、服务端复算 distanceM、verdict）+ `Attendance` 当日汇总（原字段保留，历史零迁移）；三入口共用 `components/shared/attendance-punch.tsx`（getUserMedia 实时拍摄，**无相册退路**）；行上直接显示地点、点证据开详情弹窗（照片/时间/坐标+地图/距门店/精度/来源/判定，X/Esc/背景可关）；权限模块 `ATTENDANCE`；`src/lib/business-day.ts` 收敛业务日。
-- **生产私有桶 `dz-private`（public=false）**：`scripts/provision-private-bucket.ts` 建并自验（探针公开地址 400、鉴权读 ok、探针删除）；照片只经 `/api/attendance/photo/[id]` 鉴权路由，公开 `/api/storage` 对 `private/` 前缀直接 404。
-- **生产事故（今天 15:03）与修复**：PR #28 合并 → Vercel 部署新代码，但**生产库缺整批 schema**（2 表 + 12 列）→ Prisma 缺列即该模型所有查询失败 → 首页 500（Next 报错页 + ERROR digest）。已 `VERCEL_ENV=production DIRECT_URL=$DST_DATABASE_URL node scripts/sync-prod-schema.mjs` 应用加性变更（DROP=0，2 表/12 列/5 索引），恢复后 `/` 200、`--check` agree。
-- **护栏 `fix/schema-drift-fails-the-build`（待审）**：构建期同步原本**读不到库就跳过、让构建继续**（fail-open），于是「构建成功 + schema 未验证 → 上线 → 整站挂」。现改为**生产无法验证 = exit 1 拦住构建**（并提示设 DIRECT_URL），本地/预览仍放行。三条路径都实测过。
-- **权限矩阵收敛（dce6f71）**：`src/lib/auth/role-modules.ts` 成为唯一定义，`permissions.ts` 与客户端 `nav-registry.ts` 都读它——修掉「柜台/销售在侧边栏看不到考勤」（手抄矩阵漂移；OWNER 是通配角色所以测试时看不见）。
-- **门店地址/坐标落地**：主店 = `B-10-7, 3 Two Square, 2, Jalan 19/1, Seksyen 19, 46300 Petaling Jaya, Selangor` = `3.1111141, 101.6316582`（两个独立地理编码源 + 反向地理编码确认）；测试分行暂同址；坐标改走应用界面（带 `ATTENDANCE_GEOFENCE_SET` 审计）。门店身份收敛进 `src/lib/branch-info.ts`。
-- **工单号序列修复（`fix/job-number-sequence`，未合并）**：字符串排序当数字用（DZ9999 > DZ10000，四位数用尽即永久卡死）+ 外来前缀污染（PERF900299 → DZ900300）；收敛到 `src/lib/job-number.ts` + 撞唯一约束重试。
+## 完成进度（逐次改动的完整记录见 docs/changes/）
+- **P0 安全止血（生产已验证）**：撤销匿名表授权 + 22 张表开 RLS（此前 83 张表对公开 anon key 可读）；
+  `resetBusinessData()` 的 40 张表 `deleteMany({})` 按租户收窄；导出接口与打印页按租户；
+  `/qr/*` 去掉 `{id}` 直查兜底；`rider.ts` 六个入口改为会话取身份；五处客户端不再谎报成功。
+- **P1a 租户内唯一键**：8 个全局唯一键 → 租户内复合唯一键（最硬的是 `Motorcycle.plate`：
+  **同一台车不能被两家店服务**）。生产按"加列 → 回填 → 换键"三步执行，行数前后一致。
+- **P1b 租户作用域地图**：`src/lib/tenant/scope-map.ts`（83 模型"怎么到达租户"的唯一定义）
+  + 12 条对账测试；补 3 处**缺失的关系**；`InvoiceCounter` 改 `[organisationId, year]` 复合主键；
+  4 个模型 `organisationId` 收紧为 NOT NULL。
+  ⚠️ 对原方案的偏离：**没有**给 42 张表铺 `organisationId` 冗余列（理由见下「关键决策」2）。
+- **P2 强制层 + 审计**：`src/lib/tenant/guard.ts`（`scopedDb` 强制注入 / `TENANT_GUARD=report` 审计）；
+  `scripts/tenant-guard-audit.mjs` **用项目自己的 947 条测试**量出未收窄查询并给调用点；
+  客户列表/详情、岗位看板、佣金计提、完工入口全部改为**必需租户参数**（`tsc` 一次点出 45 个调用点）。
+- **CI 修绿**：`pnpm lint` 从 `832 problems (2 errors)` 退出码 1 → `830 problems (0 errors)` 退出码 0；
+  CI 的 Playwright job 补上缺失的 `pnpm build` 并接线 secrets（此前一直失败在"没有生产构建"）。
+- **P3a 身份映射**：`AuthLink` 表（一人一店一条）+ `src/lib/tenant/identity.ts` 三条解析路径
+  + 10 条测试；回填 dev.db 18 条 / 生产 20 员工 + 4 客户（**与有 authId 的账号数完全一致**）。
+- **P3b 地基**：`src/lib/tenant/active-tenant.ts`（**签名**的 `dz_tenant` cookie）+ 7 条测试；
+  P3b 施工单写入方案文档。`active-tenant.ts` **目前没有任何调用方**。
 
 ## 下一步（按优先级）
-1. **合并 `fix/schema-drift-fails-the-build`**（护栏）——建议在**下一次改 schema 之前**合，否则仍是「构建成功但站点可能挂」。
-2. **验证 `DIRECT_URL` 生效**（owner 已在 Vercel 加好；我无权限加也验不了）：下次部署在 Build Logs 搜 `schema-sync`，出现 `database from DIRECT_URL` 即生效；仍显示 `from DATABASE_URL` 说明没读到（多半只加了 Preview 环境）。
-3. **合并 `fix/job-number-sequence`**（生产还没吃到这个修复；工单号未到五位数所以暂不触发）。
-4. **考勤 P2**：异常队列 + 更正审批（`AttendanceCorrection` 表已建）、月度报表 + CSV 导出。
-5. **生产数据卫生（待 owner 决定）**：Testing 账号（test.owner / test.mech6 等）及其打卡记录是否清理。
-6. **逾期待办**：经销商验证 59e04e5e、WhatsApp 真机上线 92b29072（含 Vercel env）。
-7. 本地可选：`.vercel/project.json` 指向失效项目 id，`npx vercel link --scope dashoilhrsams-projects --project d-z-crm` 重链（需要权限）。
+1. **P3b 第 1 步**（← 唯一该先做的事）：给注册路径的 email/phone 匹配**加租户条件**
+   （`src/actions/auth-supabase.ts:410` 的 `findFirst({ where: { email } })` 与 `:419` 的
+   `customersByPhone(...)`），注册的 org 改为来自 `/t/<slug>` 而不是
+   `organisation.findFirst({ orderBy: { name: "asc" } })`（`:204` 与 `:442`）。
+   **验证**：单店行为不变；新增"在 B 店用 A 店客户的邮箱注册，不得绑上 A 店那条记录"的回归测试。
+2. **P3b 第 2 步**：第 1 步绿了之后，才松 `User.authId` / `Customer.authId` 全局唯一键 →
+   `@@unique([organisationId, authId])`。**不要跳过第 1 步先做这一步。**
+3. P3b 第 3–6 步：解析链（`session-user.ts:40/45`、`rider-customer.ts:14` 三处
+   `findUnique({ where: { authId } })` 改走 `readActiveTenant()` + `identityInTenant`）→
+   `/t/<slug>/login` + 多店选择器 → 删死代码 `dz_org` → claim 迁 `app_metadata`。
+4. P2 剩余（低优先，清单跑 `node scripts/tenant-guard-audit.mjs` 即得）：
+   `bulk/apply.ts:60/65`、`bulk/export.ts:89/105` 是**误报**（下一行有手工归属校验）；
+   `completion.ts` 里按 `job.id` 的写是**传递安全**（入口已验归属）。
+5. CI 的 e2e job 仍需在 GitHub Settings → Secrets 配 4 个值（`AUTH_SECRET` +
+   Supabase 三个 key）才会绿 —— 已接线，缺了会红得说明白缺什么。
 
 ## 基线测试（命令 + 期望通过数）
-- `pnpm exec tsc --noEmit`：**0**（务必 `set -o pipefail`）
-- `pnpm test`：**500 通过 / 39 文件**（含 `tests/attendance.test.ts` 25 例、`tests/role-matrix.test.ts` 4 例）
-- `pnpm build`：通过（改源码后必须 build → kickstart 三端 → 才跑 e2e）
-- `pnpm exec playwright test --project=desktop-chromium`：**51 通过 · 0 失败**（约 6 分钟；会 wipe+seed `prisma/e2e.db` 并重启 :3102）
-- 生产 schema 漂移：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check` → 期望 `schema and database agree`
-- 单个 spec：`pnpm exec playwright test e2e/<name>.spec.ts --project=desktop-chromium`
+- `pnpm lint`：**退出码 0**（830 个 warning 是既有的，0 error 是门槛）
+- `pnpm exec tsc --noEmit`：**0 错误**
+- `pnpm test`：**947 个通过**（83 文件）
+- `pnpm build`：**必须通过**（改了源码要 build → kickstart 服务 → 再跑 e2e）
+- `pnpm exec playwright test --project=desktop-chromium`：**55 个通过**
+- 生产 schema 漂移：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check`
+  → 期望 `schema and database agree`
+- 租户守卫审计：`node scripts/tenant-guard-audit.mjs`（输出生产侧未收窄查询的分诊清单）
 
 ## 服务与恢复
-- workshop :3002：`curl -s -o /dev/null -w %{http_code} http://127.0.0.1:3002/login` = 200 ｜ 挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
-- rider :3003 / e2e :3102：同上换端口与 label（`.rider` / `.e2e`）
-- **加迁移后**：`dev.db` 与 `e2e.db` **都要**各跑一次 `DATABASE_URL="file:./<db>.db" pnpm exec prisma migrate deploy`，再 kickstart 对应服务（只 migrate 一个 → 那个服务页面 500 → Playwright 探活把它当没起来 → EADDRINUSE）
-- 压测实例（隔离，勿打）：:3202 `com.dz-platform.perf`、:3203 `com.dz-platform.perf-small`
-- 生产：https://d-z-crm.vercel.app （push main 自动部署；**带 schema 变更的部署前先确认 DIRECT_URL 生效**）
+- workshop `:3002`：`curl -s -o /dev/null -w '%{http_code}' http://localhost:3002/` ｜
+  挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.server`
+- rider `:3003`：同上换 `:3003` ｜ `…/com.dz-platform.rider`
+- e2e `:3102`：同上换 `:3102` ｜ `…/com.dz-platform.e2e`
+- 生产：https://d-z-crm.vercel.app ｜ `gh run list` 看 CI；`gh run view <id> --log-failed` 看失败步骤
+- ⚠️ `launchctl list | grep dz-platform` 显示的**是上次退出码**（143 = 被 kickstart 杀掉），
+  不代表当前挂了 —— **以 curl 为准**。
 
 ## git 状态
-- 当前分支：`fix/schema-drift-fails-the-build`（ceeccdb + 本条 HANDOFF 提交，已推送）；未提交 0（tracked）
-- main = **e86d7f4**（PR #28 `feat/hrm-attendance` 已合并）
-- **待审分支**：`fix/schema-drift-fails-the-build` · `fix/job-number-sequence`
-- 已合并并删除：`fix/api-auth-gate` · `fix/write-path-authorization` · `fix/concurrency-atomicity` · `feat/hrm-attendance`
-- ⚠️ **勿 `git add -A`**：scripts/ 下有历史遗留脚本、`screenshots/`（含 `hrm-local/`、`prod/` 截图）、`docs/templates/` 等未跟踪产物，加文件逐个列出
+- 分支：`docs/perf-load-results` ｜ HEAD `b5fd1dc` ｜ 与 `origin/main` **无差异**（已全部合并）
+- `origin/main = f65bee4`（Merge PR #99）
+- 未提交：0 个已跟踪改动 ｜ **85 个未跟踪**（其中 53 个是既有的截图/PDF/CSV 模板等产物，
+  历次都**刻意没有**提交；另有 `src/lib/ai-reply-draft.ts` 已在 P0 那轮补进仓库）
 
 ## 关键决策与约定
-- **打卡三规则**：时间只取服务端；判定（距离/精度/重复照片）只在服务端（客户端只上报原始读数）；记录只追加（更正走 `AttendanceCorrection` + 审计）。
-- **员工照片是个人数据**：必须走私有桶 + 鉴权路由，**绝不允许**出现在公开 URL；公开 `/api/storage` 对 `private/` 前缀 404。
-- **地点必须行上可见**（距门店 xx m / 未取到定位），不许只放 title 属性；行与弹窗共用 `locationSummary()`。
-- **一条规则只写一遍**（本轮两次收敛）：门店身份 → `src/lib/branch-info.ts`；权限矩阵 → `src/lib/auth/role-modules.ts`。
-- **生产 schema**：加性变更由构建期 `scripts/sync-prod-schema.mjs` 自动同步；**生产无法验证时必须拦住构建**（失败部署保留上一个可用版本，未验证部署会打挂站点）。
-- **改动工作流**：feature branch → push → owner 在 GitHub review + merge；不直接 push main、不自行触发 Vercel 部署。
-- 业务日期存 UTC 零点；金额存整数 sen；营收相关开关存 DB（`Organisation.*`）不写源码常量。
+1. **目标架构**：共享库 + 共享 schema + `organisationId` 行级隔离 + 数据访问层强制 + RLS 兜底。
+   租户 = `Organisation` = 一家 dealer/workshop；**`Branch` 保留但降级为隐藏的 1:1 门店记录**，
+   全部 branch UI 移除。
+2. **不铺 42 张表的 `organisationId` 冗余列**，改用**关系路径 + 作用域地图**。理由三条：
+   嵌套写入**不触发** Prisma 扩展 create 钩子（那些列会长期为 NULL）；复合唯一键**不约束 NULL 行**；
+   一列没人写也没人查的列会让代码**看起来有了隔离**却什么都没拦。有路径就用路径，没有才补关系。
+3. **P3b 不能先松 `authId` 唯一键**（本轮最重要的判断，务必保留）：
+   `auth-supabase.ts:410/419` 的邮箱/手机匹配**没有租户条件**，今天靠 `authId` 全局唯一兜住；
+   唯一键一松兜底就没了 → 在 B 店注册的人可能匹配到 A 店同邮箱/同手机的客户记录并把 `authId`
+   绑上去。**必须先加租户条件，再松约束。**
+4. **把租户做成"必需参数"比"记得在 where 里写"有效得多**：本轮两次实测——客户仓库改造
+   `tsc` 点出 10 个调用点，完工/看板改造点出 45 个。漏掉的会被编译器拦住。
+5. **签名 cookie 的不变式**：`setActiveTenant` 会签任何给它的 organisationId（服务端有权为任意
+   门店签发），所以调用方**只能**从 `identitiesForAuthUser(authId)` 的候选里选，
+   绝不直接递请求参数 —— 已写进 `active-tenant.ts` 注释与测试。
+6. **审计不做成 CI 硬门禁**：守卫只看一条查询的 args，看不到查询**之后**的手工校验，有已知误报；
+   正确用法是定期跑、看趋势（数字应单调下降）。
+7. **一条规则只写一遍**：门店身份 → `src/lib/branch-info.ts`；权限矩阵 → `src/lib/auth/role-modules.ts`；
+   租户作用域 → `src/lib/tenant/scope-map.ts`；业务日 → `src/lib/business-day.ts`。
 
 ## 踩坑与事实
-- **重建 `.next` 会让开着的标签页报「This page couldn't load」**（Next 自己的错误页 + `ERROR <digest>`）。这类**客户端** digest 不在服务端日志里；`next build` 会在服务运行时替换 `.next`，构建期间浏览必然踩到。**改完 build 一次、让用户刷新**。
-- **本机路径含 `&`**：bash 里引用项目路径必须加引号（`cd "/Users/Jun/Documents/CRM-D&Z"`），否则被当成后台符号，命令静默出错。
-- 一次性 `evaluate` 读图片 `complete/naturalWidth` 必然撞竞态 → 用 `expect.poll`。
-- 源码守卫的取函数体助手别按「顶格两空格闭合花括号」截断：会被函数内 `if` 块或**参数列表里的内联对象类型**提前截断（本轮连栽两次），要按括号配对。
-- **大文件慎用 read→write 往返**：本轮 HANDOFF 的 read+concat+write 曾静默丢掉尾 18 行；改这类文件要 `git show` 抽原文用 shell 拼接，并**用 diff 校验尾段一字未改**。macOS 是 BSD sed，`sed -n '1,/x/{...}'` 这种块语法会报错并使输出为空。
-- 真机定位实测：桌面约 ±35 m、手机 ±11 m；150 m 围栏覆盖得住（生产实测距门店 52 m 判 OK）。
-- **Vercel CLI 权限**：本机登录 `dashoilai5-3794`，可列部署/读部署元数据（`inspect`），但**读不到构建日志与环境变量**（404/403）；`--scope dashoilhrsams-projects` 是必须的（`.vercel/project.json` 指向失效项目）。
-- Prisma 对 SQLite 的「表重定义」迁移会 DROP+CREATE，但数据由 INSERT…SELECT 带过，本地实测行数不变，属正常。
-- 生产 `AttendancePunch` 已有 2 条测试账号打卡（Testing Owner / Testing Mechanic 6），照片在私有桶、公开地址 400。
+- **`process.on("exit")` 在 vitest 的 worker 里不触发** —— 审计探针攒到最后统一写盘，
+  跑完 947 条测试一个字都没输出，而聚合脚本把它读成"零违规"。**改成每条即时落盘。**
+- **`require("node:fs")` 在 ESM 模块里不存在**，被 `try/catch` 吞掉后"写盘失败"与"没有违规"
+  长得一模一样。**best-effort + 空 catch = 假绿**，本项目反复踩（本轮至少三次）。
+- **改了 schema 一定要跑完整基线**：加完新测试只跑 `vitest` 没跑 `tsc`，
+  `next build` 的 TS 检查才报错，构建中断还把 `.next/BUILD_ID` 删了，
+  三个本地服务因此全起不来。**新加文件后必须 tsc + test + build 三样都跑。**
+- **`$extends` 的运行时类型表达不了注入**：`scopedDb` 自动补 `organisationId`，
+  但生成的 client 类型仍要求显式传，测试里必须 `as never` 并**用断言证明注入真的发生**。
+- **TypeScript 字符串里一律别用 ASCII 双引号写中文标题**（本会话犯了四次，每次都是整个脚本
+  一条都没执行而我以为改完了）。用「」。
+- **给 `InvoiceCounter` 加 `ON DELETE RESTRICT` 后，两个完工测试在 `afterAll` 删组织时被
+  数据库正确拦住** —— 修的是清理代码，不是放开约束。生产同理：删租户前必须先清数据。
+- **收紧约束必须在"会写这一列的代码"上线之后**：我先给生产加了 `NOT NULL` 才 push 代码，
+  那段时间生产开单会失败（旧代码不写这一列）。已回退后再随部署对齐。
+- 本机路径含 `&`：bash 里必须 `cd "/Users/Jun/Documents/CRM-D&Z"`，否则被当成后台符号。
+- 生产 `sync-prod-schema.mjs` **遇 DROP/TRUNCATE 会 exit 1**（destructive DDL 必须人工）；
+  纯加法（建表/加列）会随构建自动应用。
+- 本机 Prisma client 是 SQLite 生成的 → **连不上生产 PG**，生产脚本一律用原生 `pg`。
 
 ## 待办（dtodo）
-- `59e04e5e` 经销商验证（逾期 2026-08-19，需真人）
-- `92b29072` 生产迁移 / provider 换真（逾期 2026-08-19）：WhatsApp 上线 5 步 + Payment/Notification 选型
+- 无（本次查询：全部清空）
 
 ## 新会话头 10 分钟
-1. **探活**：`:3002` / `:3003` / `:3102` 的 `/login` 应 200；另 `curl -s -o /dev/null -w %{http_code} https://d-z-crm.vercel.app/` 应 200。挂了：`launchctl kickstart -k gui/$(id -u)/com.dz-platform.{server,rider,e2e}`
-2. **读本文件 + `docs/changes/` 最新几个**（按文件名倒序）+ memory（project/daily）+ `dtodo list`
-3. **查 git**：`git fetch --prune` → 两条待审分支（`fix/schema-drift-fails-the-build` · `fix/job-number-sequence`）合没合；合了先 `git merge-base --is-ancestor <b> main` 验过再删
-4. **跑基线**：`set -o pipefail; pnpm exec tsc --noEmit`（0）+ `pnpm test`（**500**）；要动源码再加 `pnpm build`（顺序：build → kickstart 三端 → 才跑 e2e）+ 生产 drift `--check`
-5. **挑下一步**：优先「护栏合并 → 验证 DIRECT_URL → job-number 合并 → 考勤 P2」。**改 schema 前必读**「关键决策与约定」里生产 schema 那条。
+1. `cd "/Users/Jun/Documents/CRM-D&Z"`（**引号不能省**）→ 探活三个服务
+   （`for p in 3002 3003 3102; do curl -s -o /dev/null -w "%{http_code} " localhost:$p; done`），
+   期望三个 200；挂了用上面的 `launchctl kickstart`。
+2. 读本文件「一句话状态」与「下一步」，再读 `docs/MULTI_TENANT_PLAN.md` §P3 的
+   **「P3b 施工单」**（6 步 + 两个隐患）。
+3. 跑基线：`pnpm lint`（退出码 0）、`pnpm exec tsc --noEmit`（0）、`pnpm test`（947）、
+   `pnpm build`（通过）。期望数不符就先查，别在红的基础上开工。
+4. 从**施工单第 1 步**开工（给注册的 email/phone 匹配加租户条件）。
+   **不要**先松 `authId` 唯一键 —— 见「关键决策」3。
+
+---
+
 ## 历史段落（冻结于 2026-09-11，逐次改动的原始记录）
 
 **🐛 修复「关掉的内容仍出现在 rider 资讯」（分支 fix/rider-off-news-leak，已 push 待合）**：owner 报告。
