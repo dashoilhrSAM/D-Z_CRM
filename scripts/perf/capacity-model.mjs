@@ -83,6 +83,31 @@ const vercel = (r, R) => {
 const jobsArg = Number(process.argv[2]);
 const P = Object.assign({}, ASSUMPTIONS, jobsArg ? { jobsPerDealerDay: jobsArg } : {});
 
+// --json：把每档的完整明细（含 Vercel 的四项拆分）以 JSON 输出，给
+// scripts/perf/build-budget-workbook.mjs 消费 —— 预算表里的数字必须由这里算出来，
+// 不许在 Excel 生成脚本里手填（手填过一版，四项拆分加起来 904 而总额 948，自相矛盾）。
+if (process.argv.includes("--json")) {
+  const FIXED_P = Object.assign({}, P, { refreshSec: 120, photoMB: 0.35 });
+  const tiers = TIERS.map((t) => {
+    const a = model(t, P), b = model(t, FIXED_P);
+    const va = vercel(a, RATES.sin1), vb = vercel(b, RATES.sin1);
+    return {
+      name: t.name, dealers: t.dealers, mech: t.mech, ws: t.ws, jobs: a.jobs,
+      renders: a.renders, peakQps: Math.round(a.peakQps), sqlPerDay: a.queries,
+      vercel: { transfer: va.tr, cdn: va.cdn, mem: va.mem, cpu: va.cpu, total: va.total },
+      vercelFixed: vb.total,
+      photoGBday: a.photoGBday, photoGBdayFixed: b.photoGBday,
+      storageMo12: a.photoGBday * 30 * 12 * STORAGE_PER_GB_MO,
+      storageMo12Fixed: b.photoGBday * 30 * 12 * STORAGE_PER_GB_MO,
+      egressMo: a.egressGBday * 30 * EGRESS_CACHED,
+      // 照片压缩后出网同步下降（出网量与照片体积成正比）
+      egressMoFixed: a.egressGBday * (FIXED_P.photoMB / P.photoMB) * 30 * EGRESS_CACHED,
+    };
+  });
+  console.log(JSON.stringify({ assumptions: P, rates: RATES.sin1, tiers }, null, 2));
+  process.exit(0);
+}
+
 console.log('=== D&Z capacity model · jobs/dealer/day = ' + P.jobsPerDealerDay + ' · photo ' + P.photoMB + 'MB x ' + P.photosPerJob + ' ===\n');
 console.log('Tier | jobs/day | renders/day | auto-refresh share | invocations/day | SQL/day | Auth/day | peakQPS');
 for (const t of TIERS) {
