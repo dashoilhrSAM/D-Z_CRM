@@ -37,19 +37,30 @@ export class DashboardService {
       // lifecycle distribution: active bookings+jobs bucketed by customer-facing step
       (async () => {
         const { resolveStep, LIFECYCLE_STEPS } = await import("@/modules/rider/status");
-        const [jobs, bookings] = await Promise.all([
-          db.serviceJob.findMany({ where: { ...opWhere, status: { in: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "QC_CHECK", "WAITING_PARTS", "ON_HOLD", "READY"] } }, select: { status: true } }),
-          db.booking.findMany({ where: { ...opWhere, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED", "CHECKED_IN"] } }, select: { status: true, jobId: true } }),
+        // 只取「按状态的行数」：原来把每一张活跃工单、每一条活跃预约都取回来再逐行归类。
+        // 归类本来就只取决于状态，所以分组计数是等价且便宜的写法。
+        // 注意 jobId: null —— 原来对「已挂到工单上的预约」是 continue 跳过（由工单那侧计），
+        // 这个条件必须在数据库里表达，否则会把它们重复计一次。
+        const [jobRows, bookingRows] = await Promise.all([
+          db.serviceJob.groupBy({
+            by: ["status"],
+            where: { ...opWhere, status: { in: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "QC_CHECK", "WAITING_PARTS", "ON_HOLD", "READY"] } },
+            _count: { _all: true },
+          }),
+          db.booking.groupBy({
+            by: ["status"],
+            where: { ...opWhere, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED", "CHECKED_IN"] }, jobId: null },
+            _count: { _all: true },
+          }),
         ]);
         const buckets = new Array(LIFECYCLE_STEPS.length).fill(0) as number[];
-        for (const bk of bookings) {
-          if (bk.jobId) continue; // counted via its job
+        for (const bk of bookingRows) {
           const { stepIndex } = resolveStep(bk.status, null);
-          if (stepIndex != null) buckets[stepIndex]++;
+          if (stepIndex != null) buckets[stepIndex] += bk._count._all;
         }
-        for (const j of jobs) {
+        for (const j of jobRows) {
           const { stepIndex } = resolveStep(null, j.status);
-          if (stepIndex != null) buckets[stepIndex]++;
+          if (stepIndex != null) buckets[stepIndex] += j._count._all;
         }
         const HREF: Record<string, string> = {
           book_requested: "/workshop/bookings?status=REQUESTED",
@@ -62,10 +73,22 @@ export class DashboardService {
         };
         return LIFECYCLE_STEPS.map((label, i) => ({ label, count: buckets[i], href: HREF[label] }));
       })(),
-      db.customer.findMany({ where: { organisationId: orgId }, select: { jobs: { select: { id: true } } } }).then((cs) => {
-        const repeat = cs.filter((c) => c.jobs.length >= 2).length;
-        return { total: cs.length, repeatPct: cs.length > 0 ? Math.round((repeat / cs.length) * 100) : 0 };
-      }),
+      // 重复客户率：原来把全组织**每一个客户连同其全部工单 id** 读回来再数 ≥2 的。
+      // 现在两次计数就够（总数一条 count；「有 ≥2 张工单的客户」一条分组计数，只回一个数字）。
+      // 这段刻意不看分店（与改前一致：重复率是组织级口径）。
+      (async () => {
+        const [total, repeatRows] = await Promise.all([
+          db.customer.count({ where: { organisationId: orgId } }),
+          db.$queryRaw<{ n: number | bigint }[]>`SELECT COUNT(*) AS n FROM (
+              SELECT j."customerId" AS cid FROM "ServiceJob" j
+              JOIN "Customer" c ON c."id" = j."customerId"
+              WHERE c."organisationId" = ${orgId}
+              GROUP BY j."customerId" HAVING COUNT(*) >= 2
+            ) t`,
+        ]);
+        const repeat = Number(repeatRows[0]?.n ?? 0);
+        return { total, repeatPct: total > 0 ? Math.round((repeat / total) * 100) : 0 };
+      })(),
       db.booking.count({ where: { ...opWhere, date: { gte: new Date() }, status: { in: ["REQUESTED", "CONFIRMED", "RESCHEDULED"] } } }),
     ]);
     return {
