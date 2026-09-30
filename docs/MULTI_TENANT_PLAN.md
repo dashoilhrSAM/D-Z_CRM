@@ -568,6 +568,14 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 
 ### P3 · 身份与租户解析（8–12 天）
 
+> ✅ **P3a 已完成（2026-09-30）**：`AuthLink` 已建表并回填（本地 18 条 / 生产 20 员工 + 4 客户，
+> **与有 `authId` 的账号数完全一致**）；`src/lib/tenant/identity.ts`（三条解析路径）+ 10 条测试；
+> `src/lib/tenant/active-tenant.ts`（**签名**的 `dz_tenant` cookie）+ 7 条测试。
+> 详见 `docs/changes/2026-09-30-p3a-auth-link.md`。
+>
+> ⏸ **P3b 已勘察、尚未施工**，施工单与两个必须先解决的隐患见本节末尾的「P3b 施工单」。
+> **P3a 刻意没有松开那两个唯一约束** —— 理由就写在那份施工单里，不是没做完，是**不能先松**。
+
 - `AuthLink` 建表 + 回填生产 24 条；`session-user.ts` / `rider-customer.ts` 改为按 **(authId, organisationId)** 解析。
 - `User.email` → `@@unique([organisationId, email])`；`Customer.authId` / `User.authId` 去全局唯一。
 - `src/lib/tenant/resolve.ts`：四级解析链（签名 cookie → `/t/<slug>` 或 QR → 唯一所属 → 候选列表），**第 0 级（子域）留空占位并注释将来接法**。
@@ -577,6 +585,52 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 - claim 迁 `app_metadata`；`updateStaff` 后刷新 claim；`active` 进入校验链 + Supabase ban / 会话吊销。
 
 **验收**：同一邮箱在两家店各有一个 `User`，各自登录且互不可见；跨店骑手在两家店各有 `Customer` 档案；`/login` 用多店邮箱登录时**必须出现选择器**（不得静默进入任一店）；被停用员工立即无法登录。
+
+#### P3b 施工单（已勘察，2026-09-30）
+
+**下面两个隐患决定了施工顺序 —— 先松唯一约束会直接引入越权与重复注册。**
+
+**隐患 ①：注册时"哪家店"的答案是"按名字排序第一家"。**
+`src/actions/auth-supabase.ts:204` 与 `:442` 都是
+`db.organisation.findFirst({ orderBy: { name: "asc" } })`。
+今天只有一家店所以是对的；两家店时这是一个**按字母序的抛硬币** ——
+新客户可能被注册进别人的店。租户必须来自 `/t/<slug>/signup`（或已签名的 cookie），
+不能来自这个查询。
+
+**隐患 ②（更严重）：松开 `Customer.authId` 唯一键，会把"邮箱/手机匹配"变成跨店劫持。**
+`auth-supabase.ts:410` 的 `db.customer.findFirst({ where: { email } })` 与
+`:419` 的 `customersByPhone(...)` 都**没有租户条件**。
+今天它们安全，是因为 `authId` 全局唯一兜住了；**唯一键一松，兜底就没了**：
+在 B 店注册的人，可能匹配到 A 店那条同邮箱/同手机的客户记录并**把 authId 绑上去** ——
+等于把 A 店的客户档案交给了一个本不该看到它的人。
+所以 `email` / `phone` 的匹配必须**同时**加租户条件，且要在松约束**之前**完成。
+
+**施工顺序（每一步都能独立验证）**
+
+1. **先加租户条件，后松约束。** `auth-supabase.ts` 的两处匹配改为
+   `findFirst({ where: { email, organisationId } })` / `customersByPhone(orgId, phone)`；
+   注册的 org 改为来自 `/t/<slug>`（隐患 ①）。此时行为与今天一致（单店），但已经安全。
+2. **再松唯一键**：`User.authId` / `Customer.authId` 去全局唯一，改为
+   `@@unique([organisationId, authId])`。真正的"一人一店一条"由 `AuthLink` 的
+   `@@unique([authId, organisationId])` 守。**这一步之后才可能出现"同一个人两家店"。**
+3. **解析链落地**：`session-user.ts:40/45`、`rider-customer.ts:14` 三处
+   `findUnique({ where: { authId } })` 改为
+   `readActiveTenant()` → `identityInTenant(authId, tenant.organisationId)`，
+   无 cookie 时回退到"唯一所属"（单店用户体验不变），**多条时必须进选择器**。
+4. **入口与选择器**：`/t/<slug>/login`；`/login`、`/rider/login` 保留为无租户入口 +
+   多店选择器（`needsTenantChoice()` 为 true 时**必须**让用户选）。
+   `setActiveTenant` 的调用方**只能**传 `identitiesForAuthUser(authId)` 里的候选
+   （不变式写在 `active-tenant.ts` 的注释里）。
+5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
+   不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
+   `User.email` → `@@unique([organisationId, email])`。
+6. **claim 迁 `app_metadata`**：P0 把 `app_jwt_claim()` 改成只认 `app_metadata`
+   （`user_metadata` 用户自己就能改），于是 PostgREST 面现在**一律拒绝** ——
+   要等 `injectBizClaims` 改写才会对合法用户重新开放。这是 P0 有意留下的 fail-closed 状态。
+
+**验收**：同一邮箱在两家店各有一个 `User`，各自登录且互不可见；跨店骑手在两家店各有 `Customer`
+档案；`/login` 用多店邮箱登录时**必须出现选择器**（不得静默进入任一店）；被停用员工立即无法登录；
+**在 B 店用 A 店客户的邮箱注册，不得绑上 A 店那条记录**（隐患 ② 的回归测试）。
 
 ### P4 · 平台管理台（10–15 天）
 
