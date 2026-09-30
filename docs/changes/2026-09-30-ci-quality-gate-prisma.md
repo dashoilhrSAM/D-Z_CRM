@@ -25,6 +25,18 @@ branch: docs/perf-load-results
 
 修完后 `quality` job 才第一次真正把 lint / tsc / 971 条单测跑起来 —— 这才是"合并前的门槛"。
 
+## 结果（PR #100，run 36679969166）
+
+| job | 结果 |
+|---|---|
+| **Lint · Typecheck · Unit** | ✅ **pass（1m31s）** —— 此前从未绿过 |
+| Production Build | ✅ pass |
+| Vercel | ✅ 预览部署完成 |
+| Playwright | ❌ 只缺 4 个仓库 Secrets（日志里 `AUTH_SECRET:` 为空），owner 在 Settings 配齐即可 |
+
+quality job 日志里的关键行：`Generated Prisma Client` → `830 problems (0 errors)` →
+`All migrations have been successfully applied` → `Seed complete {...}` → `85 passed (85)`。
+
 ## 交接说明
 
 **实测（本地完整复刻 CI，无 `.env`、全新库）**：
