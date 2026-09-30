@@ -665,8 +665,10 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
      slug 优先于 cookie；**进店前提是 AuthLink 里确实有这家店**；不是这家店的人 →
      选择器（不签 cookie、不猜一家）。顺带让 `/login`、`/rider/login` 真正消费 `?next=`，
      修好了三个 QR 落地页一直"生成了 next 却没人读"的回跳。
-   - ⏳ **剩下的**：注册流程的门店显式化（`/t/<slug>/signup` + 把 slug 传进 `signUpRider`）。
-     今天注册仍走 `resolveEntryTenant()`：多店并存时**拒绝而不是猜**（安全），但不能由链接指定。
+   - **注册流程的门店显式化**：`/t/<slug>/signup` + 四个注册入口都收 `tenantSlug`
+     （`resolveEntryTenant({ slug })`）。注册的"进哪家店"从此**由链接决定**，
+     不再依赖"唯一在营门店"的兜底判断；`/rider/login` 的"去注册"链接也会跟着门店走。
+   - ⏳ **至此第 4 步已全部完成**（选择器 + `/t/<slug>` + `/t/<slug>/signup`）。
 5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
    不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
    `User.email` → `@@unique([organisationId, email])`（生产上已有该索引，核对 schema）。

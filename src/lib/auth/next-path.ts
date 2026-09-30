@@ -19,3 +19,16 @@ export function safeNextPath(raw: string | null | undefined, fallback: string): 
   if (/[\s\u0000-\u001f\u007f]/.test(s)) return fallback; // 空白/控制字符（浏览器会做奇怪归一化）
   return s;
 }
+
+/**
+ * 从回跳路径里取出门店 slug：`/t/<slug>`、`/t/<slug>/signup`、带查询串都算，别的返回 null。
+ *
+ * 用途：登录页看到"这次回跳是门店链接"时，把**注册**链接也指向同一家店
+ * （`/t/<slug>/signup`）—— 否则新客户从门店链接进来，注册仍会落到"唯一在营门店"的兜底判断上。
+ * 只认 slug 的字符集（字母数字与 `._~-`），别的一律 null —— 它会被拼进 URL。
+ */
+export function slugFromTenantPath(path: string | null | undefined): string | null {
+  if (!path) return null;
+  const m = /^\/t\/([A-Za-z0-9._~-]+)(?:\/|$|\?)/.exec(path);
+  return m ? m[1] : null;
+}
