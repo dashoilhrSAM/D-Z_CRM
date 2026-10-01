@@ -21,12 +21,28 @@ export interface BizClaims {
   customerId: string;
 }
 
-/** 登录后把业务身份写入 Supabase user_metadata（进 JWT claims）。 */
+/**
+ * 登录后把业务身份写进 Supabase 的 **app_metadata**（进 JWT claims）。
+ *
+ * ⚠️ 为什么是 app_metadata 而不是 user_metadata（P3b 第 6 步）：
+ * `user_metadata` **用户自己就能改**（`supabase.auth.updateUser({ data })`），
+ * 拿它当身份来源等于把钥匙挂在门上；P0 已经把数据库侧的 `app_jwt_claim()` 改成
+ * 只认 app_metadata，于是 PostgREST 面在 claims 迁过来之前是**一律拒绝**的 fail-closed 状态。
+ * 所以要写 app_metadata（只有 service role 能写）—— 这一处改动就是那扇门重新打开的开关。
+ *
+ * 过渡期**两处都写**：老会话/老客户端的中间件仍会兜底读 user_metadata
+ * （读的优先级见 lib/auth/request-identity.ts），少写一边就会让还没重新登录的人掉出去。
+ */
 export async function injectBizClaims(authUserId: string) {
-  const supabase = await createClient();
+  const admin = await createAdminClient();
   // P3b 第 3 步：先认「本请求指定的门店」（签名 cookie → AuthLink），没有才走唯一所属。
   // 登录时正好是最需要它的时候 —— 多店的人在这里选店，claims 必须按他选的那家签发。
   const ref = await requestPersonRef(authUserId);
+  /** 写 claims：app_metadata 是权威来源，user_metadata 只是过渡兜底。 */
+  const writeClaims = async (claims: BizClaims) => {
+    const { error } = await admin.auth.admin.updateUserById(authUserId, { app_metadata: claims, user_metadata: claims });
+    return error ? ({ ok: false as const, error: error.message }) : ({ ok: true as const });
+  };
   // 先查员工，再查顾客（rider）
   const staff = await loadStaffForRef(ref);
   if (staff) {
@@ -37,8 +53,8 @@ export async function injectBizClaims(authUserId: string) {
       userId: staff.id,
       customerId: "",
     };
-    const { error } = await supabase.auth.updateUser({ data: claims });
-    if (error) return { ok: false as const, error: error.message };
+    const written = await writeClaims(claims);
+    if (!written.ok) return written;
     return { ok: true as const, claims };
   }
   const rider = await loadCustomerForRef(ref);
@@ -50,8 +66,8 @@ export async function injectBizClaims(authUserId: string) {
       userId: "",
       customerId: rider.id,
     };
-    const { error } = await supabase.auth.updateUser({ data: claims });
-    if (error) return { ok: false as const, error: error.message };
+    const written = await writeClaims(claims);
+    if (!written.ok) return written;
     return { ok: true as const, claims };
   }
   // auth 用户尚未关联业务账号——管理员需先绑定（A3.7 建测试用户时做）
@@ -239,7 +255,9 @@ export async function signUpRider(input: { name: string; phone?: string; country
       userId: "",
       customerId: customer.id,
     };
-    const { error: metaErr } = await admin.auth.admin.updateUserById(authUserId, { user_metadata: claims });
+    // 注册后立即写 claims：**app_metadata 是权威**（用户改不了，数据库的 app_jwt_claim() 只认它），
+    // user_metadata 过渡期一并写（老会话/老客户端的中间件兜底读它）
+    const { error: metaErr } = await admin.auth.admin.updateUserById(authUserId, { app_metadata: claims, user_metadata: claims });
     if (metaErr) return { ok: false as const, error: "Account created but linking failed: " + metaErr.message };
   } catch (e) {
     return { ok: false as const, error: "Account created but profile setup failed: " + String((e as Error).message).slice(0, 120) };

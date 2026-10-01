@@ -24,17 +24,36 @@ const read = (p: string) => readFileSync(path.join(root, p), "utf8");
 const stripComments = (src: string) => src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
 describe("identityFromClaims：claims → 身份", () => {
-  it("有 sub 才算已登录，并把 user_metadata 原样带出来（middleware 要靠它做路由隔离）", () => {
+  it("有 sub 才算已登录，并把业务 claim 带出来（middleware 要靠它做路由隔离）", () => {
     const id = identityFromClaims({
       sub: "3f1c8f0e-0000-4000-8000-000000000001",
       email: "manager@dz.my",
-      user_metadata: { role: "MANAGER", orgId: "org_1", branchId: "br_1" },
+      app_metadata: { role: "MANAGER", orgId: "org_1", branchId: "br_1" },
     });
     expect(id).not.toBeNull();
     expect(id!.id).toBe("3f1c8f0e-0000-4000-8000-000000000001");
     expect(id!.email).toBe("manager@dz.my");
-    expect(id!.user_metadata.role).toBe("MANAGER");
-    expect(id!.user_metadata.branchId).toBe("br_1");
+    expect(id!.claims.role).toBe("MANAGER");
+    expect(id!.claims.branchId).toBe("br_1");
+  });
+
+  it("**app_metadata 优先于 user_metadata**（P3b 第 6 步：user_metadata 用户自己就能改）", () => {
+    // 同一个键两边都有 → 以 app_metadata 为准。用户伪造 user_metadata.role 不该生效。
+    const id = identityFromClaims({
+      sub: "u1",
+      app_metadata: { role: "MECHANIC", orgId: "org_real" },
+      user_metadata: { role: "OWNER", orgId: "org_fake", extra: "keep" },
+    })!;
+    expect(id.claims.role).toBe("MECHANIC");
+    expect(id.claims.orgId).toBe("org_real");
+    // 只在 user_metadata 里有的键仍然保留（过渡期兼容）
+    expect(id.claims.extra).toBe("keep");
+  });
+
+  it("只有 user_metadata（还没重新登录的老账号）→ 仍然读得到，过渡期不把人踢出去", () => {
+    const id = identityFromClaims({ sub: "u1", user_metadata: { role: "MANAGER", orgId: "org_1" } })!;
+    expect(id.claims.role).toBe("MANAGER");
+    expect(id.claims.orgId).toBe("org_1");
   });
 
   it("没有 sub / sub 为空 = 没有身份（不能当成已登录）", () => {
@@ -45,10 +64,11 @@ describe("identityFromClaims：claims → 身份", () => {
     expect(identityFromClaims({ sub: 123 })).toBeNull();
   });
 
-  it("user_metadata 不是对象时退化成空对象，而不是把脏数据透出去", () => {
-    expect(identityFromClaims({ sub: "u1", user_metadata: "MANAGER" })!.user_metadata).toEqual({});
-    expect(identityFromClaims({ sub: "u1", user_metadata: ["a"] })!.user_metadata).toEqual({});
-    expect(identityFromClaims({ sub: "u1", user_metadata: null })!.user_metadata).toEqual({});
+  it("metadata 不是对象时退化成空对象，而不是把脏数据透出去", () => {
+    for (const bad of ["MANAGER", ["a"], null, 42]) {
+      expect(identityFromClaims({ sub: "u1", user_metadata: bad })!.claims).toEqual({});
+      expect(identityFromClaims({ sub: "u1", app_metadata: bad })!.claims).toEqual({});
+    }
   });
 
   it("email 不是字符串就不给（claims 来自网络，类型要收）", () => {
