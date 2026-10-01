@@ -365,6 +365,27 @@ model SupportGrant {
   @@index([organisationId, createdAt])
 }
 
+/// 退租墓碑（P4 第三块）：一家店被删除之后留下的**唯一**记录。
+///
+/// 为什么必须存在：
+///  ① 店铺句柄 `slug` 是运营标识（门店链接/备份命名/日志都带它）。删掉之后如果没人记得，
+///     同一个 slug 会被下一个人"顺手"再开一家 —— 而旧的门店二维码、打印出来的链接、
+///     客户收藏的 URL 全部指向新的那家店。这是**最危险的一类串店**。
+///  ② 钱的账要对得上：某个月少了一家店、少了多少行数据，得有个地方能查到。
+///
+/// 它只增不改、不挂外键（与 PlatformAuditLog 同理：退租本身就是为了删掉那些行）。
+model TenantTombstone {
+  id              String   @id @default(cuid())
+  /// 被退休的店铺句柄 —— **永久占用**，不允许再开
+  slug            String   @unique
+  name            String
+  purgedAt        DateTime @default(now())
+  purgedByAuthId  String
+  purgedByEmail   String?
+  /// 删除时的行数快照（JSON），出账/对账用
+  counts          String?
+}
+
 model Branch {
   id             String       @id @default(cuid())
   organisationId String

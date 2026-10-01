@@ -5,7 +5,8 @@ import { requirePlatformAdmin } from "@/lib/platform/guard";
 export const dynamic = "force-dynamic";
 
 /** 租户目录（P4）：**以 slug 为键** —— 它是门店链接、备份命名、日志的公共句柄。 */
-export default async function PlatformTenantsPage() {
+export default async function PlatformTenantsPage({ searchParams }: { searchParams: Promise<{ ok?: string; err?: string }> }) {
+  const { ok, err } = await searchParams;
   const guard = await requirePlatformAdmin();
   if (guard.ok) await platformService.touchAdmin(guard.admin.authId);
 
@@ -18,6 +19,11 @@ export default async function PlatformTenantsPage() {
         <h1 className="text-lg font-semibold">租户（{tenants.length}）</h1>
         <Link href="/platform/new" className="rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground">开新店</Link>
       </div>
+
+      {err && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">操作未生效：{err}</p>
+      )}
+      {ok && <p className="rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-sm text-emerald-700">{ok}</p>}
 
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full text-sm">

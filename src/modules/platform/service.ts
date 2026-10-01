@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { IPlatformRepository, ProvisionTenantRows, SupportGrantRow } from "@/modules/platform/repository";
+import type { IPlatformRepository, ProvisionTenantRows, SupportGrantRow, TombstoneRow } from "@/modules/platform/repository";
 import { PrismaPlatformRepository } from "@/repositories/prisma/platform.repository";
 import type { AuthAdminPort } from "@/providers/auth-admin";
 import { supabaseAuthAdmin } from "@/providers/auth-admin";
@@ -227,6 +227,78 @@ export class PlatformService {
   }
 
   // ---------------------------------------------------------------------
+  // 退租删除（P4 第三块）：不可逆，所以要"看得见 + 拦得住 + 留得下"
+  // ---------------------------------------------------------------------
+
+  /** 只读预演：这家店现在有多少行、分别在哪张表（UI 上先给人看清楚）。 */
+  async purgePreview(organisationId: string) {
+    const tenant = await this.repo.getTenant(organisationId);
+    if (!tenant) return null;
+    const rows = await this.repo.countTenantRows(organisationId);
+    const tombstone = tenant.slug ? await this.repo.findTombstone(tenant.slug) : null;
+    return { tenant, rows, total: rows.reduce((n, r) => n + r.rows, 0), tombstone };
+  }
+
+  /**
+   * 退租：把一家店从库里彻底删掉。**不可逆**，所以三道闸门：
+   *   ① **先停用**（`SUSPENDED`）—— 两步走，避免"顺手删了一家正在营业的店"；
+   *   ② **原样输入 slug** —— 打字确认比勾选框难糊弄；
+   *   ③ **删除与复核在同一个事务里** —— 复核发现还有残留就整体回滚，
+   *      宁可"没退成"，也不要"退了一半"（半家店比整家店更难收拾）。
+   *
+   * 删完之后留下**墓碑**（slug 永久占用，防止旧链接指向新店）与平台审计。
+   */
+  async purgeTenant(input: {
+    organisationId: string;
+    actor: { authId: string; email?: string | null };
+    confirmSlug: string;
+  }): Promise<{ ok: true; deleted: number; tombstone: TombstoneRow } | { ok: false; error: string }> {
+    const tenant = await this.repo.getTenant(input.organisationId);
+    if (!tenant) return { ok: false, error: "租户不存在" };
+    if (!tenant.slug) return { ok: false, error: "这家店没有 slug，无法做打字确认（先补 slug 再退租）" };
+    if ((input.confirmSlug ?? "").trim() !== tenant.slug) {
+      return { ok: false, error: "确认字符串与店铺句柄不一致 —— 退租必须原样输入 " + tenant.slug };
+    }
+    if (tenant.status !== "SUSPENDED") {
+      return { ok: false, error: "先停用这家店，再退租（两步走，避免顺手删掉还在营业的店）" };
+    }
+    if (await this.repo.findTombstone(tenant.slug)) {
+      return { ok: false, error: "这个句柄已经退休过了" };
+    }
+
+    const rows = await this.repo.countTenantRows(input.organisationId);
+    const counts = JSON.stringify(Object.fromEntries(rows.map((r) => [r.model, r.rows])));
+    let deleted = 0;
+    try {
+      ({ deleted } = await this.repo.purgeTenantRows(input.organisationId));
+    } catch (e) {
+      // 复核失败 → 事务已回滚 → 什么都没删。这条失败也必须留痕（否则"退租失败"无人知道）
+      await this.repo.appendAudit({
+        actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+        action: "TENANT_PURGE_FAILED", targetOrganisationId: input.organisationId,
+        detail: String((e as Error).message).slice(0, 200),
+      });
+      return { ok: false, error: "退租失败（已回滚，数据没动）：" + String((e as Error).message).slice(0, 200) };
+    }
+
+    const tombstone = await this.repo.createTombstone({
+      slug: tenant.slug, name: tenant.name,
+      purgedByAuthId: input.actor.authId, purgedByEmail: input.actor.email ?? null,
+      counts,
+    });
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+      action: "TENANT_PURGED", targetOrganisationId: input.organisationId,
+      detail: `${tenant.name}（${tenant.slug}）· 删除 ${deleted} 行`,
+    });
+    return { ok: true, deleted, tombstone };
+  }
+
+  listTombstones() {
+    return this.repo.listTombstones();
+  }
+
+  // ---------------------------------------------------------------------
   // 限时支持访问（P4 第三块）：双向留痕
   // ---------------------------------------------------------------------
 
@@ -349,6 +421,11 @@ export class PlatformService {
     const invalid = validateProvisionInput(input);
     if (invalid) return invalid;
 
+    // 退休过的句柄**永久占用** —— 否则旧的门店二维码/打印链接会指向一家新店（最危险的一类串店）
+    const retired = await this.repo.findTombstone(input.slug);
+    if (retired) {
+      return { ok: false, code: "SLUG_TAKEN", error: `slug "${input.slug}" 已退休（${retired.name}，${retired.purgedAt.toISOString().slice(0, 10)} 退租）—— 店铺句柄不复用` };
+    }
     const existing = await this.repo.findBySlug(input.slug);
     if (existing) {
       return { ok: false, code: "SLUG_TAKEN", error: `slug "${input.slug}" 已被「${existing.name}」占用（slug 是运营句柄，不复用）` };

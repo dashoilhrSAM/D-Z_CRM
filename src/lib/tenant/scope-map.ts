@@ -36,6 +36,12 @@ export type ScopeEntry =
 export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
+  TenantTombstone: {
+    kind: "none",
+    reason:
+      "**退租墓碑**（P4）：一家店被删掉之后留下的唯一记录。不挂任何外键 —— " +
+      "它就是为'那些行已经不在了'而存在的（slug 永久占用，防止旧链接指向新店）。",
+  },
   SupportGrant: {
     kind: "column",
     note: "平台限时支持访问授权：本身属于某家店（有 organisationId），但它只由平台侧读写",

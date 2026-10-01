@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { platformService, TENANT_STATUSES, type ProvisionTenantResult } from "@/modules/platform/service";
 import { requirePlatformAdmin } from "@/lib/platform/guard";
 
@@ -21,7 +22,7 @@ export async function setTenantStatusAction(formData: FormData): Promise<void> {
   const status = String(formData.get("status") ?? "");
   if (!organisationId || !TENANT_STATUSES.includes(status as (typeof TENANT_STATUSES)[number])) return;
 
-  await platformService.setTenantStatus({
+  const res = await platformService.setTenantStatus({
     organisationId,
     status: status as (typeof TENANT_STATUSES)[number],
     actor: { authId: guard.admin.authId, email: guard.admin.email },
@@ -30,6 +31,9 @@ export async function setTenantStatusAction(formData: FormData): Promise<void> {
 
   revalidatePath("/platform");
   revalidatePath("/platform/" + String(formData.get("slug") ?? ""));
+  // ⚠️ 失败**必须说出来**：把结果一丢、照样 redirect，界面看起来就像成功了 ——
+  // 操作员会以为「已经停用了」，而其实什么都没发生（浏览器冒烟实测踩到）。
+  if (!res.ok) redirect("/platform/" + String(formData.get("slug") ?? "") + "?err=" + encodeURIComponent(res.error));
 }
 
 /**
@@ -41,13 +45,16 @@ export async function grantSupportAccessAction(formData: FormData): Promise<void
   if (!guard.ok) return;
   const organisationId = String(formData.get("organisationId") ?? "");
   if (!organisationId) return;
-  await platformService.grantSupportAccess({
+  const res = await platformService.grantSupportAccess({
     organisationId,
     actor: { authId: guard.admin.authId, email: guard.admin.email },
     reason: String(formData.get("reason") ?? ""),
     minutes: Number(formData.get("minutes") ?? 0),
   });
-  revalidatePath("/platform/" + String(formData.get("slug") ?? "") + "/support");
+  const base = "/platform/" + String(formData.get("slug") ?? "") + "/support";
+  // 原因太短 / 时长越界 —— 都要让人看见，不能静默无反应
+  if (!res.ok) redirect(base + "?err=" + encodeURIComponent(res.error));
+  revalidatePath(base);
 }
 
 export async function revokeSupportAccessAction(formData: FormData): Promise<void> {
@@ -57,6 +64,28 @@ export async function revokeSupportAccessAction(formData: FormData): Promise<voi
   if (!organisationId) return;
   await platformService.revokeSupportAccess({ organisationId, actor: { authId: guard.admin.authId, email: guard.admin.email } });
   revalidatePath("/platform/" + String(formData.get("slug") ?? "") + "/support");
+}
+
+/**
+ * 退租（永久删除）。**不可逆** —— 所以闸门在服务层（先停用、原样输入 slug、
+ * 删除与复核同事务），这里只负责把表单递过去。
+ */
+export async function purgeTenantAction(formData: FormData): Promise<void> {
+  const guard = await requirePlatformAdmin();
+  if (!guard.ok) return;
+  const organisationId = String(formData.get("organisationId") ?? "");
+  if (!organisationId) return;
+  const res = await platformService.purgeTenant({
+    organisationId,
+    actor: { authId: guard.admin.authId, email: guard.admin.email },
+    confirmSlug: String(formData.get("confirmSlug") ?? ""),
+  });
+  if (!res.ok) {
+    // 打字确认不对 / 还没停用 / 复核失败 —— 回本页把原因写在明面上（静默跳走最危险）
+    redirect("/platform/" + String(formData.get("slug") ?? "") + "?err=" + encodeURIComponent(res.error));
+  }
+  revalidatePath("/platform");
+  redirect("/platform?ok=" + encodeURIComponent("已退租 " + res.tombstone.slug + "（删除 " + res.deleted + " 行）"));
 }
 
 export async function createTenantAction(_prev: unknown, formData: FormData): Promise<ProvisionTenantResult> {
