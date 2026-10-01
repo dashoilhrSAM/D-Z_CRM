@@ -695,8 +695,19 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 
 ### P4 · 平台管理台（10–15 天）
 
-- `/platform/*` 路由 + 独立 `PLATFORM_ADMIN` 角色（不隶属任何组织）。
-- `provisionTenant({name, slug, ownerEmail, ...})`：建租户 + 唯一 Branch + OWNER + Supabase auth + `AuthLink` + 默认配置（服务目录/检查模板/消息模板/预约时段/佣金规则）+ **产出 `/t/<slug>` 开通链接与门店二维码**。
+- 🟡 **第 1 块已完成（2026-10-01）—— 开店能力 `provisionTenant`**：
+  `PlatformService.provisionTenant()`（UI→Service→Repository→Adapter 分层）+ CLI
+  `scripts/provision-tenant.ts`（默认 dry-run；**护栏判据是目标主机**，因为本仓 `.env` 里
+  就放着生产连接串、本地跑时 `NODE_ENV` 仍是 development）。一次事务建齐
+  Organisation(slug) + 唯一 Branch + 店主 User + Supabase auth + **AuthLink** + 默认配置
+  （服务/来源/阶段/模板/时段/库位），并产出 `/t/<slug>` 开通链接与门店码。
+  同邮箱开第二家店会复用手册 auth 账号并新增 AuthLink（跨店账号 → 登录出现选择器）。
+  详见 `docs/changes/2026-10-01-p4-provision-tenant.md`。
+  顺带：Supabase Auth 收进 provider 端口（`src/providers/auth-admin.ts`）、
+  QR token 的纯函数提到 `src/lib/random-token.ts` —— 两处都是因为 **`server-only` 模块
+  让脚本 import 不了**，而"开店必须能由 CLI 跑"。
+- ⏳ **第 2 块**：平台管理员身份模型 + `/platform/*` 租户目录 + 开通表单。
+- ⏳ **第 3 块**：停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 租户目录（**以 slug 为键**）、用量、停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 运维产物命名统一：备份/导出/账单/日志一律带 slug。
 
