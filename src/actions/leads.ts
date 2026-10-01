@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { leadsModule } from "@/modules/leads/service";
 
 /**
@@ -14,10 +13,12 @@ import { leadsModule } from "@/modules/leads/service";
 async function defaultOrgBranch() {
   const org = await db.organisation.findFirst();
   const session = await getSessionUser();
-  const branchScope = scopedBranchId(session);
-  const branch = branchScope
-    ? await db.branch.findFirst({ where: { id: branchScope, organisationId: org!.id } })
-    : await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
+  // P5：这**不是**权限判断，只是"这一行算在哪家门店头上"（Branch 是隐藏的 1:1 记录）。
+  // 优先用这个人自己所属的门店（属于本 org 才算），否则退回主门店 —— 行为与退役前一致。
+  const own = session.branchId
+    ? await db.branch.findFirst({ where: { id: session.branchId, organisationId: org!.id } })
+    : null;
+  const branch = own ?? (await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } }));
   return { org: org!, branch: branch! };
 }
 

@@ -13,7 +13,7 @@
 // once, and both the pages and the actions call it.
 import type { Prisma, Role } from "@prisma/client";
 import { db } from "@/lib/db";
-import { scopedBranchId, type BranchScopeSession } from "@/lib/branch-scope";
+import type { BranchScopeSession } from "@/lib/branch-scope";
 
 /** The roles that can be given a job. */
 export const ASSIGNABLE_ROLES: readonly Role[] = ["MECHANIC", "MANAGER"];
@@ -21,20 +21,22 @@ export const ASSIGNABLE_ROLES: readonly Role[] = ["MECHANIC", "MANAGER"];
 /**
  * The branch a NEW job created by this session will belong to.
  *
- * Branch-level users are locked to their own branch; org-level users (owner, super admin,
- * head office) fall back to the main branch, which is what createJob has always done.
+ * ⚠️ P5：这**不是**权限判断，只是"这一行算在哪家门店头上"的记账（Branch 是隐藏的 1:1 记录）。
+ * 所以规则简化为：优先用这个人自己所属的门店（它属于本 org 才算数），否则退回主门店。
+ * 原实现按"总部角色/分行角色"分叉 —— 那套分区语义已经退役（见 lib/branch-scope.ts 文件头）。
+ *
  * Returns null only when the database has no usable branch, which createJob treats as a
  * hard error rather than silently guessing.
  */
 export async function resolveNewJobBranchId(session: BranchScopeSession): Promise<string | null> {
   const org = await db.organisation.findFirst({ select: { id: true } });
   if (!org) return null;
-  const scope = scopedBranchId(session);
-  const branch = await db.branch.findFirst({
-    where: { organisationId: org.id, ...(scope ? { id: scope } : { isMain: true }) },
-    select: { id: true },
-  });
-  return branch?.id ?? null;
+  if (session.branchId) {
+    const own = await db.branch.findFirst({ where: { organisationId: org.id, id: session.branchId }, select: { id: true } });
+    if (own) return own.id;
+  }
+  const main = await db.branch.findFirst({ where: { organisationId: org.id, isMain: true }, select: { id: true } });
+  return main?.id ?? null;
 }
 
 /**

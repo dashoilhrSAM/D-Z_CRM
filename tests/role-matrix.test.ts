@@ -18,7 +18,7 @@ import path from "node:path";
 import { ROLE_MODULES } from "@/lib/auth/role-modules";
 import { moduleAllowed } from "@/lib/nav-registry";
 import { defaultAllowed, MODULES } from "@/lib/auth/permissions";
-import { isOrgLevelRole, canManageOrgSettings, scopedBranchId } from "@/lib/branch-scope";
+import { isOrgLevelRole, canManageOrgSettings, scopedBranchId, applyBranchScope, writeBranchId } from "@/lib/branch-scope";
 import { canAssignRole, canManageTarget } from "@/lib/auth/staff-policy";
 
 const read = (p: string) => readFileSync(path.join(process.cwd(), p), "utf8");
@@ -92,10 +92,20 @@ describe("MANAGER 与 OWNER 的后台功能对齐（数据范围不动）", () =
     ).toEqual(["*"]);
   });
 
-  it("数据范围没动：MANAGER 仍不是 org 级，锁在本店", () => {
-    expect(isOrgLevelRole("MANAGER"), "MANAGER 被提升成 org 级 = 能看/改所有分店，这次**不**要这个").toBe(false);
-    expect(scopedBranchId({ role: "MANAGER", branchId: "b1" }), "分行级必须锁在本店").toBe("b1");
-    expect(scopedBranchId({ role: "OWNER", branchId: "b1" }), "org 级才看全部").toBeNull();
+  it("P5：branch 不再是数据分区轴 —— 任何人都不再按分行收窄", () => {
+    // 历史语义是"总部角色不过滤、分行角色过滤"，于是**同一家店里的两个人看到的数据不一样**，
+    // 而那纯粹是他们账号上 branchId 字段的差别。P5 把这条轴退役了：
+    // 一个 Organisation 就是一家店，查询只按 organisationId 收窄。
+    expect(isOrgLevelRole("MANAGER"), "MANAGER 仍然不是 org 级（功能开关那条轴继续有效）").toBe(false);
+    expect(scopedBranchId({ role: "MANAGER", branchId: "b1" }), "分行级不再被锁到本分行").toBeNull();
+    expect(scopedBranchId({ role: "OWNER", branchId: "b1" })).toBeNull();
+    expect(scopedBranchId({ role: "MECHANIC", branchId: null })).toBeNull();
+    // applyBranchScope 也不再注入条件（包括 URL 上的 ?branch=）
+    const where: Record<string, unknown> = { organisationId: "org1" };
+    expect(applyBranchScope(where, { role: "MANAGER", branchId: "b1" }, "b2")).toEqual({ organisationId: "org1" });
+    // 但"写入落在哪家门店"仍然要解析（那不是权限，是记账）
+    expect(writeBranchId({ role: "MANAGER", branchId: "b1" })).toBe("b1");
+    expect(writeBranchId({ role: "OWNER", branchId: null })).toBeNull();
   });
 
   it("两个谓词是两条轴：功能可以给，范围不给", () => {

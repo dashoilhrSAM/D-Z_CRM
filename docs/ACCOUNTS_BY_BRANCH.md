@@ -35,8 +35,12 @@
 |---|---|---|
 | Muhammad binti Zain | 018-492 8009 | yes |
 
-## 4 · D&Z Testing Branch（吉隆坡）— 测试分行（隔离）
-> 分支级账号，登录后只见本分行数据（严格隔离）；密码 = 各自角色 +123（manager+123 / counter+123 / servicemgr+123 / mechanic+123）。
+## 4 · D&Z Testing Branch（吉隆坡）— 测试分行
+> 密码 = 各自角色 +123（manager+123 / counter+123 / servicemgr+123 / mechanic+123）。
+>
+> ⚠️ **2026-10-01（P5）：这个分行不再是隔离边界** —— 分行隔离已退役，
+> 这些账号与主店看到同一份数据。本表按"账号属于哪个门店"排列仍有意义（记账/归属），
+> 但**不要**再拿它当"看不到主店数据"的依据（要隔离请单开租户）。
 ### 员工
 | 姓名 | 邮箱 | 角色 | 登录 |
 |---|---|---|---|
@@ -53,6 +57,6 @@
 | JYTest | +601127322148 | jytest@gmail.com |
 
 ## 备注
-- **分行隔离**：test.* 属 Testing Branch；ManagerDemo/MechanicDemo 属主店；Ahmad 属主店、Muhammad 属 JB（rider 可 org 级跨分行预约）。
+- **门店归属**（P5 起**不再是隔离边界**）：test.* 属 Testing Branch；ManagerDemo/MechanicDemo 属主店；Ahmad 属主店、Muhammad 属 JB（rider 可跨门店预约）。
 - **重复**：MechanicDemo@gmail.com 有 2 条 User（其一 login=no，疑为历史残留）。
 - **@dz.my 员工密码**未记录，演示建议用 ManagerDemo/MechanicDemo/test.*。

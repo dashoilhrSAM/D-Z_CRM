@@ -540,7 +540,10 @@ describe("源码守卫：证据链靠写法维持", () => {
     const route = strip(read("src/app/api/attendance/export/route.ts"));
     expect(route, "API 默认必须登录且是员工").toContain("requireStaff(");
     expect(route, "导出要额外的 export 权限").toContain('"export"');
-    expect(route, "必须按分行收窄").toContain("scopedBranchId(");
+    // P5：按分行收窄已退役（一个 org 就是一家店）—— 但**按组织收窄**这条红线必须还在，
+    // 否则导出会把别家店的行踪也带出去。这里断言的是那个更重要的条件。
+    expect(route, "必须按组织收窄").toContain("organisationId");
+    expect(route, "导出的行范围必须来自会话所属组织").toContain("org.id");
     expect(route, "报表含姓名与行踪，不许有公开缓存").toContain("private, no-store");
     // 时间要按组织时区渲染：服务器时区在本地(+8)与 Vercel(UTC) 不同，工资表会差 8 小时
     expect(route, "时间必须显式按时区格式化").toContain("Intl.DateTimeFormat");
