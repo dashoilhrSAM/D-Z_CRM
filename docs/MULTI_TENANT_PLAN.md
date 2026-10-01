@@ -743,6 +743,14 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
 
 ### P5 · 产品层去 branch（3–5 天）
 
+- 🟡 **进行中（2026-10-01）**：
+  ✅ **侧边栏品牌区显示店名**（原来是「分行 · 城市」；prop `branchLabel` → `brandLabel`）。
+  ✅ **分行管理 UI 已经不存在**（`workshop/settings/` 只剩 audit-logs / developer / page）——
+  施工单里这条已完成；`branch-info.ts` 现在只被 `seed-core.ts` 用（不再影响运行时）。
+  ⏳ **剩下的大件**：`branch-scope.ts` 的隔离职责退役（`scopedBranchId`/`applyBranchScope`/
+  `isOrgLevelRole` 仍有 **90 处**调用，且参与数据分区 —— 单独一片，先摸清每处语义）；
+  `?branch=` 残留 3 处。详见 `docs/changes/2026-10-01-p5-sidebar-brand-and-e2e-fix.md`。
+
 - 移除分行管理 UI、`?branch=` 过滤、分行切换、`MyBranchSettings`；`branchId` 降级为隐藏外键。
 - **`branch-scope.ts` 的隔离职责整体退役**——`scopedBranchId()` / `applyBranchScope()` 不再参与数据分区，只保留 `canManageOrgSettings()` 这类**功能开关**语义（那是另一条轴，见 `src/lib/branch-scope.ts:22-40` 的原有说明）。
 - `branch-info.ts` 的硬编码主店身份（`MAIN_BRANCH_NAME/ADDRESS/COORDS`）改为从租户数据读取。

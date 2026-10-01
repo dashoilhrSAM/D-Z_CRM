@@ -41,11 +41,11 @@ export default async function WorkshopLayout({ children }: { children: React.Rea
   const sidebarUser = session.authenticated
     ? { id: session.user?.id ?? "", name: session.name, roleLabel: session.role, initials: session.initials }
     : undefined;
-  // 侧边栏品牌区显示登录用户所在分行（branch 级=其分行；org 级=主店）
-  const sidebarBranch = session.branchId
-    ? await db.branch.findUnique({ where: { id: session.branchId }, select: { name: true, city: true } })
-    : await db.branch.findFirst({ where: { isMain: true }, select: { name: true, city: true } });
-  const branchLabel = sidebarBranch ? `${sidebarBranch.name} · ${sidebarBranch.city}` : undefined;
+  // P5：侧边栏品牌区显示**店名**（租户），不再显示「分行 · 城市」。
+  // 多租户下"分行"已经不是用户能理解的概念（Branch 降级为隐藏的 1:1 门店记录），
+  // 而店名才是这家店的身份 —— 将来一个账号属于多家店时，这一行必须能立刻分辨"我在哪家店"。
+  const org = session.orgId ? await db.organisation.findUnique({ where: { id: session.orgId }, select: { name: true } }) : null;
+  const brandLabel = org?.name;
 
   // 导航：DB Permission 覆盖感知（Developer Settings 开关即时反映）；sidebar/mobile 共用
   const filteredNav = session.authenticated ? await navForRoleWithPerms(session.orgId, session.role, persona) : [];
@@ -58,7 +58,7 @@ export default async function WorkshopLayout({ children }: { children: React.Rea
 
   return (
     <div className="flex min-h-screen bg-muted/30 bg-[radial-gradient(90%_70%_at_88%_-12%,oklch(0.62_0.19_45/0.07),transparent_60%)]">
-      <Sidebar persona={persona} sections={filteredNav} role={session.authenticated ? session.role : undefined} user={sidebarUser} branchLabel={branchLabel} lang={lang} />
+      <Sidebar persona={persona} sections={filteredNav} role={session.authenticated ? session.role : undefined} user={sidebarUser} brandLabel={brandLabel} lang={lang} />
       <div className="flex-1 flex flex-col min-w-0">
         <div className="hidden lg:flex items-center gap-4 border-b bg-background px-6 h-16">
           <CommandPalette />
