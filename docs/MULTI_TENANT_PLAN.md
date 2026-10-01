@@ -719,7 +719,12 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   `setTenantStatus`（状态没变不写审计）；**停用对已登录的人立刻生效** —— 强制点在
   `identitiesForAuthUser` 过滤非运营租户（只挡入口是不够的）；`/platform/<slug>` 详情页
   （状态/用量/门店链接/审计轨迹 + 停用恢复表单）。详见 `docs/changes/2026-10-01-p4-tenant-status.md`。
-  ⏳ 剩下：限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
+  ✅ **限时支持访问（双向留痕）**：`SupportGrant`（限时 5–480 分钟、**必填原因**、**按人授权**、
+  可撤销、服务端判过期）；平台侧 `PlatformAuditLog` + **租户自己的 `AuditLog`** 两侧都写
+  （租户在 `/workshop/settings/audit-logs` 就能看到平台何时来过）；
+  `/platform/<slug>/support` 只展示**白名单式只读快照**（该目录里没有任何 server action）。
+  详见 `docs/changes/2026-10-01-p4-support-access.md`。
+  ⏳ 剩下：按租户导出、退租删除、模板库。
 - 租户目录（**以 slug 为键**）、用量、停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 运维产物命名统一：备份/导出/账单/日志一律带 slug。
 

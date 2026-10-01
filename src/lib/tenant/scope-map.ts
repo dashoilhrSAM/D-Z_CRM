@@ -36,6 +36,10 @@ export type ScopeEntry =
 export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
+  SupportGrant: {
+    kind: "column",
+    note: "平台限时支持访问授权：本身属于某家店（有 organisationId），但它只由平台侧读写",
+  },
   PlatformAuditLog: {
     kind: "none",
     reason:

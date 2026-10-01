@@ -34,6 +34,13 @@ export default async function PlatformTenantDetailPage({ params }: { params: Pro
         <div><dt className="text-xs text-muted-foreground">开通于</dt><dd className="text-xs">{tenant.createdAt.toISOString().slice(0, 10)}</dd></div>
       </dl>
 
+      <div className="rounded-lg border border-dashed p-3 text-sm">
+        <Link href={"/platform/" + (tenant.slug ?? "") + "/support"} className="text-primary hover:underline">限时支持访问</Link>
+        <span className="ml-2 text-xs text-muted-foreground">
+          这家店的数据默认对平台不可见；要看先给自己一段限时的只读访问权（会记进**租户自己的审计日志**）。
+        </span>
+      </div>
+
       <div className="flex flex-wrap gap-3 text-sm">
         {tenant.slug && <a href={appUrl + "/t/" + tenant.slug} className="text-primary hover:underline">门店链接</a>}
         {tenant.qrToken && <a href={appUrl + "/qr/workshop/" + tenant.qrToken} className="text-primary hover:underline">门店码</a>}
