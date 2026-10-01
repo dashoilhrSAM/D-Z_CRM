@@ -4,7 +4,7 @@ import { readRequestIdentity } from "@/lib/supabase/identity";
 import { identitiesForAuthUser } from "@/lib/tenant/identity";
 import { getLang } from "@/lib/get-lang";
 import type { Lang } from "@/lib/i18n";
-import { chooseWorkshop } from "./actions";
+import { chooseWorkshop } from "@/actions/tenant-context";
 
 /**
  * 多店选择器（P3b 第 4 步）。
