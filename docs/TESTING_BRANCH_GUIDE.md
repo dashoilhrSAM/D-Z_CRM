@@ -1,7 +1,11 @@
 # D&Z Testing Branch — 详情与指南（Guide）
 
-> 目的：为「给真实 workshop 使用」开通的 demo/testing 分行，一份完整的开通、账号、隔离、验证与注意事项指南。
+> 目的：为「给真实 workshop 使用」开通的 demo/testing 分行，一份完整的开通、账号、验证与注意事项指南。
 > 数据来源：生产库（Supabase PG，2026-09-07）。
+>
+> ⚠️ **2026-10-01（P5）：分行隔离已退役**。本指南第三、六节描述的"分支级账号只见本分行"
+> **不再成立** —— `Branch` 现在是隐藏的 1:1 门店记录，不参与可见性；org 内所有人看到同一份数据。
+> 那份隔离的**替代品是租户**：要隔离就开一个新 `Organisation`（`/platform` 或 `scripts/provision-tenant.ts`）。
 
 ---
 

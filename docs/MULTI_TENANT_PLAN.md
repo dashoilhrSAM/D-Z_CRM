@@ -747,9 +747,15 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   ✅ **侧边栏品牌区显示店名**（原来是「分行 · 城市」；prop `branchLabel` → `brandLabel`）。
   ✅ **分行管理 UI 已经不存在**（`workshop/settings/` 只剩 audit-logs / developer / page）——
   施工单里这条已完成；`branch-info.ts` 现在只被 `seed-core.ts` 用（不再影响运行时）。
-  ⏳ **剩下的大件**：`branch-scope.ts` 的隔离职责退役（`scopedBranchId`/`applyBranchScope`/
-  `isOrgLevelRole` 仍有 **90 处**调用，且参与数据分区 —— 单独一片，先摸清每处语义）；
-  `?branch=` 残留 3 处。详见 `docs/changes/2026-10-01-p5-sidebar-brand-and-e2e-fix.md`。
+  ✅ **branch 不再做数据分区（P5 主体完成）**：`scopedBranchId` 恒返回 null、
+  `applyBranchScope` 原样返回 where、`scopedStaffWhere` 不再按分行收窄；`?branch=` 失效；
+  新增 `writeBranchId()` 把「写入归属哪家门店」（记账）与「能看到什么」（权限）分开；
+  `isOrgLevelRole`（数据轴，退役）与 `canManageOrgSettings`（功能开关轴，**保留**）不再混为一谈。
+  **行为变化**：D&Z Testing Branch 的账号现在与主店看到同一份数据（实测两边工单都是 7 条）——
+  演示用的分行隔离没有了，替代品是租户。
+  详见 `docs/changes/2026-10-01-p5-retire-branch-scope.md`。
+  ⏳ 残留（纯清理、不影响行为）：约 30 处 `scopedBranchId(...)` 调用点现在是恒空的无操作，
+  下一片把它们从调用点删掉。
 
 - 移除分行管理 UI、`?branch=` 过滤、分行切换、`MyBranchSettings`；`branchId` 降级为隐藏外键。
 - **`branch-scope.ts` 的隔离职责整体退役**——`scopedBranchId()` / `applyBranchScope()` 不再参与数据分区，只保留 `canManageOrgSettings()` 这类**功能开关**语义（那是另一条轴，见 `src/lib/branch-scope.ts:22-40` 的原有说明）。

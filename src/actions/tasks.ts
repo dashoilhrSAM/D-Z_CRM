@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
-import { scopedBranchId, isOrgLevelRole } from "@/lib/branch-scope";
+import { isOrgLevelRole } from "@/lib/branch-scope";
 import { tasksModule } from "@/modules/tasks/service";
 
 /**
@@ -30,8 +30,10 @@ export async function createTask(input: {
 }) {
   const session = await requireTaskEditor();
   if (!session) return { ok: false as const, error: "Not signed in or no permission" };
-  // 分行：分行级用户只能落在自己分行；org 级可指定，未指定则不落分行
-  const branch = scopedBranchId(session) ?? (isOrgLevelRole(session.role) ? input.branchId ?? null : null);
+  // 门店落点（P5 起不再是权限判断，只是记账）：
+  //  · 分行级账号 → 自己所属的门店
+  //  · 总部级账号 → 用他显式指定的，没指定就不落门店
+  const branch = isOrgLevelRole(session.role) ? input.branchId ?? null : session.branchId ?? null;
   const task = await tasksModule.create({
     organisationId: session.orgId,
     branchId: branch,
