@@ -15,8 +15,15 @@ export const dynamic = "force-dynamic";
  *  ③ 看到的东西是**白名单只读快照**（不是"把租户端搬过来"），这个文件里**没有任何写路径**；
  *  ④ **每次查看都双向留痕**：平台侧 + 租户自己的审计页。
  */
-export default async function SupportAccessPage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function SupportAccessPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ slug: string }>;
+  searchParams: Promise<{ err?: string }>;
+}) {
   const { slug } = await params;
+  const { err } = await searchParams;
   const guard = await requirePlatformAdmin();
   if (!guard.ok) notFound();
 
@@ -42,6 +49,10 @@ export default async function SupportAccessPage({ params }: { params: Promise<{ 
         <Link href={"/platform/" + slug} className="text-sm text-muted-foreground hover:text-foreground">← {tenant.name}</Link>
         <h1 className="text-lg font-semibold">限时支持访问</h1>
       </div>
+
+      {err && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">操作未生效：{err}</p>
+      )}
 
       {!grant ? (
         <form action={grantSupportAccessAction} className="max-w-xl space-y-3 rounded-lg border p-4">

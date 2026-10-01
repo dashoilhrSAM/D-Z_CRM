@@ -724,7 +724,12 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   （租户在 `/workshop/settings/audit-logs` 就能看到平台何时来过）；
   `/platform/<slug>/support` 只展示**白名单式只读快照**（该目录里没有任何 server action）。
   详见 `docs/changes/2026-10-01-p4-support-access.md`。
-  ⏳ 剩下：按租户导出、退租删除、模板库。
+  ✅ **退租删除**：删除计划由 `scripts/gen-tenant-purge-plan.ts` 从
+  **scope map × Prisma DMMF** 推导（81 项、先子后父、Organisation 最后；生成器自检拓扑序），
+  `purgeTenant` 三道闸门（先停用 → 原样输入 slug → 删除与复核同事务、残留即回滚），
+  删完留 **`TenantTombstone`**（slug 永久占用，旧门店码不会指向新店）。
+  详见 `docs/changes/2026-10-01-p4-tenant-purge.md`。
+  ⏳ 剩下：按租户导出、模板库。
 - 租户目录（**以 slug 为键**）、用量、停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 运维产物命名统一：备份/导出/账单/日志一律带 slug。
 

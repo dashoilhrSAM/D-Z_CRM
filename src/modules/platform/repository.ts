@@ -76,7 +76,29 @@ export interface SupportSnapshot {
   tenantAudit: Array<{ action: string; entity: string; detail: string | null; createdAt: Date }>;
 }
 
+/** 退租墓碑行。 */
+export interface TombstoneRow {
+  id: string;
+  slug: string;
+  name: string;
+  purgedAt: Date;
+  purgedByAuthId: string;
+  purgedByEmail: string | null;
+  counts: string | null;
+}
+
 export interface IPlatformRepository {
+  /**
+   * 退租：按计划把这家店的**每一行**删掉，并在**同一个事务里复核**（还有残留就整体回滚）。
+   * `plan` 由 `purge-plan.generated.ts` 提供（scope map × DMMF 推导），不是手写清单。
+   */
+  purgeTenantRows(organisationId: string): Promise<{ deleted: number; remaining: number }>;
+  /** 只读预演：每个模型还剩多少行（UI 上先给人看清楚要删什么）。 */
+  countTenantRows(organisationId: string): Promise<Array<{ model: string; rows: number }>>;
+  createTombstone(row: { slug: string; name: string; purgedByAuthId: string; purgedByEmail: string | null; counts: string }): Promise<TombstoneRow>;
+  findTombstone(slug: string): Promise<TombstoneRow | null>;
+  listTombstones(): Promise<TombstoneRow[]>;
+
   createSupportGrant(row: Omit<SupportGrantRow, "id" | "createdAt" | "revokedAt">): Promise<SupportGrantRow>;
   findActiveSupportGrant(organisationId: string, authId: string, now: Date): Promise<SupportGrantRow | null>;
   revokeSupportGrants(organisationId: string, authId: string, at: Date): Promise<number>;

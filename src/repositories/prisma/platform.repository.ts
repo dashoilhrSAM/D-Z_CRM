@@ -1,6 +1,24 @@
 import type { PrismaClient } from "@prisma/client";
 import type { DbLike } from "@/modules/customers/repository";
 import type { IPlatformRepository, ProvisionTenantRows, ProvisionedTenant } from "@/modules/platform/repository";
+import { PURGE_ORDER, PURGE_WHERE } from "@/modules/platform/purge-plan.generated";
+
+/**
+ * 把生成计划里的占位符换成真实的 organisationId（保留字段名）。
+ *
+ * ⚠️ 这里踩过一次：第一版写成 `"{{ORG}}" in node` —— `in` 查的是**键**，
+ * 而占位符是**值**，于是判断永远不成立、递归一路走到字符串的每个字符上（栈溢出）。
+ * 正确的判断是"这个值是不是占位符"。
+ */
+export function resolvePurgeWhere(node: unknown, organisationId: string): Record<string, unknown> {
+  if (node === null || typeof node !== "object") return {};
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+    out[k] = v === "{{ORG}}" ? organisationId : resolvePurgeWhere(v, organisationId);
+  }
+  return out;
+}
+
 import { db } from "@/lib/db";
 
 /** 平台域的 Prisma 适配器。层级见 AGENTS.md：UI → Service → Repository → Adapter。 */
@@ -102,6 +120,57 @@ export class PrismaPlatformRepository implements IPlatformRepository {
         after: row.detail ?? null,
       },
     });
+  }
+
+  /**
+   * 退租：一次事务里"按顺序删 + 复核"，**复核不过就整体回滚**。
+   * 这比"删完再检查"强得多：删到一半发现漏了一张表时，库里不会留下半家店。
+   */
+  async purgeTenantRows(organisationId: string): Promise<{ deleted: number; remaining: number }> {
+    const client = this.c();
+    const clientFor = (model: string) => (client as unknown as Record<string, { deleteMany: (a: { where: unknown }) => Promise<{ count: number }> }>)[model.charAt(0).toLowerCase() + model.slice(1)];
+
+    return client.$transaction(async (tx) => {
+      const txFor = (model: string) => (tx as unknown as Record<string, { deleteMany: (a: { where: unknown }) => Promise<{ count: number }> }>)[model.charAt(0).toLowerCase() + model.slice(1)];
+      let deleted = 0;
+      for (const model of PURGE_ORDER) {
+        const where = resolvePurgeWhere(PURGE_WHERE[model], organisationId);
+        const res = await txFor(model).deleteMany({ where });
+        deleted += res.count;
+      }
+      // 复核：还有残留就抛错 → 整个事务回滚（宁可"没退成"，也不要"退了一半"）
+      let remaining = 0;
+      for (const model of PURGE_ORDER) {
+        const where = resolvePurgeWhere(PURGE_WHERE[model], organisationId);
+        const count = await (tx as unknown as Record<string, { count: (a: { where: unknown }) => Promise<number> }>)[model.charAt(0).toLowerCase() + model.slice(1)].count({ where });
+        remaining += count;
+      }
+      if (remaining > 0) throw new Error("退租复核失败：仍有 " + remaining + " 行残留，已回滚");
+      void clientFor;
+      return { deleted, remaining };
+    }, { timeout: 120_000 });
+  }
+
+  async countTenantRows(organisationId: string) {
+    const client = this.c();
+    const out: Array<{ model: string; rows: number }> = [];
+    for (const model of PURGE_ORDER) {
+      const count = await (client as unknown as Record<string, { count: (a: { where: unknown }) => Promise<number> }>)[model.charAt(0).toLowerCase() + model.slice(1)].count({ where: resolvePurgeWhere(PURGE_WHERE[model], organisationId) });
+      if (count > 0) out.push({ model, rows: count });
+    }
+    return out.sort((a, b) => b.rows - a.rows);
+  }
+
+  createTombstone(row: { slug: string; name: string; purgedByAuthId: string; purgedByEmail: string | null; counts: string }) {
+    return this.c().tenantTombstone.create({ data: row });
+  }
+
+  findTombstone(slug: string) {
+    return this.c().tenantTombstone.findUnique({ where: { slug } });
+  }
+
+  listTombstones() {
+    return this.c().tenantTombstone.findMany({ orderBy: { purgedAt: "desc" } });
   }
 
   findAdmin(authId: string) {
