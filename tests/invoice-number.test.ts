@@ -105,7 +105,13 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await db.invoice.deleteMany({ where: { id: { in: invoiceIds } } });
-  await db.invoice.deleteMany({ where: { invoiceNumber: { startsWith: "DZ-" + YEAR + "-" } } });
+  // ⚠️ 这条**必须带 organisationId**：`DZ-2099-` 这个前缀不是本文件独有的 ——
+  // `tests/tenant-uniqueness.test.ts` 的夹具发票号正是 `DZ-2099-00001`（两边都挑 2099
+  // 来避开真实年份）。本地 `fileParallelism` 打开时两个文件并行，
+  // 谁先跑完 cleanup 就会把对方的发票删掉 → 对方红在"expected 1 to be 2"，
+  // 而且**只在本地红、CI 绿**（CI 的 fileParallelism 是关的，文件串行）。
+  // 测试只该删自己造的行。
+  await db.invoice.deleteMany({ where: { invoiceNumber: { startsWith: "DZ-" + YEAR + "-" }, organisationId: { in: tenants.map((t) => t.orgId) } } });
   await db.invoice.deleteMany({ where: { jobId: { in: jobIds } } });
   for (const id of jobIds) {
     await db.serviceJobItem.deleteMany({ where: { jobId: id } });
@@ -116,7 +122,7 @@ afterAll(async () => {
   }
   // 计数器只清这个**合成年份**（真实年份的属于本地/生产使用，不能碰），
   // 且必须在删掉测试发票之后清，否则别的使用会从错误的号继续。
-  await db.invoiceCounter.deleteMany({ where: { year: YEAR } });
+  await db.invoiceCounter.deleteMany({ where: { year: YEAR, organisationId: { in: tenants.map((t) => t.orgId) } } });
   for (const t of tenants) {
     await db.motorcycle.deleteMany({ where: { organisationId: t.orgId } });
     await db.customer.deleteMany({ where: { organisationId: t.orgId } });
