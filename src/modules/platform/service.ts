@@ -4,6 +4,7 @@ import { PrismaPlatformRepository } from "@/repositories/prisma/platform.reposit
 import type { AuthAdminPort } from "@/providers/auth-admin";
 import { supabaseAuthAdmin } from "@/providers/auth-admin";
 import { randomToken } from "@/lib/random-token";
+import { exportFilename, type TenantExport } from "@/modules/platform/export";
 import {
   BUILTIN_TEMPLATES,
   DEFAULT_TEMPLATE_KEY,
@@ -223,6 +224,51 @@ export class PlatformService {
 
   listAudit(opts: { organisationId?: string; limit?: number } = {}) {
     return this.repo.listAudit(opts);
+  }
+
+  // ---------------------------------------------------------------------
+  // 按租户导出（P4 收尾）：把数据交给它自己
+  // ---------------------------------------------------------------------
+
+  /**
+   * 导出这家店的数据。**会写两条审计**（平台侧 + 租户自己的审计页）——
+   * 与支持访问同一个道理：把一家店的数据交出去，两边都该知道。
+   */
+  async exportTenant(input: {
+    organisationId: string;
+    actor: { authId: string; email?: string | null };
+    now?: Date;
+  }): Promise<{ ok: true; data: TenantExport; filename: string } | { ok: false; error: string }> {
+    const tenant = await this.repo.getTenant(input.organisationId);
+    if (!tenant) return { ok: false, error: "租户不存在" };
+    const { tables, rowCount, redactedFields } = await this.repo.exportTenantRows(input.organisationId);
+    const at = input.now ?? new Date();
+    const data: TenantExport = {
+      meta: {
+        slug: tenant.slug,
+        name: tenant.name,
+        organisationId: tenant.id,
+        exportedAt: at.toISOString(),
+        scope: "与该租户的退租删除范围一致（scope map 推出的每一张属于租户的表）",
+        redactedFields: [...new Set(redactedFields)].sort(),
+        notes: [
+          "这是给店主的数据副本，**不是**可以恢复整套系统的备份：登录凭据在 Supabase，平台侧的表不在这里。",
+          "带 [redacted] 的字段是密钥类内容，导出时刻意不包含。",
+        ],
+      },
+      tables,
+      rowCount,
+    };
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+      action: "TENANT_EXPORTED", targetOrganisationId: tenant.id,
+      detail: `${tenant.name}（${tenant.slug ?? "无 slug"}）· ${rowCount} 行 · 脱敏 ${data.meta.redactedFields.length} 个字段`,
+    });
+    await this.repo.auditForTenant({
+      organisationId: tenant.id, action: "TENANT_DATA_EXPORTED", entity: "TenantExport",
+      detail: (input.actor.email ?? "平台人员") + " 导出了本店数据（" + rowCount + " 行）",
+    });
+    return { ok: true, data, filename: exportFilename(tenant.slug, at) };
   }
 
   // ---------------------------------------------------------------------

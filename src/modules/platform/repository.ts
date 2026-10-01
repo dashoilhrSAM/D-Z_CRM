@@ -115,6 +115,11 @@ export interface IPlatformRepository {
    * `plan` 由 `purge-plan.generated.ts` 提供（scope map × DMMF 推导），不是手写清单。
    */
   purgeTenantRows(organisationId: string): Promise<{ deleted: number; remaining: number }>;
+  /**
+   * 按租户导出：把这家店的每一行读出来（**密钥类字段脱敏**）。
+   * 行范围与退租删除**用的是同一份计划** —— 导出少了行不会报错，只会让人以为数据就这些。
+   */
+  exportTenantRows(organisationId: string): Promise<{ tables: Record<string, unknown[]>; rowCount: number; redactedFields: string[] }>;
   /** 只读预演：每个模型还剩多少行（UI 上先给人看清楚要删什么）。 */
   countTenantRows(organisationId: string): Promise<Array<{ model: string; rows: number }>>;
   createTombstone(row: { slug: string; name: string; purgedByAuthId: string; purgedByEmail: string | null; counts: string }): Promise<TombstoneRow>;

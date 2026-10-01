@@ -2,6 +2,7 @@ import type { PrismaClient } from "@prisma/client";
 import type { DbLike } from "@/modules/customers/repository";
 import type { IPlatformRepository, ProvisionTenantRows, ProvisionedTenant } from "@/modules/platform/repository";
 import { PURGE_ORDER, PURGE_WHERE } from "@/modules/platform/purge-plan.generated";
+import { redactRow, redactedFieldsFor } from "@/modules/platform/export";
 
 /**
  * 把生成计划里的占位符换成真实的 organisationId（保留字段名）。
@@ -149,6 +150,24 @@ export class PrismaPlatformRepository implements IPlatformRepository {
       void clientFor;
       return { deleted, remaining };
     }, { timeout: 120_000 });
+  }
+
+  /** 导出：逐模型 findMany（行范围 = 退租计划），逐行脱敏。 */
+  async exportTenantRows(organisationId: string) {
+    const client = this.c() as unknown as Record<string, { findMany: (a: { where: unknown }) => Promise<Array<Record<string, unknown>>> }>;
+    const tables: Record<string, unknown[]> = {};
+    let rowCount = 0;
+    const redactedFields: string[] = [];
+    for (const model of PURGE_ORDER as readonly string[]) {
+      const where = resolvePurgeWhere(PURGE_WHERE[model], organisationId);
+      const rows = await client[model.charAt(0).toLowerCase() + model.slice(1)].findMany({ where });
+      if (!rows.length) continue;
+      const fields = redactedFieldsFor(model);
+      for (const f of fields) redactedFields.push(model + "." + f);
+      tables[model] = rows.map((r) => redactRow(model, r));
+      rowCount += rows.length;
+    }
+    return { tables, rowCount, redactedFields };
   }
 
   async countTenantRows(organisationId: string) {
