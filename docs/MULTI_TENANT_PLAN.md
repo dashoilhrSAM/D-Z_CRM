@@ -706,7 +706,14 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   顺带：Supabase Auth 收进 provider 端口（`src/providers/auth-admin.ts`）、
   QR token 的纯函数提到 `src/lib/random-token.ts` —— 两处都是因为 **`server-only` 模块
   让脚本 import 不了**，而"开店必须能由 CLI 跑"。
-- ⏳ **第 2 块**：平台管理员身份模型 + `/platform/*` 租户目录 + 开通表单。
+- ✅ **第 2 块已完成（2026-10-01）—— 平台管理员身份模型 + `/platform` 租户目录与开通表单**：
+  新建 `PlatformAdmin` 表（**不隶属任何组织**，也不进 `role-modules.ts` 的角色矩阵 ——
+  那张表管的是"在一家店里能做什么模块"，与"能不能跨店管理"是两条正交的轴）；
+  守卫 `src/lib/platform/guard.ts` 只认 `PlatformAdmin.authId`，未登录去登录、非管理员 `notFound()`
+  （不确认路由存在），**每个 action 自己再判一次**；`/platform` 列租户（以 slug 为键）、
+  `/platform/new` 开店表单（`useActionState`，临时密码一次性显示、不进 URL）；
+  `scripts/grant-platform-admin.ts` 是"第一个管理员"的唯一来源（按邮箱授予**只找不建**）。
+  详见 `docs/changes/2026-10-01-p4-platform-console.md`。
 - ⏳ **第 3 块**：停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 租户目录（**以 slug 为键**）、用量、停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 运维产物命名统一：备份/导出/账单/日志一律带 slug。

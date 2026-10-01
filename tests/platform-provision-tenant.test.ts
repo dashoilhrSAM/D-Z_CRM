@@ -33,6 +33,10 @@ class FakeAuthAdmin implements AuthAdminPort {
     this.users.push({ id, email });
     return { authId: id, reused: false };
   }
+  async findByEmail(email: string) {
+    const found = this.users.find((u) => u.email.toLowerCase() === email.trim().toLowerCase());
+    return found ? { authId: found.id, email: found.email } : null;
+  }
 }
 
 const { db } = await import("@/lib/db");
@@ -154,6 +158,7 @@ describe("③ 失败不留半成品", () => {
       ensureUser: async () => {
         throw new Error("boom");
       },
+      findByEmail: async () => null,
     });
     const res = await broken.provisionTenant({ name: "AuthDown Shop", slug, ownerEmail: "x@y.z" });
     expect(res.ok === false && res.code).toBe("AUTH_UNAVAILABLE");
