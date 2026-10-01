@@ -51,6 +51,13 @@ export default async function PlatformTenantDetailPage({
       </dl>
 
       <div className="rounded-lg border border-dashed p-3 text-sm">
+        <a href={"/platform/" + (tenant.slug ?? "") + "/export"} className="text-primary hover:underline">导出数据</a>
+        <span className="ml-2 text-xs text-muted-foreground">
+          把这家店的数据副本交给它自己（与退租删除同一范围；密钥类字段脱敏；导出会在**双方审计**里留痕）。
+        </span>
+      </div>
+
+      <div className="rounded-lg border border-dashed p-3 text-sm">
         <Link href={"/platform/" + (tenant.slug ?? "") + "/support"} className="text-primary hover:underline">限时支持访问</Link>
         <span className="ml-2 text-xs text-muted-foreground">
           这家店的数据默认对平台不可见；要看先给自己一段限时的只读访问权（会记进**租户自己的审计日志**）。
