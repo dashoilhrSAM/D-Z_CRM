@@ -3,7 +3,7 @@ import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { MechanicBoard, type BoardJob, type MechanicSummary } from "@/components/workshop/mechanic-board";
 import { getLang } from "@/lib/get-lang";
-import { scopedBranchId, scopedStaffWhere } from "@/lib/branch-scope";
+import { scopedStaffWhere } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { PageTransition } from "@/components/shared/page-transition";
 
@@ -17,7 +17,6 @@ export default async function MechanicPage() {
   // 全部工单读进内存再 filter —— 工单越多越慢。）300 是安全网，单个分店的未完工单不会接近它。
   const board = await jobService.listBoardRows({
     organisationId: session.orgId,
-    branchId: scopedBranchId(session),
     statuses: ["WAITING", "IN_PROGRESS", "AWAITING_APPROVAL", "READY"],
     pageSize: 300,
   });
@@ -43,7 +42,7 @@ export default async function MechanicPage() {
   }
 
   // all active mechanics (0-job mechanics still appear), plus unassigned bucket
-  const allMechanics = (await db.user.findMany({ where: scopedStaffWhere(session, ["MECHANIC"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } })).map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
+  const allMechanics = (await db.user.findMany({ where: scopedStaffWhere(["MECHANIC"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } })).map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
   const byId = new Map<string, { id: string; name: string; jobs: BoardJob[] }>();
   for (const m of allMechanics) byId.set(m.id, { id: m.id, name: m.name, jobs: [] });
   for (const [id, jobs] of byMechanic) {

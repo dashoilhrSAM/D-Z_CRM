@@ -18,8 +18,11 @@ import type { AttendanceRange } from "./range";
 
 export interface ReportScope {
   organisationId: string;
-  /** null = 全部分行（org 级角色）；否则锁到本店 */
-  branchId: string | null;
+  /**
+   * ⚠️ P5：分行不再是数据分区轴 —— 这个字段**已不再参与过滤**，保留是为了不破坏既有调用方
+   * （一个 org 就是一家店）。新代码不要传它。
+   */
+  branchId?: string | null;
 }
 
 export interface PunchReviewView {

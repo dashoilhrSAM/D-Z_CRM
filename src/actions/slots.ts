@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 
 /**
  * 预约时段（AppointmentSlot）的门禁。
@@ -16,7 +15,7 @@ import { scopedBranchId } from "@/lib/branch-scope";
 async function requireSlotEditor() {
   const session = await getSessionUser();
   if (session.kind !== "staff" || !session.user) return null;
-  return { session, branchScope: scopedBranchId(session) };
+  return { session, branchScope: null as string | null };
 }
 
 export async function generateSlots(input: { branchId: string; days: number; times: string[]; maxBookings: number }) {

@@ -2,8 +2,6 @@ import { db } from "@/lib/db";
 import { SlotManager, SlotRowActions } from "@/components/workshop/slot-manager";
 import { fmtDate } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t, tpl } from "@/lib/i18n";
 
 export const dynamic = "force-dynamic";
@@ -12,10 +10,8 @@ export default async function SlotsPage() {
   const lang = await getLang();
   const org = await db.organisation.findFirst();
   const branches = await db.branch.findMany({ where: { organisationId: org!.id } });
-  const session = await getSessionUser();
-  // 严格隔离：branch 级用户只看本分行时段；org 级看全部
-  const scopeId = scopedBranchId(session);
-  const scopedBranches = scopeId ? branches.filter((b) => b.id === scopeId) : branches;
+  // P5：不再按分行收窄 —— 本组织全部门店的时段都可见
+  const scopedBranches = branches;
   const slots = await db.appointmentSlot.findMany({
     where: { branchId: { in: scopedBranches.map((b) => b.id) } },
     orderBy: [{ date: "asc" }, { startTime: "asc" }],

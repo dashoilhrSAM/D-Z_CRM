@@ -754,8 +754,11 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   **行为变化**：D&Z Testing Branch 的账号现在与主店看到同一份数据（实测两边工单都是 7 条）——
   演示用的分行隔离没有了，替代品是租户。
   详见 `docs/changes/2026-10-01-p5-retire-branch-scope.md`。
-  ⏳ 残留（纯清理、不影响行为）：约 30 处 `scopedBranchId(...)` 调用点现在是恒空的无操作，
-  下一片把它们从调用点删掉。
+  ✅ **收尾（PR #119）**：约 30 处恒空的调用点已删干净 —— `scopedBranchId`/`applyBranchScope`
+  **不再被导出**，`ReportScope.branchId` 改为可选并注明不再参与过滤，两条源码守卫翻到
+  「必须按 organisationId 收窄」，lint warning 回到基线 830。做法是**先删函数、让编译器列清单**。
+  ⏳ 仅剩 `?branch=` 的 3 处残留参数（已不参与过滤，可随手删）。
+  **P5 完成 —— 多租户 0→5 阶段全部收口。**
 
 - 移除分行管理 UI、`?branch=` 过滤、分行切换、`MyBranchSettings`；`branchId` 降级为隐藏外键。
 - **`branch-scope.ts` 的隔离职责整体退役**——`scopedBranchId()` / `applyBranchScope()` 不再参与数据分区，只保留 `canManageOrgSettings()` 这类**功能开关**语义（那是另一条轴，见 `src/lib/branch-scope.ts:22-40` 的原有说明）。

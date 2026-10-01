@@ -4,17 +4,13 @@ import { inventoryService } from "@/modules/inventory/service";
 import { db } from "@/lib/db";
 import { ReorderActions } from "@/components/workshop/reorder-actions";
 import { getLang } from "@/lib/get-lang";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { invReason } from "@/lib/inv-labels";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReorderPage() {
-  const session = await getSessionUser();
-  const scopedBranch = scopedBranchId(session);
-  const branch = scopedBranch ? await db.branch.findUnique({ where: { id: scopedBranch } }) : await db.branch.findFirst({ where: { isMain: true } });
+  const branch = await db.branch.findFirst({ where: { isMain: true } }); // P5：一家店只有一个门店
   const recs = await inventoryService.reorderRecommendations(branch!.id);
   const suppliers = await inventoryService.suppliers();
   const lang = await getLang();

@@ -9,7 +9,6 @@ import { db } from "@/lib/db";
 import { fmtKM } from "@/lib/format";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
-import { getSessionUser } from "@/lib/session-user";
 import { scopedStaffWhere } from "@/lib/branch-scope";
 
 export const dynamic = "force-dynamic";
@@ -17,11 +16,10 @@ export const dynamic = "force-dynamic";
 export default async function MechanicJobPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const lang = await getLang();
-  const session = await getSessionUser();
   const detail = await jobService.getDetail(id);
   if (!detail) notFound();
 
-  const rawMechanics = await db.user.findMany({ where: scopedStaffWhere(session, ["MECHANIC", "MANAGER"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
+  const rawMechanics = await db.user.findMany({ where: scopedStaffWhere(["MECHANIC", "MANAGER"]), select: { id: true, name: true, branch: { select: { name: true } } }, orderBy: { name: "asc" } });
   const mechanics = rawMechanics.map((m) => ({ id: m.id, name: m.name, branchName: m.branch?.name ?? null }));
   const editData: EditJobData = {
     jobId: detail.id,

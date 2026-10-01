@@ -4,7 +4,7 @@ import { AttendancePanel } from "@/components/workshop/attendance-panel";
 import { AttendanceRangePicker } from "@/components/workshop/attendance-range-picker";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId, isOrgLevelRole } from "@/lib/branch-scope";
+import { isOrgLevelRole } from "@/lib/branch-scope";
 import { safeTimezone } from "@/lib/business-day";
 import { can } from "@/lib/auth/permissions";
 import { resolveRange } from "@/modules/attendance/range";
@@ -40,14 +40,12 @@ export default async function AttendancePage({
 
   const timezone = safeTimezone(org.timezone);
   const range = resolveRange({ preset: sp.preset, from: sp.from, to: sp.to, timezone });
-  const branchScope = scopedBranchId(session);
-
   // 只取 id/role/orgId，避免在 User | Customer 的联合类型上做窄化
   const me = session.kind === "staff" && session.user
     ? { id: session.user.id, name: session.name, role: session.role, organisationId: session.orgId, branchId: session.branchId }
     : null;
 
-  const report = await loadAttendanceReport({ organisationId: org.id, branchId: branchScope }, range);
+  const report = await loadAttendanceReport({ organisationId: org.id }, range);
 
   // 本人「今天」的状态**与所选区间无关**：打卡按钮说的是此刻，不是「你选中的那段时间」
   const today = resolveRange({ preset: "today", timezone });

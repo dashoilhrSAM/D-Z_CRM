@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { requireStaff } from "@/lib/api-auth";
 import { can } from "@/lib/auth/permissions";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { safeTimezone } from "@/lib/business-day";
 import { resolveRange } from "@/modules/attendance/range";
 import { loadAttendanceReport } from "@/modules/attendance/report";
@@ -54,7 +53,7 @@ export async function GET(req: NextRequest) {
   });
 
   const report = await loadAttendanceReport(
-    { organisationId: org.id, branchId: scopedBranchId({ role: session.role, branchId: session.branchId }) },
+    { organisationId: org.id },
     range,
   );
 

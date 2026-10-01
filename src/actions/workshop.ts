@@ -14,7 +14,6 @@ import { audit } from "@/lib/auth/audit";
 import { can, type PermissionAction } from "@/lib/auth/permissions";
 import { canManageTarget, canAssignRole, canToggleActive, canResetPassword, VALID_ROLES, type StaffActor, type StaffTarget } from "@/lib/auth/staff-policy";
 import { generateTempPassword } from "@/lib/auth/temp-password";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { normalizeEmail } from "@/lib/staff-identity";
 import { resolveNewJobBranchId } from "@/lib/job-branch";
 import { linkStaffIdentity } from "@/lib/tenant/identity";
@@ -150,9 +149,8 @@ export async function sendQuotation(jobId: string) {
 export async function bookingAction(id: string, action: "CONFIRMED" | "RESCHEDULED" | "CANCELLED" | "CHECKED_IN" | "NO_SHOW", extra?: { date?: string; timeSlot?: string; mileage?: number; packageId?: string; mechanicId?: string }) {
   if (action === "CHECKED_IN") {
     const org = await db.organisation.findFirst();
-    const session = await getSessionUser();
-    const branchScope = scopedBranchId(session);
-    const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
+    // P5：一家店只有一个门店 —— 门店归属取主门店（记账，不是权限）
+    const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
     const mileage = extra?.mileage ?? 0;
     if (extra?.mechanicId) {
       const mech = await db.user.findUnique({ where: { id: extra.mechanicId }, select: { branchId: true } });
@@ -207,9 +205,8 @@ export async function sendReminder(customerId: string, motorcycleId: string, nex
 
 export async function createPurchaseOrder(input: { supplierId: string; items: { productId: string; quantity: number; unitCostSen: number }[] }) {
   const org = await db.organisation.findFirst();
-  const session = await getSessionUser();
-  const branchScope = scopedBranchId(session);
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
+  // P5：一家店只有一个门店 —— 门店归属取主门店（记账，不是权限）
+  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
   await inventoryService.createPurchaseOrder({ branchId: branch!.id, supplierId: input.supplierId, items: input.items });
   revalidatePath("/", "layout");
   return { ok: true };
@@ -217,9 +214,8 @@ export async function createPurchaseOrder(input: { supplierId: string; items: { 
 
 export async function receivePurchaseOrder(poId: string) {
   const org = await db.organisation.findFirst();
-  const session = await getSessionUser();
-  const branchScope = scopedBranchId(session);
-  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, ...(branchScope ? { id: branchScope } : { isMain: true }) } });
+  // P5：一家店只有一个门店 —— 门店归属取主门店（记账，不是权限）
+  const branch = await db.branch.findFirst({ where: { organisationId: org!.id, isMain: true } });
   const result = await inventoryService.receivePurchaseOrder(poId, branch!.id);
   revalidatePath("/", "layout");
   return { ok: true, receivedAt: result.receivedAt };

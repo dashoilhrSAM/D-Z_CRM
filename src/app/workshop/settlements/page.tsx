@@ -5,7 +5,6 @@ import { ForemanPayoutView } from "@/components/workshop/foreman-payout-view";
 import { staffService } from "@/modules/staff/service";
 import { getSessionUser } from "@/lib/session-user";
 import { getLang } from "@/lib/get-lang";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
 import { fmtDate, fmtDateTime } from "@/lib/format";
@@ -28,7 +27,7 @@ export default async function SettlementsPage({ searchParams }: { searchParams: 
   const isMechanic = session.kind === "staff" && session.role === "MECHANIC";
 
   const days = DAY_FILTERS.some((f) => f.key === sp.days) ? Number(sp.days) : 7;
-  const [result, history] = await Promise.all([staffService.settlementByDay(days, undefined, scopedBranchId(session)), staffService.payoutHistory(scopedBranchId(session))]);
+  const [result, history] = await Promise.all([staffService.settlementByDay(days, undefined, undefined), staffService.payoutHistory(undefined)]);
   const foremen = isMechanic && session.user ? result.foremen.filter((f) => f.id === session.user!.id) : result.foremen;
 
   // 对账横幅（设计稿 §4.5：不变量不成立时页面顶部提示 —— "不给'就这样付了'的机会"）。

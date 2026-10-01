@@ -5,17 +5,13 @@ import { inventoryService } from "@/modules/inventory/service";
 import { db } from "@/lib/db";
 import { ReorderActions } from "@/components/workshop/reorder-actions";
 import { getLang } from "@/lib/get-lang";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { invReason } from "@/lib/inv-labels";
 
 export const dynamic = "force-dynamic";
 
 export default async function StockAlertsPage() {
-  const session = await getSessionUser();
-  const scopedBranch = scopedBranchId(session);
-  const branch = scopedBranch ? await db.branch.findUnique({ where: { id: scopedBranch } }) : await db.branch.findFirst({ where: { isMain: true } });
+  const branch = await db.branch.findFirst({ where: { isMain: true } }); // P5：一家店只有一个门店
   const rows = await inventoryService.stockStatus(branch!.id);
   const alerts = rows.filter((r) => r.level === "CRITICAL" || r.level === "OUT_OF_STOCK" || r.level === "LOW");
   const lang = await getLang();
