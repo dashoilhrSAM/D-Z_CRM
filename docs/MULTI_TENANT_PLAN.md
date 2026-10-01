@@ -669,9 +669,15 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
      （`resolveEntryTenant({ slug })`）。注册的"进哪家店"从此**由链接决定**，
      不再依赖"唯一在营门店"的兜底判断；`/rider/login` 的"去注册"链接也会跟着门店走。
    - ⏳ **至此第 4 步已全部完成**（选择器 + `/t/<slug>` + `/t/<slug>/signup`）。
-5. **清理**：删除死代码 `dz_org`（今天**写了但全项目没有任何地方读** ——
-   不是忘了读，是读它本身不安全：cookie 客户端可改，所以新 cookie 必须签名）；
-   `User.email` → `@@unique([organisationId, email])`（生产上已有该索引，核对 schema）。
+5. ✅ **已完成（2026-10-01）—— 清理**。
+   - **死代码 `dz_org` 已删**：`actions/rider-context.ts` 的 `setWorkshopContext` 会把表单里的
+     organisationId **原样写进一个既不签名、也没人读的 cookie**（写了等于没写，还让那个签名
+     cookie 看起来"已经有隔离"）。唯一调用方是 QR 门店码页 —— 现在改走 `chooseWorkshop`
+     （与多店选择器**同一个入口**：只能从 `identitiesForAuthUser` 的候选里选）并带 `next` 回跳；
+     两个 action 文件合并为 `src/actions/tenant-context.ts`。
+   - **`User.email` → `@@unique([organisationId, email])`**：双 schema 都已写全（生产上已有该索引）。
+   - 新增守卫 `tests/tenant-cookie-source.test.ts`：cookie 名只有一处定义、
+     `dz_org`/`dz_branch` 去注释后零出现、写门店 cookie 的调用点只在白名单里（都在写入口里校验候选）。
 6. **claim 迁 `app_metadata`**：P0 把 `app_jwt_claim()` 改成只认 `app_metadata`
    （`user_metadata` 用户自己就能改），于是 PostgREST 面现在**一律拒绝** ——
    要等 `injectBizClaims` 改写才会对合法用户重新开放。这是 P0 有意留下的 fail-closed 状态。

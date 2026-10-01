@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { Store, MapPin, Phone, Clock, Wrench } from "lucide-react";
 import { db } from "@/lib/db";
 import { getRiderCustomer } from "@/lib/rider-customer";
-import { setWorkshopContext } from "@/actions/rider-context";
+import { chooseWorkshop } from "@/actions/tenant-context";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import Link from "next/link";
@@ -10,7 +10,9 @@ import Link from "next/link";
 export const dynamic = "force-dynamic";
 
 /**
- * QR 落地页 C（QR-003 门店码）：Rider 扫码 → 门店资料 + 「确认进入」绑定当前服务门店。
+ * QR 落地页 C（QR-003 门店码）：Rider 扫码 → 门店资料 + 「确认进入」把这家店设为当前门店。
+ * 「确认进入」走 `chooseWorkshop`（与多店选择器同一个入口）：**只能从他 AuthLink 的候选里选** ——
+ * 表单里的 organisationId 只表示「他点了哪家店」，不代表「他有哪家店的权限」。
  * Deep link：/qr/workshop/<Organisation.id>
  */
 export default async function QrWorkshopPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ branch?: string }> }) {
@@ -45,9 +47,10 @@ export default async function QrWorkshopPage({ params, searchParams }: { params:
           {mainBranch && <div className="flex items-center gap-2 text-muted-foreground"><Wrench className="h-4 w-4 shrink-0" /> <span>{t("qr.service-repair", lang)}</span></div>}
         </div>
 
-        <form action={setWorkshopContext} className="mt-6">
+        <form action={chooseWorkshop} className="mt-6">
           <input type="hidden" name="organisationId" value={org.id} />
-          <input type="hidden" name="branchId" value={mainBranch?.id ?? ""} />
+          {/* 未登录时回跳到本页。过去这一步写的是既不签名、也没人读的 dz_org（P3b 第 5 步已删） */}
+          <input type="hidden" name="next" value={"/qr/workshop/" + org.id} />
           <button type="submit" className="w-full rounded-2xl bg-primary py-3.5 text-sm font-semibold text-primary-foreground">
             {customer ? t("qr.confirm-start", lang) : t("qr.signin-start", lang)}
           </button>

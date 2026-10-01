@@ -1,7 +1,8 @@
 /**
  * 当前门店（tenant）上下文：**签名** cookie。
  *
- * 为什么必须签名：`rider-context.ts` 今天会写一个 `dz_org` cookie，但**全项目没有任何地方读它**。
+ * 为什么必须签名：旧代码（`actions/rider-context.ts` 的 `setWorkshopContext`，P3b 第 5 步已删）
+ * 写过一个 `dz_org` cookie，而**全项目没有任何地方读它**。
  * 这不是"忘了读"，而是读它本身不安全 —— cookie 是客户端可随意写的，
  * 谁都能把自己的门店改成隔壁那家，于是"隔离"变成一句注释。
  * 所以这里用 HMAC 签名：值由服务端签发，客户端改一个字节就验不过。
