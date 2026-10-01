@@ -6,17 +6,20 @@
 > 本文件只维护**稳定的**内容（状态、基线、服务恢复、约定、未完成的事）。
 
 ## 一句话状态
-**多租户隔离 P0→P3b 已全部合并上线**（PR #97–#104；`origin/main = e9b8a8f`）。
-P3b 六步施工单里 **1（注册匹配带租户）、2（authId 降为租户内唯一）、3（请求级解析链）、
-4（多店选择器 + 门店专属链接 `/t/<slug>`）都已完成并上线**；剩下的是清理与收尾（见「下一步」）。
-**生产侧已执行过破坏性 DDL**：`User/Customer.authId` 的全局唯一索引已删除，改为
-`@@unique([organisationId, authId])` + `Customer(organisationId, phone)` 索引，
-`schema and database agree`。**不要重跑那次 DDL**（脚本幂等，但没必要）。
-生产用真实账号（`test.owner@dz.my`）实测过，**两条解析分支都验过**：
-① 直接登录 → 落 `/workshop/dashboard`、侧边栏显示姓名、**无** `dz_tenant` cookie（"唯一所属"分支）；
-② 走门店链接 `/t/d-z-smart-workshop` → 307 到 `/login?next=…` → 登录后回到 `/t/…` →
-**签上 `dz_tenant` cookie** → 落 `/workshop/dashboard`，后续 `/workshop/staff` 正常（"指定门店"分支）。
-基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **1008**（89 文件）/ build 通过 / Playwright **55**；
+**多租户隔离 P0→P3b 已全部合并上线，P3b 六步施工单全部完成**（PR #97–#108；`origin/main = 04e9f94`）。
+六步依次是：1 注册匹配带租户 → 2 `authId` 降为租户内唯一 → 3 请求级解析链 → 4 入口与选择器
+（多店选择器 + `/t/<slug>` + `/t/<slug>/signup`）→ 5 清理死代码 `dz_org` → 6 claims 迁 `app_metadata`。
+**生产侧已执行过两件半不可逆的事，不要重跑**：
+① 破坏性 DDL：`User/Customer.authId` 的全局唯一索引已删，改为
+`@@unique([organisationId, authId])` + `Customer(organisationId, phone)` 索引（`schema and database agree`）；
+② claims 回填：`scripts/backfill-auth-app-metadata.mjs --apply` 已给 **24 个账号**写好 `app_metadata`
+（复验：仍不正确 0、`provider` 丢失 0；幂等复跑输出「无需改动」）。
+生产实测（`test.owner@dz.my`，三条都验过）：
+① 直接登录 → `/workshop/dashboard`、侧边栏显示姓名、**无** `dz_tenant` cookie（"唯一所属"分支）；
+② 走 `/t/d-z-smart-workshop` → 307 → 登录回跳 → **签上 `dz_tenant` cookie** → dashboard（"指定门店"分支）；
+③ 登录后的 **JWT 里 `app_metadata` 带着 orgId / role / userId / customerId**，且 Supabase 自己的
+`provider` / `providers` 完好 —— 这是 PostgREST/RLS 面对合法用户重新开放的直接证据。
+基线全绿：lint 退出码 0 / tsc 0 错误 / vitest **1026**（91 文件）/ build 通过 / Playwright **55**；
 生产 `/` 200、`/login` 200、`/qr/rider/x` 307、`/t/d-z-smart-workshop` 307、`/t/nope` 404。
 
 ## 会话信息
@@ -43,28 +46,31 @@ P3b 六步施工单里 **1（注册匹配带租户）、2（authId 降为租户�
   CI 的 Playwright job 补上缺失的 `pnpm build` 并接线 secrets（此前一直失败在"没有生产构建"）。
 - **P3a 身份映射**：`AuthLink` 表（一人一店一条）+ `src/lib/tenant/identity.ts` 三条解析路径
   + 10 条测试；回填 dev.db 18 条 / 生产 20 员工 + 4 客户（**与有 authId 的账号数完全一致**）。
-- **P3b 地基**：`src/lib/tenant/active-tenant.ts`（**签名**的 `dz_tenant` cookie）+ 7 条测试；
-  P3b 施工单写入方案文档。`active-tenant.ts` **目前没有任何调用方**。
+- **P3b 全部六步**：见 `docs/MULTI_TENANT_PLAN.md` §P3b 与 `docs/changes/2026-09-3*`~/`2026-10-01-*`
+  的六份改动记录；门店 cookie 的**唯一写入口**是 `src/actions/tenant-context.ts` 的 `chooseWorkshop`
+  与 `src/app/t/[slug]/route.ts`（守卫在 `tests/tenant-cookie-source.test.ts`）。
 
 ## 下一步（按优先级）
-1. **注册流程的门店显式化**（P3b 第 4 步唯一没做的一块）：`/t/<slug>/signup` +
-   把 slug 传进 `signUpRider` / `completeRiderPhoneSignup`。今天注册走 `resolveEntryTenant()`
-   （签名 cookie → 唯一在营门店 → **多店并存时拒绝而不是猜**），安全但还不能由链接指定；
-   `resolveEntryTenant({ slug })` 从第 1 步起就能收 slug，缺的是把 slug 从注册页一路带下去。
-2. **CI 的 e2e job 缺 4 个 Secrets**（`AUTH_SECRET` + Supabase 三个 key；GitHub Settings → Secrets）。
+1. **P4 · 平台管理台**（10–15 天，见 `docs/MULTI_TENANT_PLAN.md` §P4）：`/platform/*` 路由 +
+   独立 `PLATFORM_ADMIN` 角色 + `provisionTenant({name, slug, ownerEmail, …})`
+   （建租户 + 唯一 Branch + OWNER + Supabase auth + `AuthLink` + 默认配置，并产出
+   `/t/<slug>` 开通链接与门店二维码）。这是把"能隔离"变成"**能开店**"的那一步 ——
+   P3b 已经把所有入口（`/t/<slug>`、`/t/<slug>/signup`、多店选择器、AuthLink、租户内唯一键）
+   铺好，`provisionTenant` 是第一个真正用上它们的消费者。
+2. **P5 · 产品层去 branch**：`branch-info.ts` 的硬编码主店身份改为从租户数据读取；
+   全部 branch UI 移除（Branch 降级为隐藏的 1:1 门店记录）。
+3. **CI 的 e2e job 缺 4 个 Secrets**（`AUTH_SECRET` + Supabase 三个 key；GitHub Settings → Secrets）。
    配齐后 Playwright 会在 CI 上跑 —— 多店选择器、`/t/<slug>` 这类"要真登录才走得到"的路径
    今天只有数据层单测 + 人工生产冒烟（都做过，见「一句话状态」）。
-3. **P3b 第 5 步清理**：删死代码 `dz_org`（`actions/rider-context.ts` 写了但全项目没人读）；
-   `User.email` 的复合唯一生产上已存在，核对 schema 是否已写全。
-4. **P3b 第 6 步**：claim 迁 `app_metadata`（P0 有意留下的 fail-closed 状态）。
-5. P2 剩余（低优先，清单跑 `node scripts/tenant-guard-audit.mjs` 即得）：
+4. **顺手可做的低优先项**：P2 剩余（清单跑 `node scripts/tenant-guard-audit.mjs` 即得）——
    `bulk/apply.ts:60/65`、`bulk/export.ts:89/105` 是**误报**（下一行有手工归属校验）；
    `completion.ts` 里按 `job.id` 的写是**传递安全**（入口已验归属）。
+   另：`qr/workshop/[id]` 与 `workshop/settings` 还有 `{id}` 直查兜底（低危，P0 时记录在案）。
 
 ## 基线测试（命令 + 期望通过数）
 - `pnpm lint`：**退出码 0**（830 个 warning 是既有的，0 error 是门槛）
 - `pnpm exec tsc --noEmit`：**0 错误**
-- `pnpm test`：**992 个通过**（87 文件）
+- `pnpm test`：**1026 个通过**（91 文件）
 - `pnpm build`：**必须通过**（改了源码要 build → kickstart 服务 → 再跑 e2e）
 - `pnpm exec playwright test --project=desktop-chromium`：**55 个通过**
 - 生产 schema 漂移：`DRIFT_CHECK_URL="$DST_DATABASE_URL" node scripts/sync-prod-schema.mjs --check`
