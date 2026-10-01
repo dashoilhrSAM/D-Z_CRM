@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import type { IPlatformRepository, ProvisionTenantRows } from "@/modules/platform/repository";
+import type { IPlatformRepository, ProvisionTenantRows, SupportGrantRow } from "@/modules/platform/repository";
 import { PrismaPlatformRepository } from "@/repositories/prisma/platform.repository";
 import type { AuthAdminPort } from "@/providers/auth-admin";
 import { supabaseAuthAdmin } from "@/providers/auth-admin";
@@ -69,6 +69,10 @@ export interface ProvisionTenantFailure {
 }
 
 export type ProvisionTenantResult = ProvisionTenantSuccess | ProvisionTenantFailure;
+
+/** 支持访问的时长上下限：限时是这个能力的前提，所以边界写在服务层而不是 UI。 */
+export const MIN_SUPPORT_MINUTES = 5;
+export const MAX_SUPPORT_MINUTES = 480;
 
 /** 租户状态。`SUSPENDED` = 停用（入口与已登录会话都立刻失去访问）。 */
 export const TENANT_STATUSES = ["ACTIVE", "TRIAL", "SUSPENDED"] as const;
@@ -220,6 +224,104 @@ export class PlatformService {
 
   listAudit(opts: { organisationId?: string; limit?: number } = {}) {
     return this.repo.listAudit(opts);
+  }
+
+  // ---------------------------------------------------------------------
+  // 限时支持访问（P4 第三块）：双向留痕
+  // ---------------------------------------------------------------------
+
+  /**
+   * 授予自己一段**限时**的支持访问权。
+   *
+   * 为什么是"授予自己而不是别人"：这个能力的现实形态就是"运维要看一眼这家店为什么坏了"，
+   * 中间隔一道审批只会让人绕过它。所以约束放在**别处**：必须写原因、必须有期限、
+   * **必须让租户看得见**（租户审计里留痕）、随时可撤销，而且只能看只读快照。
+   */
+  async grantSupportAccess(input: {
+    organisationId: string;
+    actor: { authId: string; email?: string | null };
+    reason: string;
+    minutes: number;
+    now?: Date;
+  }): Promise<{ ok: true; grant: SupportGrantRow } | { ok: false; error: string }> {
+    const reason = (input.reason ?? "").trim();
+    if (reason.length < 4) return { ok: false, error: "必须写清楚支持访问的原因（至少 4 个字）—— 这是审计的第一性问题" };
+    if (!Number.isFinite(input.minutes) || input.minutes < MIN_SUPPORT_MINUTES || input.minutes > MAX_SUPPORT_MINUTES) {
+      return { ok: false, error: `时长必须在 ${MIN_SUPPORT_MINUTES}–${MAX_SUPPORT_MINUTES} 分钟之间（限时是这个能力的前提）` };
+    }
+    const tenant = await this.repo.getTenant(input.organisationId);
+    if (!tenant) return { ok: false, error: "租户不存在" };
+
+    const now = input.now ?? new Date();
+    const expiresAt = new Date(now.getTime() + input.minutes * 60_000);
+    const grant = await this.repo.createSupportGrant({
+      organisationId: input.organisationId,
+      grantedByAuthId: input.actor.authId,
+      grantedByEmail: input.actor.email ?? null,
+      reason,
+      expiresAt,
+    });
+
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId,
+      actorEmail: input.actor.email ?? null,
+      action: "SUPPORT_GRANTED",
+      targetOrganisationId: input.organisationId,
+      detail: `${input.minutes} 分钟 · ${reason}`,
+    });
+    // 双向留痕的另一半：租户在自己的审计页上就能看到"平台在什么时候被允许看过我"
+    await this.repo.auditForTenant({
+      organisationId: input.organisationId,
+      action: "SUPPORT_ACCESS_GRANTED",
+      entity: "SupportGrant",
+      entityId: grant.id,
+      detail: `平台支持访问 ${input.minutes} 分钟：${reason}`,
+    });
+    return { ok: true, grant };
+  }
+
+  /** 当前**有效**的授权（服务端判过期/撤销，不依赖 UI）。按人 —— 只有被授权的那个人能用。 */
+  async activeSupportAccess(organisationId: string, authId: string, now = new Date()) {
+    return this.repo.findActiveSupportGrant(organisationId, authId, now);
+  }
+
+  async revokeSupportAccess(input: { organisationId: string; actor: { authId: string; email?: string | null }; now?: Date }) {
+    const at = input.now ?? new Date();
+    const count = await this.repo.revokeSupportGrants(input.organisationId, input.actor.authId, at);
+    if (count > 0) {
+      await this.repo.appendAudit({
+        actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+        action: "SUPPORT_REVOKED", targetOrganisationId: input.organisationId, detail: `撤销 ${count} 条`,
+      });
+      await this.repo.auditForTenant({
+        organisationId: input.organisationId, action: "SUPPORT_ACCESS_REVOKED", entity: "SupportGrant", detail: "平台提前结束了支持访问",
+      });
+    }
+    return count;
+  }
+
+  /**
+   * 记一次"平台人员看了这家店的数据"。**每次查看都记**（两条：平台侧 + 租户侧）——
+   * 审计的价值就在"每一次都留得下来"；写放大在这里是特性不是 bug。
+   */
+  async logSupportView(input: { organisationId: string; actor: { authId: string; email?: string | null }; detail?: string; now?: Date }) {
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+      action: "SUPPORT_VIEWED", targetOrganisationId: input.organisationId, detail: input.detail ?? null,
+    });
+    await this.repo.auditForTenant({
+      organisationId: input.organisationId, action: "SUPPORT_ACCESS_VIEWED", entity: "SupportGrant",
+      detail: (input.actor.email ?? "平台人员") + " 查看了本店数据（只读）",
+    });
+  }
+
+  listSupportGrants(organisationId: string, limit = 20) {
+    return this.repo.listSupportGrants(organisationId, limit);
+  }
+
+  /** 支持会话里能看到的只读快照（白名单见适配器）。 */
+  supportSnapshot(organisationId: string) {
+    return this.repo.supportSnapshot(organisationId);
   }
 
   /**

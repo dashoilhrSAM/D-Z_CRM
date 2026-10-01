@@ -334,6 +334,33 @@ model PlatformAuditLog {
   @@index([targetOrganisationId, createdAt])
 }
 
+/// 限时支持访问授权（P4 第三块）：平台人员**在租户知情且限时的前提下**查看这家店的数据。
+///
+/// 三条设计决定：
+///  ① **按人授权**：授权写清楚是哪个平台管理员（`grantedByAuthId`），只有他能用 ——
+///     "谁都能用别人的授权"就失去了留痕的意义。
+///  ② **服务端判过期**：`expiresAt` 每次渲染都重新判，不依赖 UI；`revokedAt` 一填立刻失效。
+///  ③ **不挂外键**：与 `PlatformAuditLog` 同理 —— 退租删掉整家店之后，
+///     "谁在什么时候被允许看过它"这条记录必须还在（没有外键就没有级联删除）。
+///
+/// 另一半是**租户可见**：授予/每次查看/撤销都会在租户自己的 `AuditLog` 里留一条
+/// （`/workshop/settings/audit-logs` 直接就能看到），这就是"双向留痕"。
+model SupportGrant {
+  id              String    @id @default(cuid())
+  /// 目标租户（无外键，见上）
+  organisationId  String
+  grantedByAuthId String
+  /// 便于人读；不参与鉴权
+  grantedByEmail  String?
+  /// **必填**：为什么需要进这家店（审计的第一性问题）
+  reason          String
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  @@index([organisationId, createdAt])
+}
+
 model Branch {
   id             String       @id @default(cuid())
   organisationId String

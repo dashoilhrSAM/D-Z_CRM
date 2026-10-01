@@ -33,6 +33,77 @@ export class PrismaPlatformRepository implements IPlatformRepository {
     });
   }
 
+  createSupportGrant(row: { organisationId: string; grantedByAuthId: string; grantedByEmail: string | null; reason: string; expiresAt: Date }) {
+    return this.c().supportGrant.create({ data: row });
+  }
+
+  findActiveSupportGrant(organisationId: string, authId: string, now: Date) {
+    return this.c().supportGrant.findFirst({
+      where: { organisationId, grantedByAuthId: authId, revokedAt: null, expiresAt: { gt: now } },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async revokeSupportGrants(organisationId: string, authId: string, at: Date): Promise<number> {
+    const res = await this.c().supportGrant.updateMany({
+      where: { organisationId, grantedByAuthId: authId, revokedAt: null },
+      data: { revokedAt: at },
+    });
+    return res.count;
+  }
+
+  listSupportGrants(organisationId: string, limit = 20) {
+    return this.c().supportGrant.findMany({ where: { organisationId }, orderBy: { createdAt: "desc" }, take: limit });
+  }
+
+  /**
+   * 支持会话里能看什么 —— **白名单**，不是"把租户端页面搬过来"。
+   * 每加一项都要问一次"平台调试真的需要它吗"：范围越小，出事时的解释成本越低。
+   */
+  async supportSnapshot(organisationId: string) {
+    const c = this.c();
+    const [staff, customers, jobs, invoices, bookings, recentJobs, staffList, tenantAudit] = await Promise.all([
+      c.user.count({ where: { organisationId } }),
+      c.customer.count({ where: { organisationId } }),
+      c.serviceJob.count({ where: { organisationId } }),
+      c.invoice.count({ where: { organisationId } }),
+      // Booking 没有 organisationId（经 branch 到达租户 —— 见 lib/tenant/scope-map.ts）
+      c.booking.count({ where: { branch: { organisationId } } }),
+      c.serviceJob.findMany({
+        where: { organisationId },
+        orderBy: { createdAt: "desc" },
+        take: 10,
+        select: { jobNumber: true, status: true, createdAt: true, customer: { select: { name: true } } },
+      }),
+      c.user.findMany({ where: { organisationId }, orderBy: { name: "asc" }, take: 20, select: { name: true, role: true, email: true } }),
+      c.auditLog.findMany({
+        where: { organisationId },
+        orderBy: { createdAt: "desc" },
+        take: 15,
+        select: { action: true, entity: true, after: true, createdAt: true },
+      }),
+    ]);
+    return {
+      counts: { staff, customers, jobs, invoices, bookings },
+      recentJobs: recentJobs.map((j) => ({ jobNumber: j.jobNumber, status: j.status, customer: j.customer?.name ?? null, createdAt: j.createdAt })),
+      staff: staffList,
+      tenantAudit: tenantAudit.map((a) => ({ action: a.action, entity: a.entity, detail: a.after, createdAt: a.createdAt })),
+    };
+  }
+
+  async auditForTenant(row: { organisationId: string; action: string; entity: string; entityId?: string | null; detail?: string | null }) {
+    // 与 lib/auth/audit.ts 同一张表：租户在自己的「审计日志」页就能看到平台什么时候来过
+    await this.c().auditLog.create({
+      data: {
+        organisationId: row.organisationId,
+        action: row.action,
+        entity: row.entity,
+        entityId: row.entityId ?? null,
+        after: row.detail ?? null,
+      },
+    });
+  }
+
   findAdmin(authId: string) {
     return this.c().platformAdmin.findUnique({ where: { authId } });
   }

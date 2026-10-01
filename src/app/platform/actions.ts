@@ -32,6 +32,33 @@ export async function setTenantStatusAction(formData: FormData): Promise<void> {
   revalidatePath("/platform/" + String(formData.get("slug") ?? ""));
 }
 
+/**
+ * 开始/结束**限时支持访问**。两条都自己判管理员身份。
+ * 期限与原因由服务层再校验一次（UI 的 min/max 只是提示）。
+ */
+export async function grantSupportAccessAction(formData: FormData): Promise<void> {
+  const guard = await requirePlatformAdmin();
+  if (!guard.ok) return;
+  const organisationId = String(formData.get("organisationId") ?? "");
+  if (!organisationId) return;
+  await platformService.grantSupportAccess({
+    organisationId,
+    actor: { authId: guard.admin.authId, email: guard.admin.email },
+    reason: String(formData.get("reason") ?? ""),
+    minutes: Number(formData.get("minutes") ?? 0),
+  });
+  revalidatePath("/platform/" + String(formData.get("slug") ?? "") + "/support");
+}
+
+export async function revokeSupportAccessAction(formData: FormData): Promise<void> {
+  const guard = await requirePlatformAdmin();
+  if (!guard.ok) return;
+  const organisationId = String(formData.get("organisationId") ?? "");
+  if (!organisationId) return;
+  await platformService.revokeSupportAccess({ organisationId, actor: { authId: guard.admin.authId, email: guard.admin.email } });
+  revalidatePath("/platform/" + String(formData.get("slug") ?? "") + "/support");
+}
+
 export async function createTenantAction(_prev: unknown, formData: FormData): Promise<ProvisionTenantResult> {
   const guard = await requirePlatformAdmin();
   if (!guard.ok) return { ok: false, code: "AUTH_UNAVAILABLE", error: "没有平台管理员权限" };

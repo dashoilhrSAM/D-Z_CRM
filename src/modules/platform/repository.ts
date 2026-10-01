@@ -57,7 +57,35 @@ export interface PlatformAuditRow {
   createdAt: Date;
 }
 
+/** 限时支持访问授权行。 */
+export interface SupportGrantRow {
+  id: string;
+  organisationId: string;
+  grantedByAuthId: string;
+  grantedByEmail: string | null;
+  reason: string;
+  expiresAt: Date;
+  revokedAt: Date | null;
+  createdAt: Date;
+}
+
+export interface SupportSnapshot {
+  counts: { staff: number; customers: number; jobs: number; invoices: number; bookings: number };
+  recentJobs: Array<{ jobNumber: string; status: string; customer: string | null; createdAt: Date }>;
+  staff: Array<{ name: string; role: string; email: string | null }>;
+  tenantAudit: Array<{ action: string; entity: string; detail: string | null; createdAt: Date }>;
+}
+
 export interface IPlatformRepository {
+  createSupportGrant(row: Omit<SupportGrantRow, "id" | "createdAt" | "revokedAt">): Promise<SupportGrantRow>;
+  findActiveSupportGrant(organisationId: string, authId: string, now: Date): Promise<SupportGrantRow | null>;
+  revokeSupportGrants(organisationId: string, authId: string, at: Date): Promise<number>;
+  listSupportGrants(organisationId: string, limit?: number): Promise<SupportGrantRow[]>;
+  /** 平台人员在支持会话里能看到的**只读快照**（白名单式，不做"整个应用"）。 */
+  supportSnapshot(organisationId: string): Promise<SupportSnapshot>;
+  /** 写租户自己的审计（双向留痕的"租户那一侧"）。 */
+  auditForTenant(row: { organisationId: string; action: string; entity: string; entityId?: string | null; detail?: string | null }): Promise<void>;
+
   /** 改租户状态（只有这一个字段，平台动作不该顺手改别的）。返回改动前的状态。 */
   setOrganisationStatus(organisationId: string, status: string): Promise<string>;
   getTenant(organisationId: string): Promise<{ id: string; name: string; slug: string | null; status: string; createdAt: Date; qrToken: string | null } | null>;
