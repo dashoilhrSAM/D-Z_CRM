@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
 import { commissionFromLedger, resolvePayoutCommission } from "@/modules/commission/settlement";
 
@@ -20,7 +19,7 @@ async function requirePayoutWrite() {
   if (session.kind !== "staff" || !session.user || session.role === "MECHANIC") {
     return { error: "Owner/manager access required" as const };
   }
-  return { session, scope: scopedBranchId(session) };
+  return { session, scope: null as string | null };
 }
 
 export interface PayoutDraft {

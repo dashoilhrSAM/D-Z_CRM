@@ -1,7 +1,5 @@
 import { db } from "@/lib/db";
 import { fmtDateTime } from "@/lib/format";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 
@@ -18,12 +16,10 @@ export const dynamic = "force-dynamic";
 export default async function AuditLogsPage({ searchParams }: { searchParams: Promise<{ action?: string; entity?: string }> }) {
   const lang = await getLang();
   const sp = await searchParams;
-  const session = await getSessionUser();
   const org = await db.organisation.findFirst();
-  const branchScope = scopedBranchId(session);
-  // 作用域（组织 + 分行）与筛选条件分开：上面的 action 计数条要统计**未按 action 过滤时**的分布，
+  // 作用域（组织）与筛选条件分开：上面的 action 计数条要统计**未按 action 过滤时**的分布，
   // 否则点进某个 action 之后所有其它 action 的计数都会变成 0。
-  const scopeWhere: Record<string, unknown> = { organisationId: org!.id, ...(branchScope ? { branchId: branchScope } : {}) };
+  const scopeWhere: Record<string, unknown> = { organisationId: org!.id };
   const where: Record<string, unknown> = { ...scopeWhere };
   if (sp.action) where.action = { contains: sp.action };
   if (sp.entity) where.entity = sp.entity;

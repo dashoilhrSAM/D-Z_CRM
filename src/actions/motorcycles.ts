@@ -4,7 +4,6 @@ import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
 
 /**
@@ -33,9 +32,7 @@ export async function transferMotorcycle(bikeId: string, newCustomerId: string) 
   const target = await db.customer.findFirst({ where: { id: newCustomerId, organisationId: session.orgId } });
   if (!target) return { ok: false, error: "Target customer not found" };
 
-  // 分行隔离：分行级用户只能把车转给本分行的顾客
-  const scope = scopedBranchId(session);
-  if (scope && target.branchId !== scope) return { ok: false, error: "Target customer belongs to another branch." };
+  // P5：分行不再是隔离边界（越权防护仍是 organisationId 收窄）
 
   await db.motorcycle.update({ where: { id: bikeId }, data: { customerId: newCustomerId } });
   await audit({

@@ -5,7 +5,6 @@ import { marketingService } from "@/modules/marketing/service";
 import { broadcast } from "@/modules/marketing/broadcast";
 import { getSessionUser, type SessionUser } from "@/lib/session-user";
 import { can } from "@/lib/auth/permissions";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { buildAudienceWhere, rulesForCampaign, type AudienceRules } from "@/modules/marketing/audience";
 import { db } from "@/lib/db";
 
@@ -32,12 +31,9 @@ async function reviewInOrg(id: string, organisationId: string) {
   return db.review.findFirst({ where: { id, branch: { organisationId } }, select: { id: true } });
 }
 
-/** 分行归属：branch 级用户的操作落在自己分行，org 级回退主店。 */
+/** 门店归属（P5：这是记账不是权限）—— 新行落在本 org 的主门店。 */
 async function defaultBranch(session: SessionUser) {
-  const branchScope = scopedBranchId(session);
-  return branchScope
-    ? await db.branch.findFirst({ where: { id: branchScope, organisationId: session.orgId } })
-    : await db.branch.findFirst({ where: { organisationId: session.orgId, isMain: true } });
+  return db.branch.findFirst({ where: { organisationId: session.orgId, isMain: true } });
 }
 
 async function mainBranchId(session: SessionUser) {

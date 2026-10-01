@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { audit } from "@/lib/auth/audit";
 import { applyDiscount, parseDiscount, type DiscountRequest } from "@/modules/finance/invoice-discount";
 
@@ -22,7 +21,7 @@ import { applyDiscount, parseDiscount, type DiscountRequest } from "@/modules/fi
 async function requireMoneyWrite() {
   const session = await getSessionUser();
   if (session.kind !== "staff" || !session.user) return { error: "Not signed in as staff." as const };
-  return { session, scope: scopedBranchId(session) };
+  return { session, scope: null as string | null };
 }
 
 /** 批量结清发票：ISSUED → PAID，应收 payment → PAID。 */
@@ -110,10 +109,7 @@ export async function setInvoiceDiscount(input: {
   });
   if (!inv) return { ok: false as const, error: "Invoice not found." };
 
-  // Strict branch isolation, the same rule the invoice list uses: a branch-level user must
-  // not be able to discount another branch's invoice by posting an id.
-  const scope = scopedBranchId(session);
-  if (scope && scope !== inv.branchId) return { ok: false as const, error: "This invoice belongs to another branch." };
+  // P5：分行不再是隔离边界 —— 本 org 的发票都能改（越权防护仍是 organisationId 收窄）
 
   // A settled invoice is finished. Taking money off it now would be a refund, which is a
   // different operation with different consequences, and not something to do by accident.

@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { fmtDate } from "@/lib/format";
 import { getSessionUser } from "@/lib/session-user";
 import { getLang } from "@/lib/get-lang";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { PageTransition } from "@/components/shared/page-transition";
 
@@ -21,7 +20,7 @@ export default async function JobsPage({ searchParams }: { searchParams: Promise
   const page = Math.max(1, Number(sp.page) || 1);
   const lang = await getLang();
   const session = await getSessionUser();
-  const branchId = scopedBranchId(session);
+  const branchId = undefined as string | undefined; // P5：分行不再参与过滤
   // data isolation: MECHANIC sees only their assigned jobs
   const mechanicId = session.kind === "staff" && session.role === "MECHANIC" && session.user ? session.user.id : undefined;
   const isKanban = view === "kanban";

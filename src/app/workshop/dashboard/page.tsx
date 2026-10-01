@@ -9,7 +9,6 @@ import { Money } from "@/components/shared/money";
 import { db } from "@/lib/db";
 import { formatRM } from "@/lib/money";
 import { getSessionUser, personaForRole } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { PageTransition } from "@/components/shared/page-transition";
 import { getLang } from "@/lib/get-lang";
 import { t, tpl } from "@/lib/i18n";
@@ -19,11 +18,8 @@ export const dynamic = "force-dynamic";
 export default async function DashboardPage() {
   const lang = await getLang();
   const session = await getSessionUser();
-  // 分行作用域：branch 级用户只见本分行；org 级(admin/owner/head-office)回退 main branch
-  const scopedId = scopedBranchId(session);
-  const branch = scopedId
-    ? (await db.branch.findUnique({ where: { id: scopedId } }))
-    : (await db.branch.findFirst({ where: { isMain: true } }));
+  // P5：一家店只有一个门店 —— 直接取主门店（branch 不再参与可见性）
+  const branch = await db.branch.findFirst({ where: { isMain: true } });
   const [dash, recs] = await Promise.all([
     dashboardService.get(branch?.id, session.orgId),
     aiService.recommendations(branch?.id, lang),

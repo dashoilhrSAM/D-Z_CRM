@@ -44,38 +44,12 @@ export function canManageOrgSettings(role: string): boolean {
 }
 
 /**
- * ⚠️ **已退役（P5）**：恒返回 `null` = 「不加 branch 过滤」。
- * 保留函数是为了不改 30 多处调用点的编译；语义上它现在什么也不做。
- * 调用点里那些 `branchId: scopedBranchId(session) ?? undefined` 会在下一片机械删除。
- */
-export function scopedBranchId(_session: BranchScopeSession): string | null {
-  void _session;
-  return null;
-}
-
-/**
- * ⚠️ **已退役（P5）**：原样返回 `where`，**不再注入 branchId**（包括 URL 上的 `?branch=`）。
- * 一家店只有一个门店，按分行过滤等于不过滤；而"分行级忽略显式参数、总部级允许"
- * 那套规则正是要退役的东西。
- */
-export function applyBranchScope<T extends Record<string, unknown>>(
-  where: T,
-  _session?: BranchScopeSession,
-  _explicitBranch?: string | null,
-): T {
-  void _session;
-  void _explicitBranch;
-  return where;
-}
-
-/**
  * Branch-scoped where for listing assignable staff (mechanics / managers).
  *
  * ⚠️ **已退役（P5）**：不再按 branch 收窄 —— 同一家店里的技师彼此可指派，
  * 这正是原来那条"KL 的用户看不到 Testing 门店技师"的规则要放弃的东西。
  */
-export function scopedStaffWhere(_session: BranchScopeSession, roles: readonly Role[]): Prisma.UserWhereInput {
-  void _session;
+export function scopedStaffWhere(roles: readonly Role[]): Prisma.UserWhereInput {
   return { role: { in: [...roles] }, active: true };
 }
 

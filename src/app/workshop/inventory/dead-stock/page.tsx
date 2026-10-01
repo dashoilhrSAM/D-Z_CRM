@@ -3,17 +3,13 @@ import { Money } from "@/components/shared/money";
 import { inventoryService } from "@/modules/inventory/service";
 import { db } from "@/lib/db";
 import { getLang } from "@/lib/get-lang";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { t } from "@/lib/i18n";
 import { invRecommendation } from "@/lib/inv-labels";
 
 export const dynamic = "force-dynamic";
 
 export default async function DeadStockPage() {
-  const session = await getSessionUser();
-  const scopedBranch = scopedBranchId(session);
-  const branch = scopedBranch ? await db.branch.findUnique({ where: { id: scopedBranch } }) : await db.branch.findFirst({ where: { isMain: true } });
+  const branch = await db.branch.findFirst({ where: { isMain: true } }); // P5：一家店只有一个门店
   const rows = await inventoryService.deadStock(branch!.id);
   const total = rows.reduce((s, r) => s + r.valueSen, 0);
   const lang = await getLang();

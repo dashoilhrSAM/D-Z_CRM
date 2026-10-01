@@ -3,7 +3,6 @@ import { ChevronDown } from "lucide-react";
 import { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { applyBranchScope } from "@/lib/branch-scope";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 import { formatRM } from "@/lib/money";
@@ -44,7 +43,6 @@ export default async function WorkshopInvoicesPage({ searchParams }: { searchPar
       { job: { motorcycle: { plate: { contains: q } } } },
     ];
   }
-  applyBranchScope(searchWhere, session, null); // 严格隔离：branch 级只看本分行发票
   const countWhere = { ...searchWhere };
   const where = { ...searchWhere, ...(sp.status ? { status: sp.status } : {}) };
   const [invoices, statusGroups] = await Promise.all([

@@ -575,7 +575,8 @@ describe("源码守卫：证据链靠写法维持", () => {
     // 不剥注释的话这条守卫会被自己的注释喂饱（第一版就是这么假通过的）。
     const page = strip(read("src/app/workshop/attendance/page.tsx"));
     expect(page, "不许再按 role: MECHANIC 过滤").not.toContain('role: "MECHANIC"');
-    expect(page).toContain("scopedBranchId(");
+    // P5：分行不再是数据分区轴 —— 页面必须按**组织**收窄（否则会把别家店的考勤也列出来）
+    expect(page, "必须按组织收窄").toContain("organisationId");
     const nav = read("src/lib/nav-registry.ts");
     expect(nav, "考勤有独立的权限模块").toContain('module: "ATTENDANCE"');
     expect(nav, "柜台/销售也要能打卡").toMatch(/key: "attendance"[^\n]*COUNTER_STAFF/);

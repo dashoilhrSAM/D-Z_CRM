@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 
 /**
  * 通知的读态标记。
@@ -25,11 +24,8 @@ import { scopedBranchId } from "@/lib/branch-scope";
 async function notificationScope(): Promise<Record<string, unknown> | null> {
   const session = await getSessionUser();
   if (session.kind !== "staff" || !session.user) return null;
-  const branchScope = scopedBranchId(session);
-  // 与列表页同一套 baseWhere：分支级看本分行 + 系统通知；org 级看本组织全部分行 + 系统通知。
-  return branchScope
-    ? { OR: [{ branchId: branchScope }, { branchId: null }] }
-    : { OR: [{ branch: { organisationId: session.orgId } }, { branchId: null }] };
+  // 与列表页同一套 baseWhere：本组织 + 系统通知（P5：不再按分行收窄）
+  return { OR: [{ branch: { organisationId: session.orgId } }, { branchId: null }] };
 }
 
 export async function markNotificationRead(id: string) {

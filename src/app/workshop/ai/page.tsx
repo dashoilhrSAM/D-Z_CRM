@@ -4,8 +4,6 @@ import { PageHeader } from "@/components/shared/page-header";
 import { AiDraftComposer } from "@/components/workshop/ai-draft-composer";
 import { aiService } from "@/modules/ai/service";
 import { db } from "@/lib/db";
-import { getSessionUser } from "@/lib/session-user";
-import { scopedBranchId } from "@/lib/branch-scope";
 import { getLang } from "@/lib/get-lang";
 import { t } from "@/lib/i18n";
 
@@ -13,12 +11,8 @@ export const dynamic = "force-dynamic";
 
 export default async function AiCentrePage() {
   const lang = await getLang();
-  // 分行作用域：branch 级用户看本分行洞察；org 级回退主店
-  const session = await getSessionUser();
-  const scopedId = scopedBranchId(session);
-  const branch = scopedId
-    ? await db.branch.findUnique({ where: { id: scopedId } })
-    : await db.branch.findFirst({ where: { isMain: true } });
+  // P5：一家店只有一个门店 —— 直接取主门店
+  const branch = await db.branch.findFirst({ where: { isMain: true } });
   const recs = await aiService.recommendations(branch?.id, lang);
   return (
     <div className="space-y-6">
