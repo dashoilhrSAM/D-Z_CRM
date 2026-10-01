@@ -40,7 +40,7 @@ P4 的第一块：**把"能隔离"变成"能开店"**。P4 原计划是一整套
      `src/lib/random-token.ts`（无副作用、无守卫），`qr-token.ts` 保留守卫并复用它。
      **不是放松守卫**：QR token 的安全性来自"服务端签发 + 库里比对"，
      客户端自己生成一个随机串拿不到任何权限。
-5. **测试 +10**（`tests/platform-provision-tenant.test.ts`）—— 见下。
+5. **测试 +12**（`tests/platform-provision-tenant.test.ts`）—— 见下。
 
 ## 影响
 
@@ -59,7 +59,7 @@ P4 的第一块：**把"能隔离"变成"能开店"**。P4 原计划是一整套
 | 检查 | 结果 |
 |---|---|
 | `tsc --noEmit` | 0 错误 |
-| `pnpm test` | **1036 通过 / 92 文件**（1026 + 10） |
+| `pnpm test` | **1038 通过 / 92 文件**（1026 + 12） |
 | `pnpm lint` | 退出码 0（830 warning / 0 error） |
 | `pnpm build` + kickstart | 通过 / 三服务 200 |
 | Playwright | **55 通过** |
@@ -86,6 +86,21 @@ P4 的第一块：**把"能隔离"变成"能开店"**。P4 原计划是一整套
 而我最初把整个 organisation 输入塞在 `rows.organisation` 里，文本上看不见。
 修法不是绕开守卫，而是把 `slug` 提到 `ProvisionTenantRows` 顶层、
 并把 organisation 输入类型 Omit 掉 slug —— **类型层面杜绝两处 slug 不一致**。
+
+### CI 抓到的第一个问题（值得单独记）
+
+第一版测试是 mock `@supabase/supabase-js` 的 —— **本地全绿、CI 红 7 条**，
+原因是 `AuthAdminPort` 的真实实现先检查 `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY`，
+而本机有 `.env`、CI 没有。**这正是把 Supabase Auth 抽成端口的意义**：
+测试改为注入假端口（零 env 依赖），provider 自己的建号/复用逻辑单独一组测试、显式 stub env。
+
+顺带在修的过程中又踩到一个方向相反的坑：那组 provider 测试里模拟"缺 env"用的是
+`vi.unstubAllEnvs()` —— 在**有 `.env` 的机器上它会把真值恢复回来**，于是这条例外
+"本地绿、CI 才真"。改成显式 `stubEnv(..., "")` 之后两边一致（现在
+`NEXT_PUBLIC_SUPABASE_URL= SUPABASE_SERVICE_ROLE_KEY= pnpm test` 全绿 = 与 CI 同条件）。
+
+**教训**："本地绿"必须用**把本地便利条件拿掉**的方式复验一次（清 env、清 `.env`、清缓存），
+否则测的是"我的机器"而不是"这套代码"。
 
 ### 下一步（P4 第二块）
 

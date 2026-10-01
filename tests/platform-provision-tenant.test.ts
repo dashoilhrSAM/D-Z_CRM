@@ -7,54 +7,50 @@
 //      否则新店进去是空壳，每个新客户都得手工配一遍
 //   ③ **开完就能走 P3b 的入口链**：`/t/<slug>` 认得这家店、店主点进去直接进得去
 //      （这才是 P3b 与 P4 的接缝，也是最容易"看起来做完了其实没通"的地方）
-//   ④ 失败不留半成品：slug 被占 / slug 非法 → 拒绝，且**库里不多出任何一行**
+//   ④ 失败不留半成品：slug 被占 / slug 非法 / auth 挂了 → 拒绝，且**库里不多出任何一行**
 //
-// Supabase 只打桩（建号/列表），其余全是真实数据库 —— 与 `tenant-shop-signup.test.ts` 同一套手法。
+// ⚠️ 这里**注入假的 AuthAdminPort**，不依赖 `NEXT_PUBLIC_SUPABASE_URL` 之类的环境变量。
+// 第一版是 mock `@supabase/supabase-js` 的，于是**本地绿（有 .env）而 CI 红（没有 .env）**——
+// 这正是"端口"存在的意义：测试与脚本都不必先具备生产凭据。
+// provider 自己的建号/复用逻辑另有一组测试（见文件末尾），那组会显式 stub env。
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import type { AuthAdminPort } from "@/providers/auth-admin";
 
-const { authUsers } = vi.hoisted(() => ({ authUsers: [] as Array<{ id: string; email: string }> }));
-
+// `resolveEntryTenant` 会读签名 cookie（`next/headers`）——vitest 里没有请求上下文，
+// 给它一个"没有 cookie"的桩（这也正好是"店主打自己的开通链接"的真实起点）。
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
 }));
-let authSeq = 0;
-vi.mock("@supabase/supabase-js", () => ({
-  createClient: () => ({
-    auth: {
-      admin: {
-        createUser: async ({ email }: { email: string }) => {
-          // 邮箱已存在 → 真实 Supabase 会报错；这里同样报错，让"复用"分支必须自己走到
-          if (authUsers.some((u) => u.email.toLowerCase() === String(email).toLowerCase())) {
-            return { data: { user: null }, error: { message: "User already registered" } };
-          }
-          const id = "test-provision-auth-" + ++authSeq;
-          authUsers.push({ id, email: String(email) });
-          return { data: { user: { id } }, error: null };
-        },
-        updateUserById: async () => ({ data: {}, error: null }),
-        listUsers: async () => ({ data: { users: [...authUsers] }, error: null }),
-      },
-    },
-  }),
-}));
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({ auth: { getUser: async () => ({ data: { user: null }, error: null }) } }),
-}));
+
+/** 假的认证端口：有则复用、无则建 —— 与真实实现同语义，但不碰网络、不需要 env。 */
+class FakeAuthAdmin implements AuthAdminPort {
+  users: Array<{ id: string; email: string }> = [];
+  seq = 0;
+  async ensureUser({ email }: { email: string; password: string; name?: string }) {
+    const found = this.users.find((u) => u.email.toLowerCase() === email.toLowerCase());
+    if (found) return { authId: found.id, reused: true };
+    const id = "test-provision-auth-" + ++this.seq;
+    this.users.push({ id, email });
+    return { authId: id, reused: false };
+  }
+}
 
 const { db } = await import("@/lib/db");
-const { platformService, validateProvisionInput } = await import("@/modules/platform/service");
-const { resolveEntryTenant } = await import("@/lib/tenant/entry-tenant");
-const { planShopEntry } = await import("@/lib/tenant/entry-tenant");
+const { PlatformService, validateProvisionInput } = await import("@/modules/platform/service");
+const { PrismaPlatformRepository } = await import("@/repositories/prisma/platform.repository");
+
+const repo = new PrismaPlatformRepository();
+const fakeAuth = new FakeAuthAdmin();
+const platformService = new PlatformService(repo, fakeAuth);
 
 const TAG = Date.now().toString(36);
 const SLUG = "prov-" + TAG;
 const SLUG2 = "prov2-" + TAG;
 const OWNER = "owner." + TAG + "@provision.test";
-const created: string[] = [];
 
 async function dropIfAny(slug: string) {
   const org = await db.organisation.findUnique({ where: { slug }, select: { id: true } });
-  if (org) await platformService["repo"].dropTenant(org.id);
+  if (org) await repo.dropTenant(org.id);
 }
 
 beforeAll(async () => {
@@ -64,7 +60,6 @@ beforeAll(async () => {
 afterAll(async () => {
   await dropIfAny(SLUG);
   await dropIfAny(SLUG2);
-  await db.organisation.deleteMany({ where: { id: { in: created } } });
 });
 
 describe("① 开出来的店是完整的（四件东西同时成立 + 默认配置）", () => {
@@ -78,7 +73,6 @@ describe("① 开出来的店是完整的（四件东西同时成立 + 默认配
     });
     expect(res.ok, JSON.stringify(res)).toBe(true);
     if (!res.ok) return;
-    created.push(res.organisationId);
     expect(res.slug).toBe(SLUG);
     expect(res.status).toBe("ACTIVE");
     expect(res.entryUrl).toContain("/t/" + SLUG);
@@ -115,12 +109,14 @@ describe("① 开出来的店是完整的（四件东西同时成立 + 默认配
 
 describe("② 开完就能走 P3b 的入口链（P3b × P4 的接缝）", () => {
   it("门店链接认得这家新店", async () => {
+    const { resolveEntryTenant } = await import("@/lib/tenant/entry-tenant");
     const tenant = await resolveEntryTenant({ slug: SLUG });
     expect(tenant.ok).toBe(true);
     expect(tenant.ok && tenant.source).toBe("slug");
   });
 
   it("**店主点自己的开通链接 → 直接进店**（不需要任何额外手工步骤）", async () => {
+    const { planShopEntry } = await import("@/lib/tenant/entry-tenant");
     const org = await db.organisation.findUnique({ where: { slug: SLUG }, select: { id: true } });
     const owner = await db.user.findFirst({ where: { organisationId: org!.id, role: "OWNER" }, select: { authId: true } });
     const plan = await planShopEntry(owner!.authId!, SLUG);
@@ -147,6 +143,18 @@ describe("③ 失败不留半成品", () => {
     expect(validateProvisionInput({ name: "  ", slug: "ok-slug", ownerEmail: OWNER })?.code).toBe("INVALID_NAME");
     expect(validateProvisionInput({ name: "X", slug: "ok-slug", ownerEmail: OWNER })).toBeNull();
   });
+
+  it("认证服务不可用 → AUTH_UNAVAILABLE，且**库里不多出任何一行**", async () => {
+    const before = await db.organisation.count();
+    const broken = new PlatformService(repo, {
+      ensureUser: async () => {
+        throw new Error("boom");
+      },
+    });
+    const res = await broken.provisionTenant({ name: "AuthDown Shop", slug: "authdown-" + TAG, ownerEmail: "x@y.z" });
+    expect(res.ok === false && res.code).toBe("AUTH_UNAVAILABLE");
+    expect(await db.organisation.count(), "auth 挂了却建出了半家店").toBe(before);
+  });
 });
 
 describe("④ 同一个人可以同时属于多家店（复用手册里的多租户能力）", () => {
@@ -157,7 +165,6 @@ describe("④ 同一个人可以同时属于多家店（复用手册里的多租
     const res = await platformService.provisionTenant({ name: "Provision Test Shop 2", slug: SLUG2, ownerEmail: OWNER });
     expect(res.ok, JSON.stringify(res)).toBe(true);
     if (!res.ok) return;
-    created.push(res.organisationId);
     expect(res.reusedAuthAccount).toBe(true);
     expect(res.tempPassword, "复用老账号时不能发新密码（那会改掉他在别家店的密码）").toBeUndefined();
 
@@ -190,7 +197,7 @@ describe("⑤ 开通脚本的护栏判据（纯函数，CLI 与这里共用同�
 });
 
 describe("⑥ service role 的 provider 不能进客户端 bundle", () => {
-  it("没有任何 \"use client\" 文件引用 providers/auth-admin", async () => {
+  it('没有任何 "use client" 文件引用 providers/auth-admin', async () => {
     const { readFileSync, readdirSync, statSync } = await import("node:fs");
     const path = await import("node:path");
     const root = process.cwd();
@@ -207,5 +214,51 @@ describe("⑥ service role 的 provider 不能进客户端 bundle", () => {
     expect(clients.length, "一个 use client 文件都没扫到 —— 守卫形同虚设").toBeGreaterThan(20);
     const offenders = clients.filter((f) => /providers\/auth-admin/.test(readFileSync(path.join(root, f), "utf8")));
     expect(offenders, "service role 的模块被客户端引用了").toEqual([]);
+  });
+});
+
+describe("⑦ SupabaseAuthAdmin：建号 / 复用 / 失败（provider 自己的逻辑）", () => {
+  it("新建成功 → reused=false；邮箱已存在 → 找回并 reused=true；都不通 → 抛错；缺 env → 抛错", async () => {
+    /** 每个分支都要重新 mock + resetModules：provider 内部是 `await import(...)`。 */
+    const withClient = async (adminImpl: Record<string, unknown>) => {
+      vi.resetModules();
+      vi.doMock("@supabase/supabase-js", () => ({ createClient: () => ({ auth: { admin: adminImpl } }) }));
+      const mod = await import("@/providers/auth-admin");
+      return new mod.SupabaseAuthAdmin();
+    };
+
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "https://stub.supabase.co");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "stub-service-key");
+
+    const created = await withClient({
+      createUser: async () => ({ data: { user: { id: "auth-new" } }, error: null }),
+      listUsers: async () => ({ data: { users: [] } }),
+    });
+    expect(await created.ensureUser({ email: "x@y.z", password: "pw" })).toEqual({ authId: "auth-new", reused: false });
+
+    // 邮箱已注册 → 从列表里找回（大小写不敏感），**不改密码**
+    const existing = await withClient({
+      createUser: async () => ({ data: { user: null }, error: { message: "User already registered" } }),
+      listUsers: async () => ({ data: { users: [{ id: "auth-existing", email: "X@Y.Z" }] } }),
+    });
+    expect(await existing.ensureUser({ email: "x@y.z", password: "pw" })).toEqual({ authId: "auth-existing", reused: true });
+
+    // 两条路都不通 → 抛错（让上层返回 AUTH_UNAVAILABLE，而不是静默建半个店）
+    const broken = await withClient({
+      createUser: async () => ({ data: { user: null }, error: { message: "boom" } }),
+      listUsers: async () => ({ data: { users: [] } }),
+    });
+    await expect(broken.ensureUser({ email: "x@y.z", password: "pw" })).rejects.toThrow(/boom|无法/);
+
+    // 缺 env 也要抛 —— 配置问题不能被当成"建好了"。
+    // ⚠️ 必须**显式置空**而不是 `unstubAllEnvs()`：本地有 .env，那个调用会把它恢复回来，
+    // 于是这条例外在"有 .env"的机器上永远绿、在 CI 上才是真的（方向刚好反了）。
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    vi.resetModules();
+    vi.doUnmock("@supabase/supabase-js");
+    const { SupabaseAuthAdmin: Fresh } = await import("@/providers/auth-admin");
+    await expect(new Fresh().ensureUser({ email: "x@y.z", password: "pw" })).rejects.toThrow(/SUPABASE/);
+    vi.unstubAllEnvs();
   });
 });
