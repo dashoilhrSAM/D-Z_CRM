@@ -7,6 +7,32 @@ import { db } from "@/lib/db";
 export class PrismaPlatformRepository implements IPlatformRepository {
   private c(client?: DbLike): PrismaClient { return (client ?? db) as PrismaClient; }
 
+  findAdmin(authId: string) {
+    return this.c().platformAdmin.findUnique({ where: { authId } });
+  }
+
+  listAdmins() {
+    return this.c().platformAdmin.findMany({ orderBy: { createdAt: "asc" } });
+  }
+
+  upsertAdmin(input: { authId: string; email?: string | null; note?: string | null; createdBy?: string | null }) {
+    const { authId, ...rest } = input;
+    return this.c().platformAdmin.upsert({
+      where: { authId },
+      create: { authId, ...rest },
+      update: rest,
+    });
+  }
+
+  async removeAdmin(authId: string): Promise<boolean> {
+    const res = await this.c().platformAdmin.deleteMany({ where: { authId } });
+    return res.count > 0;
+  }
+
+  async touchAdmin(authId: string, at: Date): Promise<void> {
+    await this.c().platformAdmin.update({ where: { authId }, data: { lastSeenAt: at } });
+  }
+
   findBySlug(slug: string) {
     return this.c().organisation.findUnique({ where: { slug }, select: { id: true, name: true, status: true } });
   }

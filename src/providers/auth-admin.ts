@@ -32,17 +32,30 @@ export interface EnsureAuthUserResult {
 export interface AuthAdminPort {
   /** 有就复用、没有就建。**不修改已存在账号的任何凭据。** */
   ensureUser(input: EnsureAuthUserInput): Promise<EnsureAuthUserResult>;
+  /** 按邮箱找人。**只找不建** —— 授予平台权限时绝不能因为手滑打错邮箱就造出一个新账号。 */
+  findByEmail(email: string): Promise<{ authId: string; email: string } | null>;
 }
 
 /** Supabase 实现：建号失败即视为"该邮箱已存在"，再从列表里找回来（createUser 不返回既有 id）。 */
 export class SupabaseAuthAdmin implements AuthAdminPort {
-  async ensureUser(input: EnsureAuthUserInput): Promise<EnsureAuthUserResult> {
+  private async admin() {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!url || !key) throw new Error("缺少 NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
-
     const { createClient } = await import("@supabase/supabase-js");
-    const admin = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+    return createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  }
+
+  async findByEmail(email: string) {
+    const admin = await this.admin();
+    const want = email.trim().toLowerCase();
+    const { data } = await admin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const found = data?.users?.find((u) => (u.email ?? "").toLowerCase() === want);
+    return found?.email ? { authId: found.id, email: found.email } : null;
+  }
+
+  async ensureUser(input: EnsureAuthUserInput): Promise<EnsureAuthUserResult> {
+    const admin = await this.admin();
 
     const email = input.email.trim().toLowerCase();
     const { data, error } = await admin.auth.admin.createUser({

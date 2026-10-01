@@ -36,6 +36,12 @@ export type ScopeEntry =
 export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
+  PlatformAdmin: {
+    kind: "none",
+    reason:
+      "**平台管理员**（P4）：有意不属任何租户 —— 它是跨店管理权限，不该被任何一家店的数据收窄，" +
+      "也不该出现在租户侧的作用域查询里。鉴权只认它自己的 authId（lib/platform/guard.ts）。",
+  },
 
   // ============ 有 organisationId 列 ============
   // 注意：这里的条目数是**测试在守着的** —— 加了新模型却忘了登记，

@@ -296,6 +296,26 @@ model BrandProfile {
 }
 
 
+/// 平台管理员（P4）：**不隶属任何组织**，所以不能是 `User`（那要求 organisationId）。
+///
+/// 为什么单独一张表而不是环境变量白名单：改名单不该需要重新部署，而"谁在什么时候
+/// 获得了平台权限"这件事必须留痕（createdBy / createdAt）。它也不进
+/// `role-modules.ts` 的角色矩阵 —— 那张表管的是"在**一家店**里能做什么模块"，
+/// 与"能不能跨店管理"是两条正交的轴；混在一起迟早有人以为 OWNER 就等于平台管理员。
+model PlatformAdmin {
+  id         String   @id @default(cuid())
+  /// Supabase auth 用户 id —— 鉴权只认它
+  authId     String   @unique
+  /// 便于运维辨认（**不参与鉴权**，改邮箱不该影响权限）
+  email      String?
+  /// 为什么给这个人平台权限（审计用，写清楚理由）
+  note       String?
+  /// 谁授予的（"双人"要求的落点：至少能查出是谁开的门）
+  createdBy  String?
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime?
+}
+
 model Branch {
   id             String       @id @default(cuid())
   organisationId String

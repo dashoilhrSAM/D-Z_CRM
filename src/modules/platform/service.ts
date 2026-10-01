@@ -118,6 +118,62 @@ export class PlatformService {
     private authAdmin: AuthAdminPort = supabaseAuthAdmin,
   ) {}
 
+  // ---------------------------------------------------------------------
+  // 平台管理员（P4 第二块）：**与租户内的角色完全无关**
+  // ---------------------------------------------------------------------
+
+  /**
+   * 这个人是不是平台管理员 —— 鉴权只认 `PlatformAdmin.authId`。
+   *
+   * ⚠️ 刻意**不**看租户角色：OWNER/MANAGER 再大也只是"一家店里最大"，
+   * 让他们天然拥有跨店管理权，等于把整套租户隔离从后门打开。
+   * `role-modules.ts` 那张矩阵管的是"在一家店里能做什么模块"，是另一条轴。
+   */
+  async adminFor(authId: string | null | undefined) {
+    if (!authId) return null;
+    return this.repo.findAdmin(authId);
+  }
+
+  listAdmins() {
+    return this.repo.listAdmins();
+  }
+
+  /** 授予以邮箱为准（**找不到人就拒绝，绝不顺手建号**）—— 手滑打错一个字母不该造出账号。 */
+  async grantAdminByEmail(email: string, opts: { note?: string; createdBy?: string } = {}) {
+    const found = await this.authAdmin.findByEmail(email);
+    if (!found) return { ok: false as const, error: `找不到邮箱为 ${email} 的登录账号（先让他自己注册/由开通流程创建，再授权）` };
+    const row = await this.repo.upsertAdmin({ authId: found.authId, email: found.email, note: opts.note ?? null, createdBy: opts.createdBy ?? null });
+    return { ok: true as const, admin: row };
+  }
+
+  /** 直接用 authId 授予（auth 服务不可用时的兜底；CLI 与邮箱二选一）。 */
+  async grantAdminByAuthId(authId: string, opts: { email?: string; note?: string; createdBy?: string } = {}) {
+    const row = await this.repo.upsertAdmin({ authId, email: opts.email ?? null, note: opts.note ?? null, createdBy: opts.createdBy ?? null });
+    return { ok: true as const, admin: row };
+  }
+
+  revokeAdmin(authId: string) {
+    return this.repo.removeAdmin(authId);
+  }
+
+  /** 按邮箱在**名单里**找（撤销时用；与"去 auth 找人"是两件事）。 */
+  async adminForEmailLookup(email: string) {
+    const want = email.trim().toLowerCase();
+    const rows = await this.repo.listAdmins();
+    return rows.find((r) => (r.email ?? "").toLowerCase() === want) ?? null;
+  }
+
+  /**
+   * 记一次"他来过平台台"。**带节流**：每次渲染都写库是没必要的写放大，
+   * 一小时内有记录就不再写。
+   */
+  async touchAdmin(authId: string, now = new Date()) {
+    const row = await this.repo.findAdmin(authId);
+    if (!row) return;
+    if (row.lastSeenAt && now.getTime() - row.lastSeenAt.getTime() < 3600_000) return;
+    await this.repo.touchAdmin(authId, now);
+  }
+
   /** 租户目录（管理台第一屏的数据源）。 */
   listTenants() {
     return this.repo.listTenants();

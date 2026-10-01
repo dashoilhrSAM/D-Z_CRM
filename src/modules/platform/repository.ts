@@ -36,7 +36,25 @@ export interface ProvisionedTenant {
   qrToken: string | null;
 }
 
+/** 平台管理员行（P4）。 */
+export interface PlatformAdminRow {
+  authId: string;
+  email: string | null;
+  note: string | null;
+  createdBy: string | null;
+  createdAt: Date;
+  lastSeenAt: Date | null;
+}
+
 export interface IPlatformRepository {
+  // —— 平台管理员（与租户完全无关的一张表）——
+  findAdmin(authId: string): Promise<PlatformAdminRow | null>;
+  listAdmins(): Promise<PlatformAdminRow[]>;
+  /** 幂等：已在名单里就只更新备注/邮箱 */
+  upsertAdmin(input: { authId: string; email?: string | null; note?: string | null; createdBy?: string | null }): Promise<PlatformAdminRow>;
+  removeAdmin(authId: string): Promise<boolean>;
+  touchAdmin(authId: string, at: Date): Promise<void>;
+
   findBySlug(slug: string): Promise<{ id: string; name: string; status: string } | null>;
   /** 一次事务写完；任何一条失败整块回滚。 */
   provision(rows: ProvisionTenantRows): Promise<ProvisionedTenant>;
