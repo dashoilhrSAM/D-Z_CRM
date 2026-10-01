@@ -23,6 +23,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
           <nav className="flex items-center gap-3 text-sm text-muted-foreground">
             <Link href="/platform" className="hover:text-foreground">租户</Link>
             <Link href="/platform/new" className="hover:text-foreground">开新店</Link>
+            <Link href="/platform/templates" className="hover:text-foreground">模板</Link>
           </nav>
           <span className="ml-auto text-xs text-muted-foreground">{guard.admin.email ?? guard.admin.authId.slice(0, 8)}</span>
         </div>

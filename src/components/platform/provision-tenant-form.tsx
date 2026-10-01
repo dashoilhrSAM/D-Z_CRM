@@ -9,7 +9,7 @@ const inputCls = "w-full rounded-md border bg-background px-3 py-2 text-sm outli
 const labelCls = "mb-1 block text-xs font-medium text-muted-foreground";
 
 /** 开通表单 + **一次性**回执（临时密码只在这里显示一次，不写进 URL、不进日志）。 */
-export function ProvisionTenantForm() {
+export function ProvisionTenantForm({ templates }: { templates: Array<{ key: string; name: string; source: string; counts: { serviceTypes: number; leadSources: number; leadStages: number; messageTemplates: number } }> }) {
   const [state, formAction, pending] = useActionState<ProvisionTenantResult | null, FormData>(createTenantAction, null);
 
   if (state?.ok) return <OnboardingCard result={state} />;
@@ -21,6 +21,16 @@ export function ProvisionTenantForm() {
           [{state.code}] {state.error}
         </p>
       )}
+      <div>
+        <label className={labelCls} htmlFor="templateKey">开通模板（决定新店的服务目录/线索来源与阶段/消息模板）</label>
+        <select id="templateKey" name="templateKey" defaultValue="standard" className={inputCls}>
+          {templates.map((t) => (
+            <option key={t.key} value={t.key}>
+              {t.name}（{t.source === "custom" ? "自定义" : "内置"}：服务 {t.counts.serviceTypes} · 来源 {t.counts.leadSources} · 阶段 {t.counts.leadStages} · 模板 {t.counts.messageTemplates}）
+            </option>
+          ))}
+        </select>
+      </div>
       <div>
         <label className={labelCls} htmlFor="name">店名 *</label>
         <input id="name" name="name" required className={inputCls} placeholder="KL Bike Works" />

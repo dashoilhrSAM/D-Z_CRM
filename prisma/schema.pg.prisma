@@ -386,6 +386,29 @@ model TenantTombstone {
   counts          String?
 }
 
+/// 开通模板（P4 第三块）：把"一家新店开出来长什么样"从代码里搬出来。
+///
+/// 两条来源，解析顺序**自定义（这张表）→ 内置（代码里的 BUILTIN_TEMPLATES）**：
+///   · 内置模板写死在 `src/modules/platform/templates.ts` —— 永远存在、可复现；
+///   · 这张表存**从某家店导出来的**模板（"把店 A 的配置复制给店 B"），
+///     这是连锁开店时最省事的一条路。
+/// 刻意不做"把内置也塞进库"：那样会有两份事实来源，改了代码而库里是旧的。
+model TenantTemplate {
+  id          String   @id @default(cuid())
+  /// 稳定句柄（开新店时传它）：小写字母数字连字符
+  key         String   @unique
+  name        String
+  description String?
+  /// 模板负载（JSON）：serviceTypes / leadSources / leadStages / messageTemplates
+  payload     String
+  /// 从哪家店导出来的（审计用；不做外键 —— 那家店可能已经退租了）
+  sourceOrganisationId String?
+  createdByAuthId      String
+  createdByEmail       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
 model Branch {
   id             String       @id @default(cuid())
   organisationId String

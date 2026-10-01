@@ -4,6 +4,16 @@ import { PrismaPlatformRepository } from "@/repositories/prisma/platform.reposit
 import type { AuthAdminPort } from "@/providers/auth-admin";
 import { supabaseAuthAdmin } from "@/providers/auth-admin";
 import { randomToken } from "@/lib/random-token";
+import {
+  BUILTIN_TEMPLATES,
+  DEFAULT_TEMPLATE_KEY,
+  TEMPLATE_KEY_PATTERN,
+  resolveBuiltinTemplate,
+  safeParsePayload,
+  summarizePayload,
+  type TemplatePayload,
+  type TemplateSummary,
+} from "@/modules/platform/templates";
 
 /**
  * P4 · 开店（`provisionTenant`）—— 把"能隔离"变成"能开店"的那一步。
@@ -38,6 +48,8 @@ export interface ProvisionTenantInput {
   trialDays?: number;
   /** 跳过默认配置（只建组织/门店/店主；测试或特殊店用） */
   skipDefaults?: boolean;
+  /** 套哪个开通模板（默认 standard）；自定义模板优先于内置 */
+  templateKey?: string;
 }
 
 export interface ProvisionTenantSuccess {
@@ -65,7 +77,7 @@ export interface ProvisionTenantFailure {
   ok: false;
   error: string;
   /** 给 CLI 用的机器可读原因 */
-  code: "INVALID_SLUG" | "INVALID_NAME" | "INVALID_EMAIL" | "SLUG_TAKEN" | "AUTH_EXISTS_IN_TENANT" | "AUTH_UNAVAILABLE" | "DB_FAILED";
+  code: "INVALID_SLUG" | "INVALID_NAME" | "INVALID_EMAIL" | "SLUG_TAKEN" | "AUTH_EXISTS_IN_TENANT" | "AUTH_UNAVAILABLE" | "DB_FAILED" | "TEMPLATE_NOT_FOUND" | "TEMPLATE_INVALID";
 }
 
 export type ProvisionTenantResult = ProvisionTenantSuccess | ProvisionTenantFailure;
@@ -100,19 +112,6 @@ export function validateProvisionInput(input: Pick<ProvisionTenantInput, "name" 
   return null;
 }
 
-const DEFAULT_SERVICE_TYPES = [
-  { name: "General Service", code: "SVC-GEN", category: "SERVICE", durationMin: 60, priceSen: 8000 },
-  { name: "Engine Oil Change", code: "SVC-OIL", category: "SERVICE", durationMin: 30, priceSen: 4500 },
-  { name: "Tyre Replace", code: "SVC-TYRE", category: "SERVICE", durationMin: 40, priceSen: 6000 },
-  { name: "Full Inspection", code: "SVC-INSPECT", category: "SERVICE", durationMin: 45, priceSen: 3000 },
-];
-const DEFAULT_LEAD_SOURCES = ["Walk-in", "WhatsApp", "Facebook", "Referral", "Phone"];
-const DEFAULT_LEAD_STAGES = ["New", "Contacted", "Quoted", "Won", "Lost"];
-const DEFAULT_TEMPLATES = [
-  { name: "Booking reminder", body: "Hi {{name}}, reminder for your appointment on {{date}} {{time}}. Reply to reschedule." },
-  { name: "Job completed", body: "Hi {{name}}, your {{bike}} is ready for collection. Total {{amount}}." },
-  { name: "Service due", body: "Hi {{name}}, your {{bike}} is due for service. Book here: {{link}}" },
-];
 const SLOT_TIMES = ["09:00", "11:00", "14:00", "16:00"];
 
 /** 生成临时密码：够强（大小写+数字+符号），店主登录后应自行修改。 */
@@ -224,6 +223,77 @@ export class PlatformService {
 
   listAudit(opts: { organisationId?: string; limit?: number } = {}) {
     return this.repo.listAudit(opts);
+  }
+
+  // ---------------------------------------------------------------------
+  // 开通模板（P4 第三块）：把"新店该长什么样"变成数据
+  // ---------------------------------------------------------------------
+
+  /** 列出可用模板：**自定义在前、内置在后**（与解析顺序一致，免得"看到的"和"用到的"不是同一个）。 */
+  async listTemplates(): Promise<Array<TemplateSummary & { payload: TemplatePayload }>> {
+    const rows = await this.repo.listTemplates();
+    const custom: Array<TemplateSummary & { payload: TemplatePayload }> = [];
+    for (const r of rows) {
+      const payload = safeParsePayload(JSON.parse(r.payload));
+      if (!payload) continue; // 坏数据不展示（但也不删 —— 让人自己去查）
+      custom.push({ key: r.key, name: r.name, description: r.description, source: "custom", counts: summarizePayload(payload), payload });
+    }
+    const builtin = Object.entries(BUILTIN_TEMPLATES).map(([key, t]) => ({
+      key,
+      name: t.name,
+      description: t.description,
+      source: "builtin" as const,
+      counts: summarizePayload(t.payload),
+      payload: t.payload,
+    }));
+    return [...custom, ...builtin];
+  }
+
+  /**
+   * 从某家店导出模板（"把店 A 的配置复制给店 B"）。
+   * 只搬**配置**（服务目录/线索来源与阶段/消息模板），不搬业务数据 —— 模板不是备份。
+   */
+  async saveTemplateFromTenant(input: {
+    organisationId: string;
+    key: string;
+    name: string;
+    description?: string;
+    actor: { authId: string; email?: string | null };
+  }): Promise<{ ok: true; template: TemplateSummary } | { ok: false; error: string }> {
+    const key = (input.key ?? "").trim().toLowerCase();
+    if (!TEMPLATE_KEY_PATTERN.test(key)) {
+      return { ok: false, error: "模板 key 只能是小写字母/数字/连字符，2–40 位，首尾必须是字母或数字" };
+    }
+    if (!input.name?.trim()) return { ok: false, error: "模板名必填" };
+    const tenant = await this.repo.getTenant(input.organisationId);
+    if (!tenant) return { ok: false, error: "租户不存在" };
+
+    const raw = await this.repo.readTenantConfig(input.organisationId);
+    const payload = safeParsePayload(raw);
+    if (!payload) return { ok: false, error: "这家店的配置读出来不合模板形状（联系开发看日志）" };
+    if (summarizePayload(payload).serviceTypes + payload.leadSources.length + payload.leadStages.length + payload.messageTemplates.length === 0) {
+      return { ok: false, error: "这家店还没有可导出的配置（服务目录/线索来源/阶段/消息模板都是空的）" };
+    }
+
+    const row = await this.repo.upsertTemplate({
+      key,
+      name: input.name.trim(),
+      description: input.description?.trim() || null,
+      payload: JSON.stringify(payload),
+      sourceOrganisationId: input.organisationId,
+      createdByAuthId: input.actor.authId,
+      createdByEmail: input.actor.email ?? null,
+    });
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId, actorEmail: input.actor.email ?? null,
+      action: "TEMPLATE_SAVED", targetOrganisationId: input.organisationId,
+      detail: `${key}（从 ${tenant.name} 导出）`,
+    });
+    return { ok: true, template: { key: row.key, name: row.name, description: row.description, source: "custom", counts: summarizePayload(payload) } };
+  }
+
+  async deleteTemplate(key: string) {
+    return this.repo.deleteTemplate(key);
   }
 
   // ---------------------------------------------------------------------
@@ -446,6 +516,19 @@ export class PlatformService {
       return { ok: false, code: "AUTH_UNAVAILABLE", error: "认证服务不可用：" + String((e as Error).message).slice(0, 160) };
     }
 
+    // ①b 解析模板：**自定义（库）优先 → 内置（代码）**。找不到就明确拒绝 ——
+    //     静默退回默认配置会让"我明明选了模板"变成一句空话。
+    const templateKey = input.templateKey ?? DEFAULT_TEMPLATE_KEY;
+    let payload: TemplatePayload | null = null;
+    if (!input.skipDefaults) {
+      const custom = await this.repo.findTemplate(templateKey);
+      payload = custom ? safeParsePayload(JSON.parse(custom.payload)) : resolveBuiltinTemplate(templateKey);
+      if (!payload) {
+        const known = [...Object.keys(BUILTIN_TEMPLATES), ...(await this.repo.listTemplates()).map((t) => t.key)];
+        return { ok: false, code: "TEMPLATE_NOT_FOUND", error: `找不到模板 "${templateKey}"（可用：${known.join(", ")}）` };
+      }
+    }
+
     // ② 一次事务写完：组织 + 主店 + 店主 + AuthLink + 默认配置 + 预约时段
     const warnings: string[] = [];
     const trial = typeof input.trialDays === "number" && input.trialDays > 0;
@@ -480,13 +563,13 @@ export class PlatformService {
         branchId: null,
       },
       authId,
-      defaults: input.skipDefaults
+      defaults: input.skipDefaults || !payload
         ? { serviceTypes: [], leadSources: [], leadStages: [], messageTemplates: [] }
         : {
-            serviceTypes: DEFAULT_SERVICE_TYPES,
-            leadSources: DEFAULT_LEAD_SOURCES.map((name) => ({ name })),
-            leadStages: DEFAULT_LEAD_STAGES.map((name, i) => ({ name, order: i })),
-            messageTemplates: DEFAULT_TEMPLATES,
+            serviceTypes: payload.serviceTypes,
+            leadSources: payload.leadSources,
+            leadStages: payload.leadStages.map((s2) => ({ name: s2.name, order: s2.order ?? 0 })),
+            messageTemplates: payload.messageTemplates.map((t) => ({ name: t.name, body: t.body, channel: t.channel ?? "WHATSAPP", subject: t.subject ?? null })),
           },
       slots: input.skipDefaults ? [] : buildSlots(),
     };

@@ -173,6 +173,36 @@ export class PrismaPlatformRepository implements IPlatformRepository {
     return this.c().tenantTombstone.findMany({ orderBy: { purgedAt: "desc" } });
   }
 
+  findTemplate(key: string) {
+    return this.c().tenantTemplate.findUnique({ where: { key } });
+  }
+
+  listTemplates() {
+    return this.c().tenantTemplate.findMany({ orderBy: { createdAt: "asc" } });
+  }
+
+  upsertTemplate(row: { key: string; name: string; description: string | null; payload: string; sourceOrganisationId: string | null; createdByAuthId: string; createdByEmail: string | null }) {
+    const { key, ...rest } = row;
+    return this.c().tenantTemplate.upsert({ where: { key }, create: { key, ...rest }, update: rest });
+  }
+
+  async deleteTemplate(key: string): Promise<boolean> {
+    const res = await this.c().tenantTemplate.deleteMany({ where: { key } });
+    return res.count > 0;
+  }
+
+  /** 导出这家店当前的配置（模板负载形状）。只取"可复制"的那几类，不搬业务数据。 */
+  async readTenantConfig(organisationId: string) {
+    const c = this.c();
+    const [serviceTypes, leadSources, leadStages, messageTemplates] = await Promise.all([
+      c.serviceType.findMany({ where: { organisationId, active: true }, orderBy: { name: "asc" }, select: { name: true, code: true, category: true, durationMin: true, priceSen: true } }),
+      c.leadSource.findMany({ where: { organisationId, active: true }, orderBy: { name: "asc" }, select: { name: true } }),
+      c.leadStage.findMany({ where: { organisationId, active: true }, orderBy: { order: "asc" }, select: { name: true, order: true } }),
+      c.messageTemplate.findMany({ where: { organisationId, active: true }, orderBy: { name: "asc" }, select: { name: true, body: true, channel: true, subject: true } }),
+    ]);
+    return { serviceTypes, leadSources, leadStages, messageTemplates };
+  }
+
   findAdmin(authId: string) {
     return this.c().platformAdmin.findUnique({ where: { authId } });
   }

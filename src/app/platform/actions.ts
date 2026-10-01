@@ -70,6 +70,30 @@ export async function revokeSupportAccessAction(formData: FormData): Promise<voi
  * 退租（永久删除）。**不可逆** —— 所以闸门在服务层（先停用、原样输入 slug、
  * 删除与复核同事务），这里只负责把表单递过去。
  */
+/** 从某家店导出模板（"把店 A 的配置复制给店 B"）。 */
+export async function saveTemplateFromTenantAction(formData: FormData): Promise<void> {
+  const guard = await requirePlatformAdmin();
+  if (!guard.ok) return;
+  const res = await platformService.saveTemplateFromTenant({
+    organisationId: String(formData.get("organisationId") ?? ""),
+    key: String(formData.get("key") ?? ""),
+    name: String(formData.get("name") ?? ""),
+    description: String(formData.get("description") ?? ""),
+    actor: { authId: guard.admin.authId, email: guard.admin.email },
+  });
+  const back = "/platform/templates";
+  if (!res.ok) redirect(back + "?err=" + encodeURIComponent(res.error));
+  revalidatePath(back);
+  redirect(back + "?ok=" + encodeURIComponent("已保存模板 " + res.template.key));
+}
+
+export async function deleteTemplateAction(formData: FormData): Promise<void> {
+  const guard = await requirePlatformAdmin();
+  if (!guard.ok) return;
+  await platformService.deleteTemplate(String(formData.get("key") ?? ""));
+  revalidatePath("/platform/templates");
+}
+
 export async function purgeTenantAction(formData: FormData): Promise<void> {
   const guard = await requirePlatformAdmin();
   if (!guard.ok) return;
@@ -101,6 +125,7 @@ export async function createTenantAction(_prev: unknown, formData: FormData): Pr
     address: String(formData.get("address") ?? "").trim() || undefined,
     phone: String(formData.get("phone") ?? "").trim() || undefined,
     trialDays: formData.get("trialDays") ? Number(formData.get("trialDays")) : undefined,
+    templateKey: String(formData.get("templateKey") ?? "").trim() || undefined,
   });
 
   if (res.ok) revalidatePath("/platform");

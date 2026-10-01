@@ -36,6 +36,11 @@ export type ScopeEntry =
 export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
+  TenantTemplate: {
+    kind: "none",
+    reason:
+      "**开通模板**（P4）：平台级资产，不属任何租户 —— 它描述的是「新店该长什么样」，只有平台侧读写。",
+  },
   TenantTombstone: {
     kind: "none",
     reason:

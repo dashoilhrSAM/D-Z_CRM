@@ -435,6 +435,7 @@ export const PURGE_WHERE: Record<string, unknown> = {
 /** 不在租户范围内的模型（shared/none）——不参与退租删除，列出来是为了让人一眼能核对。 */
 export const NON_TENANT_MODELS = [
   "Organisation",
+  "TenantTemplate",
   "TenantTombstone",
   "PlatformAuditLog",
   "PlatformAdmin",
