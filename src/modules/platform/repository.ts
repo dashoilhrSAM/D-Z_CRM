@@ -87,7 +87,29 @@ export interface TombstoneRow {
   counts: string | null;
 }
 
+/** 自定义模板行（内置模板在代码里，不入库）。 */
+export interface TemplateRow {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  payload: string;
+  sourceOrganisationId: string | null;
+  createdByAuthId: string;
+  createdByEmail: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 export interface IPlatformRepository {
+  // —— 开通模板 ——
+  findTemplate(key: string): Promise<TemplateRow | null>;
+  listTemplates(): Promise<TemplateRow[]>;
+  upsertTemplate(row: { key: string; name: string; description: string | null; payload: string; sourceOrganisationId: string | null; createdByAuthId: string; createdByEmail: string | null }): Promise<TemplateRow>;
+  deleteTemplate(key: string): Promise<boolean>;
+  /** 把某家店当前的配置读出来（"把店 A 的配置复制给店 B"）。 */
+  readTenantConfig(organisationId: string): Promise<{ serviceTypes: unknown[]; leadSources: unknown[]; leadStages: unknown[]; messageTemplates: unknown[] }>;
+
   /**
    * 退租：按计划把这家店的**每一行**删掉，并在**同一个事务里复核**（还有残留就整体回滚）。
    * `plan` 由 `purge-plan.generated.ts` 提供（scope map × DMMF 推导），不是手写清单。
