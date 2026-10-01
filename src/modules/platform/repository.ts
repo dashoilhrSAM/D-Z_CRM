@@ -46,7 +46,24 @@ export interface PlatformAdminRow {
   lastSeenAt: Date | null;
 }
 
+/** 平台审计行（P4）。 */
+export interface PlatformAuditRow {
+  id: string;
+  actorAuthId: string;
+  actorEmail: string | null;
+  action: string;
+  targetOrganisationId: string | null;
+  detail: string | null;
+  createdAt: Date;
+}
+
 export interface IPlatformRepository {
+  /** 改租户状态（只有这一个字段，平台动作不该顺手改别的）。返回改动前的状态。 */
+  setOrganisationStatus(organisationId: string, status: string): Promise<string>;
+  getTenant(organisationId: string): Promise<{ id: string; name: string; slug: string | null; status: string; createdAt: Date; qrToken: string | null } | null>;
+  appendAudit(row: Omit<PlatformAuditRow, "id" | "createdAt">): Promise<PlatformAuditRow>;
+  listAudit(opts: { organisationId?: string; limit?: number }): Promise<PlatformAuditRow[]>;
+
   // —— 平台管理员（与租户完全无关的一张表）——
   findAdmin(authId: string): Promise<PlatformAdminRow | null>;
   listAdmins(): Promise<PlatformAdminRow[]>;

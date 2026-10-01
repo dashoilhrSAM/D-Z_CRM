@@ -7,6 +7,32 @@ import { db } from "@/lib/db";
 export class PrismaPlatformRepository implements IPlatformRepository {
   private c(client?: DbLike): PrismaClient { return (client ?? db) as PrismaClient; }
 
+  async setOrganisationStatus(organisationId: string, status: string): Promise<string> {
+    const before = await this.c().organisation.findUnique({ where: { id: organisationId }, select: { status: true } });
+    if (!before) throw new Error("租户不存在");
+    await this.c().organisation.update({ where: { id: organisationId }, data: { status } });
+    return before.status;
+  }
+
+  getTenant(organisationId: string) {
+    return this.c().organisation.findUnique({
+      where: { id: organisationId },
+      select: { id: true, name: true, slug: true, status: true, createdAt: true, qrToken: true },
+    });
+  }
+
+  appendAudit(row: { actorAuthId: string; actorEmail: string | null; action: string; targetOrganisationId: string | null; detail: string | null }) {
+    return this.c().platformAuditLog.create({ data: row });
+  }
+
+  listAudit(opts: { organisationId?: string; limit?: number }) {
+    return this.c().platformAuditLog.findMany({
+      where: opts.organisationId ? { targetOrganisationId: opts.organisationId } : {},
+      orderBy: { createdAt: "desc" },
+      take: opts.limit ?? 50,
+    });
+  }
+
   findAdmin(authId: string) {
     return this.c().platformAdmin.findUnique({ where: { authId } });
   }

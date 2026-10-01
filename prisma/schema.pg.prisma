@@ -316,6 +316,28 @@ model PlatformAdmin {
   lastSeenAt DateTime?
 }
 
+/// 平台侧审计（P4）：**跨租户、只增不改** —— 停用/恢复租户、将来的限时支持访问都写在这里。
+///
+/// 为什么单独一张表而不是塞进租户的 `AuditLog`：平台动作发生在"租户之上"，
+/// 把它写进被操作的那家店的日志里，等于让被操作方看不见/改得着（而且退租时会被一起删掉 ——
+/// "谁在什么时候关了这家店"恰恰是退租之后最需要留下的东西）。
+model PlatformAuditLog {
+  id          String   @id @default(cuid())
+  /// 谁做的（PlatformAdmin.authId）
+  actorAuthId String
+  /// 便于人读；**不参与鉴权**
+  actorEmail  String?
+  /// 动作：TENANT_SUSPENDED | TENANT_RESUMED | TENANT_PROVISIONED | …
+  action      String
+  /// 作用对象（租户）。平台级动作可为空。
+  targetOrganisationId String?
+  /// 人读的补充（停用原因等）
+  detail      String?
+  createdAt   DateTime @default(now())
+
+  @@index([targetOrganisationId, createdAt])
+}
+
 model Branch {
   id             String       @id @default(cuid())
   organisationId String

@@ -70,6 +70,10 @@ export interface ProvisionTenantFailure {
 
 export type ProvisionTenantResult = ProvisionTenantSuccess | ProvisionTenantFailure;
 
+/** 租户状态。`SUSPENDED` = 停用（入口与已登录会话都立刻失去访问）。 */
+export const TENANT_STATUSES = ["ACTIVE", "TRIAL", "SUSPENDED"] as const;
+export type TenantStatus = (typeof TENANT_STATUSES)[number];
+
 /** slug 的规则：它会进 URL（`/t/<slug>`）与运维产物命名，所以只允许小写字母数字与连字符。 */
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{1,46}[a-z0-9]$/;
 /** 保留字：留给自己将来的路由，别让第一家店的链接把命名空间占死。 */
@@ -161,6 +165,61 @@ export class PlatformService {
     const want = email.trim().toLowerCase();
     const rows = await this.repo.listAdmins();
     return rows.find((r) => (r.email ?? "").toLowerCase() === want) ?? null;
+  }
+
+  // ---------------------------------------------------------------------
+  // 租户状态：停用 / 恢复（P4 第三块）
+  // ---------------------------------------------------------------------
+
+  /**
+   * 改一家店的状态。**停用必须是立刻生效的** —— 这一点靠两处：
+   *   ① 入口链（`resolveEntryTenant*`）本来就不认非运营状态；
+   *   ② `identitiesForAuthUser` 会把非运营租户的身份过滤掉，
+   *      于是**已经登录的人下一次请求就失去业务身份**，不必等他登出。
+   *
+   * 写一条平台审计（append-only，跨租户）：谁、什么时候、把哪家店、因为什么停掉。
+   * 状态没变化时不写审计（避免手抖点两次留下两条"停用"）。
+   */
+  async setTenantStatus(input: {
+    organisationId: string;
+    status: TenantStatus;
+    actor: { authId: string; email?: string | null };
+    reason?: string;
+  }): Promise<{ ok: true; before: string; after: TenantStatus; changed: boolean } | { ok: false; error: string }> {
+    if (!TENANT_STATUSES.includes(input.status)) {
+      return { ok: false, error: `状态只能是 ${TENANT_STATUSES.join(" / ")}` };
+    }
+    const tenant = await this.repo.getTenant(input.organisationId);
+    if (!tenant) return { ok: false, error: "租户不存在" };
+    if (tenant.status === input.status) return { ok: true, before: tenant.status, after: input.status, changed: false };
+
+    const before = await this.repo.setOrganisationStatus(input.organisationId, input.status);
+    await this.repo.appendAudit({
+      actorAuthId: input.actor.authId,
+      actorEmail: input.actor.email ?? null,
+      action: input.status === "SUSPENDED" ? "TENANT_SUSPENDED" : "TENANT_RESUMED",
+      targetOrganisationId: input.organisationId,
+      detail: (input.reason ?? "").trim() || null,
+    });
+    return { ok: true, before, after: input.status, changed: true };
+  }
+
+  /** 租户详情 + 它的审计轨迹（详情页用）。 */
+  async tenantDetail(slug: string) {
+    const row = await this.repo.findBySlug(slug);
+    if (!row) return null;
+    const tenant = await this.repo.getTenant(row.id);
+    if (!tenant) return null;
+    const [audit, tenants] = await Promise.all([
+      this.repo.listAudit({ organisationId: tenant.id, limit: 20 }),
+      this.repo.listTenants(),
+    ]);
+    const counts = tenants.find((t) => t.id === tenant.id);
+    return { tenant, audit, usage: { staff: counts?.staff ?? 0, customers: counts?.customers ?? 0 } };
+  }
+
+  listAudit(opts: { organisationId?: string; limit?: number } = {}) {
+    return this.repo.listAudit(opts);
   }
 
   /**

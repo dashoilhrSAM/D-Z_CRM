@@ -36,6 +36,12 @@ export type ScopeEntry =
 export const TENANT_SCOPE: Record<string, ScopeEntry> = {
   // ============ 租户自身 ============
   Organisation: { kind: "none", reason: "租户本身，不是租户的数据；按 id 过滤" },
+  PlatformAuditLog: {
+    kind: "none",
+    reason:
+      "**平台侧审计**（P4）：跨租户、只增不改。故意不挂 organisationId 外键 —— " +
+      "退租删掉整家店之后，'谁在什么时候关了这家店'这条记录必须还在。",
+  },
   PlatformAdmin: {
     kind: "none",
     reason:
