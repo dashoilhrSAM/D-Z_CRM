@@ -28,9 +28,23 @@ async function punch(page: Page, kind: "IN" | "OUT") {
   await settle(page);
 }
 
-/** 幂等开场：上一轮若留下"在岗"，先下班把它收干净（否则重跑会撞 ALREADY_IN）。 */
+/**
+ * 幂等开场：上一轮若留下"在岗"，先下班把它收干净（否则重跑会撞 ALREADY_IN）。
+ *
+ * ⚠️ 但**补下班本身会造出一条新的待处置异常**：同一张合成照片在短时间内连拍两次，
+ * 会被判成 `SUSPECT_REUSE`。实测踩过两次 —— 队列于是变成 2 条，
+ * 而下面"待处置应当是 1"就红了（看起来像功能坏了，其实是开场没收干净）。
+ * 所以这里顺手把**它自己造出来的那条**也处置掉。
+ */
 async function cleanState(page: Page) {
-  if (await page.getByTestId("attendance-check-out").count()) await punch(page, "OUT");
+  if (!(await page.getByTestId("attendance-check-out").count())) return;
+  await punch(page, "OUT");
+  const item = page.locator('[data-testid^="review-item-"]').first();
+  if (await item.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const id = (await item.getAttribute("data-testid"))!.replace("review-item-", "");
+    await page.getByTestId("review-dismiss-" + id).click().catch(() => {});
+    await page.waitForTimeout(500);
+  }
 }
 
 test.describe("attendance P2: range report + flag review", () => {
@@ -43,13 +57,20 @@ test.describe("attendance P2: range report + flag review", () => {
     await dismissGuide(page);
     await cleanState(page);
 
+    // ⚠️ 断言用**相对量**：队列是"工作队列"，可能带着别的用例/上一次失败跑留下的条目
+    // （实测踩过两次：另一个 spec 结束时把人留在岗，cleanState 补下班时同一张合成照片
+    //  被判"照片复用"，而**这一条本身就是新的待处置异常**，于是"等于 1"变成 2）。
+    // 相对量同样能证明"异常会进队列"，而且不会因为库里本来就有别的条目而假红。
+    const pendingBefore = Number(await page.getByTestId("attendance-kpi-pending").innerText());
+    const itemsBefore = await page.locator('[data-testid^="review-item-"]').count();
+
     await punch(page, "IN");
 
-    // 1) 这一笔被标成异常，并且**出现在队列里**
-    await expect(page.getByTestId("attendance-kpi-pending"), "待处置应当是 1").toHaveText("1", { timeout: 20_000 });
+    // 1) 这一笔被标成异常，并且**出现在队列里**（比之前多一条）
+    await expect(page.getByTestId("attendance-kpi-pending"), "待处置应当比之前多 1").toHaveText(String(pendingBefore + 1), { timeout: 20_000 });
     const queue = page.getByTestId("attendance-review-queue");
     await expect(queue).toBeVisible();
-    await expect(page.locator('[data-testid^="review-item-"]')).toHaveCount(1);
+    await expect(page.locator('[data-testid^="review-item-"]')).toHaveCount(itemsBefore + 1);
     await expect(page.locator('[data-testid^="review-item-"]').first(), "队列里要说清楚是哪一条判定").toContainText(
       /no location|未取到定位|tiada lokasi/i,
     );
@@ -60,11 +81,11 @@ test.describe("attendance P2: range report + flag review", () => {
     const past = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
     await page.goto(BASE_URL + "/workshop/attendance?preset=custom&from=" + past + "&to=" + past);
     await dismissGuide(page);
-    await expect(page.locator('[data-testid^="review-item-"]'), "队列不该被所选区间过滤掉").toHaveCount(1, {
+    await expect(page.locator('[data-testid^="review-item-"]'), "队列不该被所选区间过滤掉").toHaveCount(itemsBefore + 1, {
       timeout: 20_000,
     });
     await expect(page.locator('[data-testid^="review-outside-"]').first(), "不在区间内的项必须标出来").toBeVisible();
-    await expect(page.getByTestId("attendance-kpi-pending"), "待处置是工作队列的量，与区间无关").toHaveText("1");
+    await expect(page.getByTestId("attendance-kpi-pending"), "待处置是工作队列的量，与区间无关").toHaveText(String(pendingBefore + 1));
 
     await context.close();
   });
@@ -80,15 +101,18 @@ test.describe("attendance P2: range report + flag review", () => {
     const item = page.locator('[data-testid^="review-item-"]').first();
     await expect(item, "队列里应当还有上一条用例造出来的异常").toBeVisible({ timeout: 20_000 });
     const punchId = (await item.getAttribute("data-testid"))!.replace("review-item-", "");
+    // 自己取基线：队列是工作队列，可能带着别的条目（见 pendingBefore 的说明）
+    const pendingBefore = Number(await page.getByTestId("attendance-kpi-pending").innerText());
 
     const exceptionsBefore = await page.getByTestId("attendance-kpi-exceptions").textContent();
     // 备注是可选的，但它是"为什么这么判"的唯一载体，必须能写进去
     await page.getByTestId("review-note-" + punchId).fill("Indoor — no GPS fix");
     await page.getByTestId("review-confirm-" + punchId).click();
 
-    // 2) 队列清空、待处置归零
-    await expect(page.getByTestId("attendance-queue-empty")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("attendance-kpi-pending")).toHaveText("0");
+    // 2) 这一条不再挂在工作队列上，待处置比之前少 1
+    //（原断言是"队列整个空了" —— 那要求库里没有别的条目，属于对**别的用例**的隐含依赖）
+    await expect(page.getByTestId("review-item-" + punchId), "处置过的条目不该还挂在队列上").toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId("attendance-kpi-pending")).toHaveText(String(pendingBefore - 1));
 
     // 3) **异常数不变**：处置是"人的看法"，不是改写事实。这条是 P2 的核心不变量。
     await expect(page.getByTestId("attendance-kpi-exceptions"), "处置不能抹掉异常记录").toHaveText(exceptionsBefore ?? "1");
@@ -99,17 +123,18 @@ test.describe("attendance P2: range report + flag review", () => {
     // 4) 刷新后仍然是已处置（真的落库了，不是只是本地状态）
     await page.reload();
     await dismissGuide(page);
-    await expect(page.getByTestId("attendance-queue-empty")).toBeVisible({ timeout: 20_000 });
-    await expect(page.getByTestId("attendance-kpi-pending")).toHaveText("0");
+    await expect(page.getByTestId("review-item-" + punchId)).toHaveCount(0, { timeout: 20_000 });
+    await expect(page.getByTestId("attendance-kpi-pending")).toHaveText(String(pendingBefore - 1));
     await expect(page.getByTestId("punch-review-" + punchId).first()).toBeVisible();
 
-    // 收拾：把这一轮的下班卡也打掉，并处置它，留给下一条用例一个干净前提
+    // 收拾：把这一轮的下班卡也打掉，并处置**它造出来的那一条**，留给下一条用例一个干净前提
+    //（同样只断言「这一条不在了」—— 不假设库里没有别的条目）
     await punch(page, "OUT");
     const next = page.locator('[data-testid^="review-item-"]').first();
     await expect(next).toBeVisible({ timeout: 20_000 });
     const nextId = (await next.getAttribute("data-testid"))!.replace("review-item-", "");
     await page.getByTestId("review-dismiss-" + nextId).click();
-    await expect(page.getByTestId("attendance-queue-empty")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("review-item-" + nextId)).toHaveCount(0, { timeout: 20_000 });
 
     await context.close();
   });
