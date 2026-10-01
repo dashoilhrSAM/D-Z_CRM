@@ -128,11 +128,15 @@ describe("② 开完就能走 P3b 的入口链（P3b × P4 的接缝）", () => 
 
 describe("③ 失败不留半成品", () => {
   it("slug 被占用 → 拒绝，且不新建任何组织", async () => {
-    const before = await db.organisation.count();
     const res = await platformService.provisionTenant({ name: "Dup", slug: SLUG, ownerEmail: "other." + TAG + "@provision.test" });
     expect(res.ok).toBe(false);
     expect(res.ok === false && res.code).toBe("SLUG_TAKEN");
-    expect(await db.organisation.count()).toBe(before);
+    // ⚠️ 断言必须**限定在自己的夹具范围内**：`db.organisation.count()` 是全表计数，
+    // 而本地 `fileParallelism` 打开、别的测试文件同时在增删组织 —— 用全表数做断言
+    // 会得到一个只在本地偶发红的测试（本项目已经踩过一模一样的坑）。
+    expect(await db.organisation.count({ where: { name: "Dup" } }), "被拒绝的开通居然建出了组织").toBe(0);
+    const kept = await db.organisation.findUnique({ where: { slug: SLUG }, select: { name: true } });
+    expect(kept!.name, "被拒绝的开通改动了已有租户").toBe("Provision Test Shop");
   });
 
   it("slug 非法 / 保留字 / 邮箱格式错 → 在校验阶段就被挡住（不碰 auth、不碰库）", () => {
@@ -145,15 +149,17 @@ describe("③ 失败不留半成品", () => {
   });
 
   it("认证服务不可用 → AUTH_UNAVAILABLE，且**库里不多出任何一行**", async () => {
-    const before = await db.organisation.count();
+    const slug = "authdown-" + TAG;
     const broken = new PlatformService(repo, {
       ensureUser: async () => {
         throw new Error("boom");
       },
     });
-    const res = await broken.provisionTenant({ name: "AuthDown Shop", slug: "authdown-" + TAG, ownerEmail: "x@y.z" });
+    const res = await broken.provisionTenant({ name: "AuthDown Shop", slug, ownerEmail: "x@y.z" });
     expect(res.ok === false && res.code).toBe("AUTH_UNAVAILABLE");
-    expect(await db.organisation.count(), "auth 挂了却建出了半家店").toBe(before);
+    // 同样按夹具范围断言（全表计数在并行下不稳定）
+    expect(await db.organisation.count({ where: { slug } }), "auth 挂了却建出了半家店").toBe(0);
+    expect(await db.user.count({ where: { email: "x@y.z" } })).toBe(0);
   });
 });
 
