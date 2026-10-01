@@ -19,23 +19,39 @@
 export interface RequestIdentity {
   id: string;
   email?: string;
-  user_metadata: Record<string, unknown>;
+  /**
+   * 业务 claim（role / orgId / branchId / userId / customerId）。
+   *
+   * ⚠️ **以 `app_metadata` 为准**：`user_metadata` 是**用户自己就能改**的
+   * （`supabase.auth.updateUser({ data })`），拿它当身份来源等于把钥匙挂在门上。
+   * P0 已经把数据库侧的 `app_jwt_claim()` 改成只认 app_metadata；P3b 第 6 步把
+   * claims 的**写入**也迁到 app_metadata（见 `injectBizClaims`），这里同步按同样优先级读。
+   * user_metadata 只作**过渡兜底**：还没登录过、app_metadata 里没有 claims 的老账号
+   * 仍能走通，登录一次后就被 app_metadata 覆盖。
+   */
+  claims: Record<string, unknown>;
 }
 
 export interface JwtClaimsLike {
   sub?: unknown;
   email?: unknown;
+  app_metadata?: unknown;
   user_metadata?: unknown;
+}
+
+/** 只接受"普通对象"当 claim 容器；字符串/数组/null 一律当空（claims 来自网络，类型要收）。 */
+function asRecord(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
 export function identityFromClaims(claims: JwtClaimsLike | null | undefined): RequestIdentity | null {
   if (!claims || typeof claims.sub !== "string" || claims.sub.length === 0) return null;
-  const meta = claims.user_metadata;
+  const app = asRecord(claims.app_metadata);
+  const user = asRecord(claims.user_metadata);
   return {
     id: claims.sub,
     email: typeof claims.email === "string" ? claims.email : undefined,
-    user_metadata: meta !== null && typeof meta === "object" && !Array.isArray(meta)
-      ? (meta as Record<string, unknown>)
-      : {},
+    // 逐键合并，**app_metadata 覆盖 user_metadata**：同一个键两边都有时前者赢
+    claims: { ...user, ...app },
   };
 }

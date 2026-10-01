@@ -8,7 +8,7 @@ import { identityFromClaims, type RequestIdentity } from "@/lib/auth/request-ide
  * 2026-09-29（P1）：这里原来调 auth.getUser()——**每个请求都打一次 GoTrue**。
  * 现在用 getClaims()：本项目是非对称签名（ES256），它在本地用 WebCrypto 验签，
  * JWKS 由库缓存在函数实例里，稳态下零网络往返。返回的身份只有
- * { id, email, user_metadata }，而 middleware 需要的恰好就是 user_metadata 里的业务
+ * { id, email, claims }，而 middleware 需要的恰好就是 claims（app_metadata 优先）里的业务
  * claims（role/orgId/branchId）与"有没有登录"这两件事。
  */
 export async function updateSession(request: NextRequest) {

@@ -678,9 +678,15 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
    - **`User.email` → `@@unique([organisationId, email])`**：双 schema 都已写全（生产上已有该索引）。
    - 新增守卫 `tests/tenant-cookie-source.test.ts`：cookie 名只有一处定义、
      `dz_org`/`dz_branch` 去注释后零出现、写门店 cookie 的调用点只在白名单里（都在写入口里校验候选）。
-6. **claim 迁 `app_metadata`**：P0 把 `app_jwt_claim()` 改成只认 `app_metadata`
-   （`user_metadata` 用户自己就能改），于是 PostgREST 面现在**一律拒绝** ——
-   要等 `injectBizClaims` 改写才会对合法用户重新开放。这是 P0 有意留下的 fail-closed 状态。
+6. ✅ **已完成（2026-10-01）—— claim 迁 `app_metadata`**。P0 把 `app_jwt_claim()` 改成只认
+   `app_metadata`（`user_metadata` 用户自己就能改），于是 PostgREST 面**一律拒绝** ——
+   那是有意留下的 fail-closed。现在：`injectBizClaims` 与注册路径都写 `app_metadata`
+   （service role 客户端，过渡期同时写 user_metadata）；`identityFromClaims` 按同样优先级读
+   （app_metadata 优先、user_metadata 兜底），字段名从 `user_metadata` 改为 **`claims`**
+   （原名本身就是让下一个维护者误以为"user_metadata 是身份来源"的原因）。
+   存量账号用 `scripts/backfill-auth-app-metadata.mjs` 回填（默认演练；**claims 从业务库推导，
+   不复制 user_metadata** —— 否则会把用户伪造的 `role` 洗白成权威值；写入是合并，
+   保住 Supabase 自己的 `provider`/`providers`）。
 
 **验收**：同一邮箱在两家店各有一个 `User`，各自登录且互不可见；跨店骑手在两家店各有 `Customer`
 档案；`/login` 用多店邮箱登录时**必须出现选择器**（不得静默进入任一店）；被停用员工立即无法登录；

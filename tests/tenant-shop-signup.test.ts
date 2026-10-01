@@ -15,6 +15,9 @@ import path from "node:path";
 
 const TEST_AUTH_ID = "test-shop-signup-auth-user";
 
+/** 记录 admin 端写过的 metadata（断言 app_metadata 真的被写了）。 */
+const { writeCalls } = vi.hoisted(() => ({ writeCalls: [] as Array<{ id: string; app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }> }));
+
 // `active-tenant` 会读 cookie：vitest 里没有请求上下文，给它一个"没有 cookie"的桩
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined, set: () => {}, delete: () => {} }),
@@ -25,7 +28,10 @@ vi.mock("@supabase/supabase-js", () => ({
     auth: {
       admin: {
         createUser: async () => ({ data: { user: { id: TEST_AUTH_ID } }, error: null }),
-        updateUserById: async () => ({ data: { user: { id: TEST_AUTH_ID } }, error: null }),
+        updateUserById: async (id: string, attrs: { app_metadata?: Record<string, unknown>; user_metadata?: Record<string, unknown> }) => {
+          writeCalls.push({ id, app_metadata: attrs?.app_metadata, user_metadata: attrs?.user_metadata });
+          return { data: { user: { id } }, error: null };
+        },
         getUserById: async () => ({ data: { user: { id: TEST_AUTH_ID, email: "x@y.z" } }, error: null }),
       },
     },
@@ -41,7 +47,7 @@ vi.mock("@/lib/supabase/server", () => ({
 }));
 
 const { db } = await import("@/lib/db");
-const { signUpRider } = await import("@/actions/auth-supabase");
+const { signUpRider, injectBizClaims } = await import("@/actions/auth-supabase");
 
 const ORG_A = "test_su_org_a";
 const ORG_B = "test_su_org_b";
@@ -99,10 +105,33 @@ describe("① 带门店链接注册 → 落在链接那家店，且不碰别家�
     expect(links[0].kind).toBe("CUSTOMER");
   });
 
+  it("**claims 写进了 app_metadata**（P3b 第 6 步：user_metadata 用户自己就能改）", async () => {
+    const mine = writeCalls.filter((c) => c.id === TEST_AUTH_ID);
+    expect(mine.length, "注册/登录路径一次 claims 都没写").toBeGreaterThan(0);
+    const created = await db.customer.findFirst({ where: { organisationId: ORG_B, email: SHARED_EMAIL } });
+    // 每一条写入都必须带 app_metadata（过渡期同时写 user_metadata 是允许的）
+    for (const call of mine) {
+      expect(call.app_metadata, "只写了 user_metadata —— PostgREST 面会继续拒绝合法用户").toBeTruthy();
+      expect(call.app_metadata!.orgId).toBe(ORG_B); // 门店来自链接，claims 也得是这家
+    }
+    expect(mine[mine.length - 1].app_metadata).toMatchObject({ orgId: ORG_B, role: "CUSTOMER", customerId: created!.id });
+  });
+
   it("链接指向不存在的店 → 拒绝注册（不退回兜底判断）", async () => {
     const res = await signupAt("no-such-shop-" + Date.now().toString(36));
     expect(res.ok).toBe(false);
     expect(res.ok === false && /link/i.test(res.error)).toBe(true);
+  });
+});
+
+describe("①b 登录路径也写 app_metadata（老账号靠这一次登录完成迁移）", () => {
+  it("injectBizClaims → calls 里带着 app_metadata，且门店来自他的 AuthLink", async () => {
+    writeCalls.length = 0;
+    const res = await injectBizClaims(TEST_AUTH_ID);
+    expect(res.ok, JSON.stringify(res)).toBe(true);
+    const call = writeCalls.find((c) => c.id === TEST_AUTH_ID);
+    expect(call, "injectBizClaims 一次 metadata 都没写").toBeTruthy();
+    expect(call!.app_metadata).toMatchObject({ orgId: ORG_B, role: "CUSTOMER" });
   });
 });
 

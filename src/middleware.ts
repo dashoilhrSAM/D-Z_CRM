@@ -61,7 +61,7 @@ export async function middleware(req: NextRequest) {
     // 骑手（CUSTOMER）不直接调 API：他们的数据走页面与 Server Action。
     // 这里读的是 JWT claims，够不上"权威"（角色改动要重新登录才生效），
     // 所以真正的判定仍在路由里的 requireStaff()——这一层只是让匿名请求连门都进不来。
-    if (((user.user_metadata?.role as string) ?? "") === "CUSTOMER") {
+    if (((user.claims.role as string) ?? "") === "CUSTOMER") {
       return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
     }
     response.headers.set("x-pathname", pathname);
@@ -69,8 +69,9 @@ export async function middleware(req: NextRequest) {
   }
   if (user) {
     // —— 路由隔离矩阵（角色级；layout 层用 DB 权威数据兜底）——
-    // JWT claims 由登录时 injectBizClaims 写入 user_metadata（orgId/branchId/role/userId/customerId）
-    const role = (user.user_metadata?.role as string) ?? "";
+    // JWT claims 由登录时 injectBizClaims 写入 **app_metadata**（orgId/branchId/role/userId/customerId）
+    // ——app_metadata 用户改不了；user_metadata 只在过渡期作兜底（见 request-identity.ts）
+    const role = (user.claims.role as string) ?? "";
     const isCustomer = role === "CUSTOMER";
     const isMechanic = role === "MECHANIC";
     const go = (path: string): NextResponse => {
