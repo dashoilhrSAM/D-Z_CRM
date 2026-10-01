@@ -65,8 +65,21 @@ export async function identityInTenant(authId: string, organisationId: string): 
  */
 export async function identitiesForAuthUser(authId: string): Promise<ResolvedIdentity[]> {
   if (!authId) return [];
-  const rows = await db.authLink.findMany({ where: { authId }, orderBy: { createdAt: "asc" } });
-  return rows.map(toResolved);
+  const rows = await db.authLink.findMany({
+    where: { authId },
+    orderBy: { createdAt: "asc" },
+    include: { organisation: { select: { status: true } } },
+  });
+  // ⚠️ **被停用的店不算身份**（P4 第三块）。这一步是"停用立刻生效"的关键：
+  // 只挡入口是不够的 —— 已经在店里的人手里还握着会话，下一次请求照样能过。
+  // 在这里过滤之后，他们会立刻变成"没有业务身份"，被送回登录/选择器，
+  // 而登录侧的 `injectBizClaims` 也找不到身份，于是拿不到新 claims。
+  return rows.filter((r) => isOperatingStatus(r.organisation.status)).map(toResolved);
+}
+
+/** 组织是否在运营。未知取值一律按"不在运营"处理（fail-closed，与 entry-tenant 同一口径）。 */
+export function isOperatingStatus(status: string | null | undefined): boolean {
+  return status === "ACTIVE" || status === "TRIAL";
 }
 
 /**

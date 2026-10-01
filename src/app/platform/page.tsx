@@ -35,7 +35,9 @@ export default async function PlatformTenantsPage() {
           <tbody>
             {tenants.map((t) => (
               <tr key={t.id} className="border-t">
-                <td className="px-3 py-2 font-medium">{t.name}</td>
+                <td className="px-3 py-2 font-medium">
+                  {t.slug ? <Link href={"/platform/" + t.slug} className="hover:underline">{t.name}</Link> : t.name}
+                </td>
                 <td className="px-3 py-2 font-mono text-xs">{t.slug ?? <span className="text-muted-foreground">（无）</span>}</td>
                 <td className="px-3 py-2">
                   <span className={t.status === "ACTIVE" ? "text-emerald-600" : t.status === "TRIAL" ? "text-amber-600" : "text-muted-foreground"}>

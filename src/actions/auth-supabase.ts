@@ -70,6 +70,12 @@ export async function injectBizClaims(authUserId: string) {
     if (!written.ok) return written;
     return { ok: true as const, claims };
   }
+  // 有 AuthLink、但那些店都被停用了 —— 与"根本没绑过账号"是两回事，
+  // 报同一句话会让店主以为自己的账号丢了（P4 第三块）。
+  const links = await db.authLink.findMany({ where: { authId: authUserId }, select: { organisationId: true } });
+  if (links.length > 0) {
+    return { ok: false as const, error: "Your workshop is currently suspended. Please contact the platform administrator." };
+  }
   // auth 用户尚未关联业务账号——管理员需先绑定（A3.7 建测试用户时做）
   return { ok: false as const, error: "No D&Z account linked to this auth user." };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import Link from "next/link";
 import { createTenantAction } from "@/app/platform/actions";
 import type { ProvisionTenantResult } from "@/modules/platform/service";
 
@@ -101,7 +102,7 @@ function OnboardingCard({ result }: { result: Extract<ProvisionTenantResult, { o
       {result.warnings.map((w) => (
         <p key={w} className="text-xs text-amber-600">⚠️ {w}</p>
       ))}
-      <a href="/platform" className="inline-block rounded-md border px-3 py-1.5 text-sm">回到租户列表</a>
+      <Link href="/platform" className="inline-block rounded-md border px-3 py-1.5 text-sm">回到租户列表</Link>
     </div>
   );
 }

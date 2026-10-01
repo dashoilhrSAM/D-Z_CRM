@@ -714,7 +714,12 @@ RLS 治不了应用（连接角色 bypass），但它必须能治 **PostgREST �
   `/platform/new` 开店表单（`useActionState`，临时密码一次性显示、不进 URL）；
   `scripts/grant-platform-admin.ts` 是"第一个管理员"的唯一来源（按邮箱授予**只找不建**）。
   详见 `docs/changes/2026-10-01-p4-platform-console.md`。
-- ⏳ **第 3 块**：停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
+- 🟡 **第 3 块进行中（2026-10-01）**：
+  ✅ **停用/恢复 + 平台侧审计**：`PlatformAuditLog`（跨租户、只增不改，退租后仍留痕）；
+  `setTenantStatus`（状态没变不写审计）；**停用对已登录的人立刻生效** —— 强制点在
+  `identitiesForAuthUser` 过滤非运营租户（只挡入口是不够的）；`/platform/<slug>` 详情页
+  （状态/用量/门店链接/审计轨迹 + 停用恢复表单）。详见 `docs/changes/2026-10-01-p4-tenant-status.md`。
+  ⏳ 剩下：限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 租户目录（**以 slug 为键**）、用量、停用/恢复、限时支持访问（双向留痕）、按租户导出、退租删除、模板库。
 - 运维产物命名统一：备份/导出/账单/日志一律带 slug。
 
