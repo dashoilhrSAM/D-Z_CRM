@@ -20,13 +20,19 @@ vi.mock("node:child_process", () => ({
     }
     return Buffer.alloc(0);
   },
-  spawnSync: () => ({ stdout: "200", stderr: "", status: 0, signal: null, pid: 1, output: [null, "200", ""] }),
+  spawnSync: () => {
+    expect(process.env.CI, "CI prepares the database before its server exists").not.toBe("true");
+    return { stdout: "200", stderr: "", status: 0, signal: null, pid: 1, output: [null, "200", ""] };
+  },
 }));
 
-it("recreates an empty SQLite file before migrating a wiped E2E database", async () => {
+it.each([false, true])("recreates an empty SQLite file before migration (CI=%s)", async (ci) => {
   fixture.root = mkdtempSync(join(tmpdir(), "dz-e2e-setup-"));
   const previousUrl = process.env.DATABASE_URL;
+  const previousCi = process.env.CI;
   try {
+    if (ci) process.env.CI = "true";
+    else delete process.env.CI;
     mkdirSync(join(fixture.root, "prisma"));
     writeFileSync(join(fixture.root, "prisma/e2e.db"), "stale demo data");
     writeFileSync(join(fixture.root, "prisma/e2e.db-journal"), "stale journal");
@@ -36,5 +42,22 @@ it("recreates an empty SQLite file before migrating a wiped E2E database", async
     rmSync(fixture.root, { recursive: true, force: true });
     if (previousUrl === undefined) delete process.env.DATABASE_URL;
     else process.env.DATABASE_URL = previousUrl;
+    if (previousCi === undefined) delete process.env.CI;
+    else process.env.CI = previousCi;
+  }
+});
+
+it("CI prepares its database before starting a fresh server, with no later reset", async () => {
+  vi.stubEnv("CI", "true");
+  try {
+    const { default: config } = await import("../playwright.config");
+    expect(config.globalSetup, "globalSetup runs after webServer and must not wipe its open database").toBeUndefined();
+    expect(config.webServer).toMatchObject({ reuseExistingServer: false });
+    const command = (config.webServer as { command: string }).command;
+    const prepare = command.indexOf("tsx e2e/global-setup.ts");
+    expect(prepare, "cold startup must initialize the database").toBeGreaterThanOrEqual(0);
+    expect(command.indexOf("pnpm start")).toBeGreaterThan(prepare);
+  } finally {
+    vi.unstubAllEnvs();
   }
 });

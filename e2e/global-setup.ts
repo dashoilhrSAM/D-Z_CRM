@@ -16,6 +16,9 @@ export default async function globalSetup() {
   execSync("pnpm exec tsx prisma/seed.ts", { cwd: root, env: process.env, stdio: "inherit" });
   // e2e 用真实 Supabase 登录：播种后把 User/Customer 绑定到 auth 用户（email → authId）
   execSync("pnpm exec tsx e2e/link-auth.ts", { cwd: root, env: process.env, stdio: "inherit" });
+  console.log("[global-setup] e2e.db wiped, migrated + seeded (pristine demo state)");
+  // CI invokes this script before starting webServer; there is no service to restart yet.
+  if (process.env.CI) return;
 
   // The E2E server runs under launchd (com.dz-platform.e2e, port 3102). Its
   // PrismaClient may hold a stale SQLite handle from before the wipe — restart
@@ -32,5 +35,8 @@ export default async function globalSetup() {
     if (r.stdout.trim() === "200") { console.log("[global-setup] e2e server healthy on :3102"); break; }
     await new Promise((res) => setTimeout(res, 2000));
   }
-  console.log("[global-setup] e2e.db wiped, migrated + seeded (pristine demo state)");
+}
+
+if (process.argv[1]?.endsWith("global-setup.ts")) {
+  globalSetup().catch((error) => { console.error(error); process.exit(1); });
 }

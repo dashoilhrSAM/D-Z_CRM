@@ -4,7 +4,7 @@ const BASE_URL = "http://localhost:3102";
 
 export default defineConfig({
   testDir: "./e2e",
-  globalSetup: "./e2e/global-setup.ts",
+  globalSetup: process.env.CI ? undefined : "./e2e/global-setup.ts",
   fullyParallel: false,
   workers: 1, // shared SQLite demo DB — serialize the journeys
   timeout: 120_000,
@@ -30,11 +30,12 @@ export default defineConfig({
   ],
   // The E2E server runs under launchd (com.dz-platform.e2e) on port 3102 with
   // DATABASE_URL=file:./e2e.db — Playwright reuses it (sandbox-safe). Fallback
-  // command only starts if the URL is somehow down.
+  // In CI, initialize before starting Next.js: webServer runs before globalSetup.
   webServer: {
-    command: 'DATABASE_URL="file:./e2e.db" pnpm start --port 3102',
+    command: (process.env.CI ? "pnpm exec tsx e2e/global-setup.ts && " : "")
+      + 'DATABASE_URL="file:./e2e.db" pnpm start --port 3102',
     url: BASE_URL,
-    reuseExistingServer: true,
+    reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },
 });
