@@ -14,7 +14,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # Prisma client 必须先生成。`build` 脚本自带 `prisma generate`，但这个 job 是**直接**跑
@@ -45,7 +45,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # 必须 build：webServer 跑的是 `pnpm start`（next start），没有 .next 它会直接起不来。
@@ -85,7 +85,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build

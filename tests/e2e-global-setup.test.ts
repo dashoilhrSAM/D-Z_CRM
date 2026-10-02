@@ -3,8 +3,15 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import globalSetup from "../e2e/global-setup";
+import { createClient } from "@supabase/supabase-js";
 
 const fixture = vi.hoisted(() => ({ root: "" }));
+
+it("can construct the Supabase admin client in the test runtime", () => {
+  expect(() => createClient("https://example.supabase.co", "runtime-probe", {
+    auth: { autoRefreshToken: false, persistSession: false },
+  })).not.toThrow();
+});
 vi.mock("node:path", async (importOriginal) => {
   const actual = await importOriginal<typeof import("node:path")>();
   return { ...actual, resolve: (...args: string[]) =>
