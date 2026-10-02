@@ -52,6 +52,10 @@ jobs:
       # 之前这个 job 一直失败在这里 —— 报的是 "Could not find a production build"，
       # 与测试本身无关，却让整条 CI 看起来像"测试挂了"。
       - run: pnpm build
+        env:
+          # NEXT_PUBLIC_* is embedded in browser bundles during build.
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm exec playwright test
         env:
