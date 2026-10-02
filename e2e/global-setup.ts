@@ -8,8 +8,10 @@ export default async function globalSetup() {
   const root = path.resolve(__dirname, "..");
   // hard wipe so the seed always starts from an empty schema (seed is not idempotent)
   for (const f of ["prisma/e2e.db", "prisma/e2e.db-journal"]) {
-    try { fs.rmSync(path.join(root, f), { force: true }); } catch {}
+    fs.rmSync(path.join(root, f), { force: true });
   }
+  // migrate deploy can fail with P1003 when the SQLite file does not exist.
+  fs.writeFileSync(path.join(root, "prisma/e2e.db"), "", { flag: "wx" });
   execSync("pnpm exec prisma migrate deploy", { cwd: root, env: process.env, stdio: "inherit" });
   execSync("pnpm exec tsx prisma/seed.ts", { cwd: root, env: process.env, stdio: "inherit" });
   // e2e 用真实 Supabase 登录：播种后把 User/Customer 绑定到 auth 用户（email → authId）
